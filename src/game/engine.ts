@@ -390,6 +390,9 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   function applyDefensiveAlignment() {
     const activeDefKey = (activeDefense === 'P1') ? p1DefPlay : p2DefPlay;
     alignDefenders(defenders, activeDefKey, attackDirection, lineOfScrimmageY, receivers, centerReceiver);
+    if (rb && defenders[4] && !defenders[4].passRusher) {
+      defenders[4].assignedReceiver = rb;
+    }
   }
 
   function swapPossession() {
@@ -1078,8 +1081,6 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           score += 35; // Cover 3 concedes underneath flats and slants
         } else if (activeDefKey === 'TAMPA2' && depthYards > 10 && depthYards < 24 && Math.abs(t.x - 170) > 65) {
           score += 45; // Tampa 2 sideline Honey Hole
-        } else if (activeDefKey === 'COVER2MAN' && isCheckdown) {
-          score += 45; // RB has no assigned man defender
         } else if (activeDefKey === 'BLITZ') {
           if (isCheckdown || t.routeType === 'SLANT-L' || t.routeType === 'SLANT-R') {
             score += 50; // Hot read vs Zero Blitz
@@ -1614,6 +1615,14 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
             targetX = d.zoneX || 170;
             targetY = d.zoneY || (lineOfScrimmageY + (65 * dir));
           }
+        }
+
+        if (rb && d.assignedReceiver === rb && (phase === 'QB_DROP' || phase === 'THROWN')) {
+          const rbTarget = rb;
+          targetX = rbTarget.x;
+          targetY = rbTarget.y + (12 * dir);
+          moveSpeed = 1.72;
+          moveAccel = 0.32;
         }
 
         // Only the coverage defenders nearest the catch point break toward the ball.
