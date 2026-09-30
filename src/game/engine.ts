@@ -34,6 +34,7 @@ export interface GameEngineCallbacks {
   setCpuScore: (score: number) => void;
   setP1DefPlayState: (key: string) => void;
   setPlaybookModal: (mode: 'OFFENSE' | 'DEFENSE') => void;
+  setMomentumState: (momentum: number) => void;
   showAnnouncement: (text: string, color?: string) => void;
   onEngineReady: (engine: GameEngineHandle | null) => void;
 }
@@ -48,6 +49,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     setCpuScore,
     setP1DefPlayState,
     setPlaybookModal,
+    setMomentumState,
     showAnnouncement
   } = callbacks;
   const ctx = canvas.getContext('2d');
@@ -125,6 +127,52 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   }
   const userPlayHistory: PlayRecord[] = [];
   const userDefenseHistory: string[] = [];
+  let momentum = 0;
+
+  function clamp(value: number, min: number, max: number): number {
+    return Math.min(Math.max(value, min), max);
+  }
+
+  function getOpponentDefenseKey(): string {
+    return (activeDefense === 'P1') ? p1DefPlay : p2DefPlay;
+  }
+
+  function getPlayMatchup(playKey: string, defenseKey: string) {
+    const play = offensivePlaybook[playKey];
+    const isGoodMatch = play?.bestVs?.includes(defenseKey);
+    const isBadMatch = play?.weakVs?.includes(defenseKey);
+
+    if (isGoodMatch) {
+      return {
+        yardsAdjustment: play.risk === 'EXPLOSIVE' ? 8 : 4,
+        momentumDelta: play.risk === 'EXPLOSIVE' ? 2 : 1,
+        successBonus: 0.12
+      };
+    }
+
+    if (isBadMatch) {
+      return {
+        yardsAdjustment: play.risk === 'EXPLOSIVE' ? -10 : -5,
+        momentumDelta: play.risk === 'EXPLOSIVE' ? -2 : -1,
+        successBonus: -0.12
+      };
+    }
+
+    return {
+      yardsAdjustment: 0,
+      momentumDelta: 0,
+      successBonus: 0
+    };
+  }
+
+  function applyMomentum(delta: number): void {
+    if (delta === 0) return;
+    momentum = clamp(momentum + delta, -3, 3);
+    setMomentumState(momentum);
+    if (momentum >= 2 || momentum <= -2) {
+      showAnnouncement(momentum >= 2 ? 'MOMENTUM SHIFT! BIG PLAY ENERGY.' : 'DEFENSE HAS THE EDGE.', momentum >= 2 ? '#00ffaa' : '#ff6666');
+    }
+  }
 
   let touchStartX = 0;
   let touchStartY = 0;
@@ -460,6 +508,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   }
 
   function handlePlayEnd(endingY: number, resultType: string, customMessage?: string, customColor?: string) {
+    const activePlayKey = (activeOffense === 'P1') ? p1OffPlay : p2OffPlay;
+    const matchup = getPlayMatchup(activePlayKey, getOpponentDefenseKey());
     const playResult = resolvePlayResult({
       lineOfScrimmageY,
       endingY,
@@ -468,10 +518,13 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       fieldHeight,
       endZoneHeight
     });
-    const yardsGained = playResult.yardsGained;
+    const baseYardsGained = playResult.yardsGained;
+    const yardsGained = clamp(baseYardsGained + matchup.yardsAdjustment, -12, 40);
+    playResult.yardsGained = yardsGained;
 
     if (playResult.isTouchdown) {
       sounds.playTouchdown();
+      applyMomentum(2);
       if (activeOffense === 'P1') {
         p1Score += 6;
         setUserScore(p1Score);
@@ -491,11 +544,13 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       lineOfScrimmageY = endingY;
       yardsToGo -= yardsGained;
       currentDown++;
+      applyMomentum(matchup.momentumDelta - 1);
       showAnnouncement(customMessage || `SACK! Loss of ${Math.abs(yardsGained)} yards. (${currentDown} Down)`, customColor || "#ff3333");
       checkFirstDownOrTurnover();
     } else if (resultType === 'INCOMPLETE' || resultType === 'DEFLECT' || resultType === 'BATTED_DOWN' || resultType === 'BROKEN_UP') {
       sounds.playWhistle();
       currentDown++;
+      applyMomentum(matchup.momentumDelta - 1);
       const messagePrefix = customMessage ? `${customMessage} • ` : 'PASS INCOMPLETE. ';
       showAnnouncement(`${messagePrefix}(${currentDown} Down)`, customColor || "#aaaaaa");
       checkFirstDownOrTurnover();
@@ -504,6 +559,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       lineOfScrimmageY = endingY;
       yardsToGo -= yardsGained;
       currentDown++;
+      applyMomentum(Math.max(0, matchup.momentumDelta) + (yardsGained >= 12 ? 1 : 0) - (yardsGained <= 2 ? 1 : 0));
       showAnnouncement(`Gain of ${yardsGained} yards. (${currentDown} Down, ${Math.max(0, yardsToGo)} yards to go)`, "#ffcc00");
       checkFirstDownOrTurnover();
     }

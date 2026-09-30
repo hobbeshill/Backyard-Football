@@ -1,3 +1,6 @@
+export type PlayRisk = 'SAFE' | 'BALANCED' | 'EXPLOSIVE';
+export type RouteType = 'SHORT' | 'MEDIUM' | 'VERTICAL';
+
 export interface PlayOption {
   name: string;
   type: string;
@@ -7,11 +10,18 @@ export interface PlayOption {
   center?: string;
   rbRoute?: string;
   desc: string;
+  risk?: PlayRisk;
+  routeType?: RouteType;
+  bestVs?: string[];
+  weakVs?: string[];
+  expectedGain?: [number, number];
 }
 
 export interface DefOption {
   name: string;
   desc: string;
+  weakness?: string;
+  vulnerableRouteType?: RouteType;
 }
 
 export interface Entity {

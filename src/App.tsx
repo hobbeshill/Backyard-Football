@@ -16,6 +16,7 @@ export default function App() {
   const [p2OffPlayState, setP2OffPlayState] = useState('SHORT_PASS');
   const [p2DefPlayState, setP2DefPlayState] = useState('COVER3');
   const [activeOffenseState, setActiveOffenseState] = useState('P1');
+  const [momentumState, setMomentumState] = useState(0);
   const [banner, setBanner] = useState<{ text: string; color: string; visible: boolean }>({
     text: '',
     color: '#ffcc00',
@@ -139,6 +140,7 @@ export default function App() {
       setCpuScore,
       setP1DefPlayState,
       setPlaybookModal,
+      setMomentumState,
       showAnnouncement,
       onEngineReady: engine => { engineRef.current = engine; }
     });
@@ -225,6 +227,11 @@ export default function App() {
             <span className="text-green-400">P1 (YOU):</span>
             <span className="text-white text-[0.8rem]">{userScore}</span>
           </div>
+        </div>
+
+        <div className="flex items-center justify-center w-full bg-black/75 border border-[#00ffff]/60 rounded-md px-2 py-0.5 text-[0.62rem] text-white/90 mb-1.5">
+          <span className="mr-1 text-[#ffcc00]">Momentum:</span>
+          <span className={momentumState >= 0 ? 'text-[#00ffaa]' : 'text-[#ff6666]'}>{momentumState >= 0 ? '+' : ''}{momentumState}</span>
         </div>
 
         {/* Action Buttons Bar: Only active side is accessible to user; CPU calls its own plays */}
