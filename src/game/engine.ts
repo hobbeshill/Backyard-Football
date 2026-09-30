@@ -100,6 +100,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   let linemen: Entity[] = [];
   let defenders: Entity[] = [];
   let ball: Ball | null = null;
+  let ballPressureDefenders: Entity[] = [];
   let fumbleBall: FumbleBall | null = null;
   let brokenTackleEffect: { x: number; y: number; timer: number } | null = null;
   let activeEntity: Entity = qb;
@@ -141,6 +142,19 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       x: (clientX - rect.left) * (fieldWidth / rect.width),
       y: (clientY - rect.top) * (450 / rect.height)
     };
+  }
+
+  function selectCoverageBreakers(targetX: number, targetY: number): Entity[] {
+    return defenders
+      .filter(defender => !defender.passRusher)
+      .map(defender => ({
+        defender,
+        distance: Math.hypot(defender.x - targetX, defender.y - targetY)
+      }))
+      .filter(candidate => candidate.distance < 160)
+      .sort((first, second) => first.distance - second.distance)
+      .slice(0, 2)
+      .map(candidate => candidate.defender);
   }
 
   function resizeGame() {
@@ -510,6 +524,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   function resetDrill() {
     phase = 'PRE_SNAP';
     ball = null;
+    ballPressureDefenders = [];
     fumbleBall = null;
     brokenTackleEffect = null;
     isAiming = false;
@@ -802,6 +817,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       // Standard physics-based throw directly to the aimed location (scaled 20% to match sprites)
       const throwSpeed = Math.min(7.6, Math.max(4.4, (4.0 + throwDist * 0.035) * 0.8));
       const totalFlightFrames = Math.max(16, Math.round(throwDist / throwSpeed));
+      ballPressureDefenders = selectCoverageBreakers(projX, projY);
 
       const vx = dx / totalFlightFrames;
       const vy = dy / totalFlightFrames;
@@ -943,15 +959,25 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       const evaluateTarget = (t: Entity | null, isCheckdown: boolean) => {
         if (!t) return { score: -9999, isBreakOpen: false, depthYards: 0, nearestDefDist: 0 };
 
+        const targetDist = Math.hypot(t.x - qb.x, t.y - qb.y);
+        const isDeepRoute = t.routeType === 'GO' || t.routeType === 'FLAG-L' || t.routeType === 'FLAG-R';
+        const estimatedThrowSpeed = (isDeepRoute
+          ? (targetDist > 240 ? 9.5 : 8.6)
+          : (targetDist > 140 ? 8.8 : 7.6)) * 0.8;
+        const arrivalFrames = Math.max(16, Math.round(targetDist / estimatedThrowSpeed));
+        const arrivalX = Math.max(25, Math.min(fieldWidth - 25, t.x + (t.vx || 0) * arrivalFrames * 0.92));
+        const arrivalY = t.y + (t.vy || 0) * arrivalFrames * 0.92;
         let nearestDefDist = Infinity;
         defenders.forEach(d => {
           if (!d || d.passRusher) return;
-          const dist = Math.hypot(d.x - t.x, d.y - t.y);
+          const defenderArrivalX = d.x + (d.vx || 0) * arrivalFrames * 0.92;
+          const defenderArrivalY = d.y + (d.vy || 0) * arrivalFrames * 0.92;
+          const dist = Math.hypot(defenderArrivalX - arrivalX, defenderArrivalY - arrivalY);
           if (dist < nearestDefDist) nearestDefDist = dist;
         });
 
-        // Downfield depth in yards past line of scrimmage
-        const depthYards = (t.y - lineOfScrimmageY) * attackDirection / 10;
+        // Evaluate separation and depth where the receiver is expected to meet the pass.
+        const depthYards = (arrivalY - lineOfScrimmageY) * attackDirection / 10;
 
         // Passing lane obstruction check
         let laneObstruction = 0;
@@ -1126,6 +1152,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
         const dx = leadX - qb.x;
         const dy = leadY - qb.y;
+        ballPressureDefenders = selectCoverageBreakers(leadX, leadY);
         const vx = dx / T;
         const vy = dy / T;
         // Arch height: lower arc for slants/crossers (16-24), higher arc for deep fade/go (28-36)
@@ -1402,7 +1429,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
               d.reactionTimer = 0;
             }
             const isCenterSlot = (rec === centerReceiver);
-            const maxLag = isCenterSlot ? 2 : 12; // Slot corner has quick NFL reflexes on inside slants
+            const maxLag = isCenterSlot ? 8 : 12;
             const trailDist = isCenterSlot ? 6 : 14;
             moveSpeed = isCenterSlot ? 1.76 : 1.70;
             moveAccel = isCenterSlot ? 0.34 : 0.28;
@@ -1518,7 +1545,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
               d.reactionTimer = 0;
             }
             const isCenterSlot = (rec === centerReceiver);
-            const maxLag = isCenterSlot ? 2 : 12;
+            const maxLag = isCenterSlot ? 8 : 12;
             const trailDist = isCenterSlot ? 6 : 14;
             moveSpeed = isCenterSlot ? 1.76 : 1.70;
             moveAccel = isCenterSlot ? 0.34 : 0.28;
@@ -1535,14 +1562,14 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           }
         }
 
-        // When ball is in flight, nearby defenders break toward the ball
+        // Only the coverage defenders nearest the catch point break toward the ball.
         if (phase === 'THROWN' && ball) {
           const distToBall = Math.hypot(ball.x - d.x, ball.y - d.y);
-          if (distToBall < 120) {
+          if (ballPressureDefenders.includes(d) && distToBall < 100) {
             targetX = ball.x;
             targetY = ball.y;
-            moveSpeed = 1.82; // Fast closing break on thrown pass
-            moveAccel = 0.36;
+            moveSpeed = 1.52;
+            moveAccel = 0.26;
           }
         }
 
