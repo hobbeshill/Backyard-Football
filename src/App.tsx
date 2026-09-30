@@ -17,6 +17,10 @@ export default function App() {
   const [p2DefPlayState, setP2DefPlayState] = useState('COVER3');
   const [activeOffenseState, setActiveOffenseState] = useState('P1');
   const [momentumState, setMomentumState] = useState(0);
+  const [gameClockState, setGameClockState] = useState({ quarter: 1, seconds: 240 });
+  const [playClockSeconds, setPlayClockSeconds] = useState(20);
+  const [p1TimeoutsLeft, setP1TimeoutsLeft] = useState(3);
+  const [p2TimeoutsLeft, setP2TimeoutsLeft] = useState(3);
   const [banner, setBanner] = useState<{ text: string; color: string; visible: boolean }>({
     text: '',
     color: '#ffcc00',
@@ -87,46 +91,89 @@ export default function App() {
       cx.arc(alignment === 'TRIPS' ? 22 : canvas.width - 22, canvas.height / 2 + 12, 3, 0, Math.PI * 2);
       cx.fill();
     } else {
-      cx.fillStyle = '#ff6666';
-      if (playKey === 'BLITZ') {
-        cx.fillStyle = '#ff3333';
+      const drawDefender = (x: number, y: number, fill = '#ff6666') => {
+        cx.fillStyle = fill;
         cx.beginPath();
-        cx.arc(canvas.width / 2 - 10, canvas.height / 2 + 5, 3.5, 0, Math.PI * 2);
-        cx.arc(canvas.width / 2 + 10, canvas.height / 2 + 5, 3.5, 0, Math.PI * 2);
+        cx.arc(x, y, 3.4, 0, Math.PI * 2);
         cx.fill();
-        cx.strokeStyle = '#ff3333';
-        cx.lineWidth = 1.5;
+      };
+
+      const drawZoneLine = (x1: number, y1: number, x2: number, y2: number) => {
+        cx.strokeStyle = '#ff6666';
+        cx.lineWidth = 1.1;
+        cx.setLineDash([2, 2]);
         cx.beginPath();
-        cx.moveTo(canvas.width / 2 - 10, canvas.height / 2 + 5);
-        cx.lineTo(canvas.width / 2 - 10, canvas.height / 2 - 12);
-        cx.moveTo(canvas.width / 2 + 10, canvas.height / 2 + 5);
-        cx.lineTo(canvas.width / 2 + 10, canvas.height / 2 - 12);
+        cx.moveTo(x1, y1);
+        cx.lineTo(x2, y2);
         cx.stroke();
+        cx.setLineDash([]);
+      };
+
+      if (playKey === 'BLITZ') {
+        drawZoneLine(18, canvas.height / 2 - 10, 82, canvas.height / 2 - 10);
+        drawDefender(18, canvas.height / 2 - 10, '#ff3333');
+        drawDefender(28, canvas.height / 2 - 10, '#ff3333');
+        drawDefender(38, canvas.height / 2 - 10, '#ff3333');
+        drawDefender(48, canvas.height / 2 - 10, '#ff3333');
+        drawDefender(58, canvas.height / 2 - 10, '#ff3333');
+        drawDefender(68, canvas.height / 2 - 10, '#ff3333');
+        drawDefender(50, canvas.height / 2 + 8, '#ffb3b3');
+        drawDefender(37, canvas.height / 2 + 9, '#ffb3b3');
+        drawDefender(63, canvas.height / 2 + 9, '#ffb3b3');
       } else if (playKey === 'QUARTERS') {
-        cx.beginPath();
-        cx.arc(canvas.width / 2 - 30, canvas.height / 2 - 12, 3, 0, Math.PI * 2);
-        cx.arc(canvas.width / 2 - 10, canvas.height / 2 - 12, 3, 0, Math.PI * 2);
-        cx.arc(canvas.width / 2 + 10, canvas.height / 2 - 12, 3, 0, Math.PI * 2);
-        cx.arc(canvas.width / 2 + 30, canvas.height / 2 - 12, 3, 0, Math.PI * 2);
-        cx.fill();
-      } else if (playKey === 'TAMPA2' || playKey === 'COVER2MAN') {
-        cx.beginPath();
-        cx.arc(canvas.width / 2 - 20, canvas.height / 2 - 12, 3, 0, Math.PI * 2);
-        cx.arc(canvas.width / 2 + 20, canvas.height / 2 - 12, 3, 0, Math.PI * 2);
-        cx.arc(canvas.width / 2, canvas.height / 2 + 2, 3, 0, Math.PI * 2);
-        cx.fill();
+        drawDefender(18, canvas.height / 2 - 12, '#ff6666');
+        drawDefender(32, canvas.height / 2 - 12, '#ff6666');
+        drawDefender(68, canvas.height / 2 - 12, '#ff6666');
+        drawDefender(82, canvas.height / 2 - 12, '#ff6666');
+        drawDefender(18, canvas.height / 2 + 12, '#ff6666');
+        drawDefender(32, canvas.height / 2 + 12, '#ff6666');
+        drawDefender(68, canvas.height / 2 + 12, '#ff6666');
+        drawDefender(82, canvas.height / 2 + 12, '#ff6666');
+        drawZoneLine(18, canvas.height / 2 - 12, 18, 8);
+        drawZoneLine(82, canvas.height / 2 - 12, 82, 8);
+        drawZoneLine(18, canvas.height / 2 + 12, 18, canvas.height - 8);
+        drawZoneLine(82, canvas.height / 2 + 12, 82, canvas.height - 8);
+      } else if (playKey === 'TAMPA2') {
+        drawDefender(22, canvas.height / 2 - 12, '#ff6666');
+        drawDefender(50, canvas.height / 2 - 14, '#ffcccc');
+        drawDefender(78, canvas.height / 2 - 12, '#ff6666');
+        drawDefender(38, canvas.height / 2 + 10, '#ff6666');
+        drawDefender(62, canvas.height / 2 + 10, '#ff6666');
+        drawDefender(50, canvas.height / 2 + 18, '#ff6666');
+        drawZoneLine(50, canvas.height / 2 - 14, 50, 30);
+      } else if (playKey === 'COVER2MAN') {
+        drawDefender(22, canvas.height / 2 - 14, '#ff6666');
+        drawDefender(78, canvas.height / 2 - 14, '#ff6666');
+        drawDefender(22, canvas.height / 2 + 10, '#ff6666');
+        drawDefender(78, canvas.height / 2 + 10, '#ff6666');
+        drawDefender(38, canvas.height / 2 + 10, '#ffcccc');
+        drawDefender(62, canvas.height / 2 + 10, '#ffcccc');
+        drawDefender(50, canvas.height / 2 + 18, '#ffcccc');
+        drawZoneLine(22, canvas.height / 2 - 14, 22, 8);
+        drawZoneLine(78, canvas.height / 2 - 14, 78, 8);
+      } else if (playKey === 'ROBBER') {
+        drawDefender(22, canvas.height / 2 - 10, '#ff6666');
+        drawDefender(38, canvas.height / 2 - 4, '#ff6666');
+        drawDefender(50, canvas.height / 2 - 15, '#ff3333');
+        drawDefender(62, canvas.height / 2 - 4, '#ff6666');
+        drawDefender(78, canvas.height / 2 - 10, '#ff6666');
+        drawDefender(50, canvas.height / 2 + 18, '#ffcccc');
+        drawZoneLine(50, canvas.height / 2 - 15, 50, 10);
       } else {
-        cx.beginPath();
-        cx.arc(canvas.width / 2, canvas.height / 2 - 14, 3, 0, Math.PI * 2);
-        cx.arc(canvas.width / 2 - 25, canvas.height / 2 - 5, 3, 0, Math.PI * 2);
-        cx.arc(canvas.width / 2 + 25, canvas.height / 2 - 5, 3, 0, Math.PI * 2);
-        cx.fill();
+        drawDefender(50, canvas.height / 2 - 14, '#ff3333');
+        drawDefender(28, canvas.height / 2 + 2, '#ff6666');
+        drawDefender(72, canvas.height / 2 + 2, '#ff6666');
+        drawDefender(38, canvas.height / 2 + 10, '#ff6666');
+        drawDefender(62, canvas.height / 2 + 10, '#ff6666');
+        drawDefender(50, canvas.height / 2 + 18, '#ffcccc');
+        drawZoneLine(50, canvas.height / 2 - 14, 50, 8);
       }
     }
   };
 
   // Keep ref to mutable game engine to avoid stale closures in requestAnimationFrame
   const engineRef = useRef<GameEngineHandle | null>(null);
+  const playClockRef = useRef(20);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -141,10 +188,26 @@ export default function App() {
       setP1DefPlayState,
       setPlaybookModal,
       setMomentumState,
+      setGameClockState: (quarter, seconds) => setGameClockState({ quarter, seconds }),
       showAnnouncement,
       onEngineReady: engine => { engineRef.current = engine; }
     });
   }, []);
+
+  useEffect(() => {
+    if (!playbookModal) return;
+    playClockRef.current = 20;
+    setPlayClockSeconds(20);
+    const timer = window.setInterval(() => {
+      playClockRef.current--;
+      if (playClockRef.current <= 0) {
+        engineRef.current?.applyDelayOfGame();
+        playClockRef.current = 20;
+      }
+      setPlayClockSeconds(playClockRef.current);
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [playbookModal]);
 
   // Handlers for user changing offensive/defensive plays (user only controls their own side)
   const handleSelectOffensePlay = (key: string) => {
@@ -182,10 +245,32 @@ export default function App() {
   const handleResetGame = () => {
     setUserScore(0);
     setCpuScore(0);
+    setP1TimeoutsLeft(3);
+    setP2TimeoutsLeft(3);
     if (engineRef.current) {
       engineRef.current.resetGame();
       showAnnouncement("GAME RESET - P1 BALL 1ST & 10", "#00ffff");
     }
+  };
+
+  const handleUseTimeout = () => {
+    if (playbookModal === null) {
+      return;
+    }
+
+    const canUsePlayerTimeout = activeOffenseState === 'P1' ? p1TimeoutsLeft > 0 : p1TimeoutsLeft > 0;
+    if (!canUsePlayerTimeout) {
+      showAnnouncement('NO TIMEOUTS LEFT', '#ff6666');
+      return;
+    }
+
+    setP1TimeoutsLeft(prev => Math.max(0, prev - 1));
+    setP2TimeoutsLeft(prev => Math.max(0, prev - 1));
+    setPlaybookModal(null);
+    setTimeout(() => {
+      setPlaybookModal(activeOffenseState === 'P1' ? 'OFFENSE' : 'DEFENSE');
+    }, 0);
+    showAnnouncement('TIMEOUT CALLED', '#00ffff');
   };
 
   const offensiveAlignmentKeys = offensiveKeys.filter(key => offensivePlaybook[key].type === 'PASS');
@@ -229,6 +314,13 @@ export default function App() {
           </div>
         </div>
 
+        <div className="flex items-center justify-between w-full bg-black/75 border border-white/20 rounded-md px-2 py-0.5 text-[0.62rem] text-white/90 mb-1.5">
+          <span className="text-[#ffcc00]">Q{gameClockState.quarter}</span>
+          <span className={gameClockState.seconds <= 30 ? 'text-red-400 font-bold' : 'text-[#00ffff]'}>
+            GAME {Math.floor(gameClockState.seconds / 60)}:{String(gameClockState.seconds % 60).padStart(2, '0')}
+          </span>
+        </div>
+
         <div className="flex items-center justify-center w-full bg-black/75 border border-[#00ffff]/60 rounded-md px-2 py-0.5 text-[0.62rem] text-white/90 mb-1.5">
           <span className="mr-1 text-[#ffcc00]">Momentum:</span>
           <span className={momentumState >= 0 ? 'text-[#00ffaa]' : 'text-[#ff6666]'}>{momentumState >= 0 ? '+' : ''}{momentumState}</span>
@@ -256,7 +348,7 @@ export default function App() {
               >
                 <span className="text-red-400 font-extrabold">CPU DEF:</span>
                 <span className="text-white truncate">
-                  {defensivePlaybook[p2DefPlayState]?.name || 'COVER 3'}
+                  {activeOffenseState === 'P1' ? '??' : defensivePlaybook[p2DefPlayState]?.name || 'COVER 3'}
                 </span>
                 <span className="text-[0.55rem] px-1 py-0.2 bg-red-950 border border-red-500/50 text-red-300 rounded uppercase font-semibold tracking-wider">AI</span>
               </div>
@@ -270,7 +362,7 @@ export default function App() {
               >
                 <span className="text-red-400 font-extrabold">CPU OFF:</span>
                 <span className="text-white truncate">
-                  {offensivePlaybook[p2OffPlayState]?.name || 'SHORT PASS'}
+                  {activeOffenseState === 'P2' ? '??' : offensivePlaybook[p2OffPlayState]?.name || 'SHORT PASS'}
                 </span>
                 <span className="text-[0.55rem] px-1 py-0.2 bg-red-950 border border-red-500/50 text-red-300 rounded uppercase font-semibold tracking-wider">AI</span>
               </div>
@@ -354,12 +446,27 @@ export default function App() {
               <BookOpen size={16} />
               {playbookModal === 'OFFENSE' ? 'P1: SELECT OFFENSIVE PLAY' : 'P1: CALL DEFENSIVE SCHEME'}
             </h2>
-            <button
-              onClick={() => setPlaybookModal(null)}
-              className="text-neutral-400 hover:text-white p-1 rounded-md"
-            >
-              <X size={18} />
-            </button>
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={handleUseTimeout}
+                className="bg-[#0b2a2a] border border-[#00ffff] text-[#00ffff] px-2 py-1 rounded text-[0.58rem] font-bold disabled:opacity-40"
+                disabled={p1TimeoutsLeft <= 0}
+              >
+                TIMEOUT ({p1TimeoutsLeft})
+              </button>
+              <button
+                onClick={() => setPlaybookModal(null)}
+                className="text-neutral-400 hover:text-white p-1 rounded-md"
+              >
+                <X size={18} />
+              </button>
+            </div>
+          </div>
+
+          <div className="mb-2 flex items-center justify-between text-[0.58rem] text-neutral-300 bg-black/40 border border-neutral-700 rounded px-2 py-1">
+            <span>PLAY CALL SCREEN</span>
+            <span className={playClockSeconds <= 5 ? 'text-red-400 font-bold' : 'text-[#00ffff]'}>PLAY CLOCK: {playClockSeconds}s</span>
+            <span>P1 TIMEOUTS: {p1TimeoutsLeft}/3</span>
           </div>
 
           <div className="grid grid-cols-2 gap-2.5 max-w-[360px] w-full max-h-[75vh] overflow-y-auto p-1 scrollbar-thin">

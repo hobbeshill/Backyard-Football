@@ -41,7 +41,8 @@ export function resolveCollisions(
   allEntities: Entity[],
   includeReceivers: boolean,
   receiverEntities: Entity[],
-  defenders: Entity[]
+  defenders: Entity[],
+  ballCarrier: Entity | null = null
 ): void {
   for (let i = 0; i < allEntities.length; i++) {
     for (let j = i + 1; j < allEntities.length; j++) {
@@ -56,6 +57,10 @@ export function resolveCollisions(
         const isSecondDefender = defenders.includes(second);
         if ((isFirstReceiver && isSecondDefender) || (isSecondReceiver && isFirstDefender)) continue;
       }
+
+      const isFirstDefender = defenders.includes(first);
+      const isSecondDefender = defenders.includes(second);
+      if ((first === ballCarrier && isSecondDefender) || (second === ballCarrier && isFirstDefender)) continue;
 
       const dx = second.x - first.x;
       const dy = second.y - first.y;

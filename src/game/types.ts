@@ -39,6 +39,7 @@ export interface Entity {
   tackleImmunity?: number;
   type?: string;
   passRusher?: boolean;
+  defenseAssignment?: 'BLITZ' | 'MAN' | 'ZONE';
   assignedReceiver?: Entity | null;
   assignedCenter?: Entity;
   zoneX?: number;

@@ -14,6 +14,8 @@ export function alignDefenders(
   defenders.forEach(defender => {
     defender.assignedReceiver = undefined;
     defender.assignedCenter = undefined;
+    defender.zoneX = undefined;
+    defender.zoneY = undefined;
     defender.passRusher = false;
     defender.type = 'DB';
     defender.color = '#ff6666';
