@@ -1,5 +1,6 @@
 export type PlayRisk = 'SAFE' | 'BALANCED' | 'EXPLOSIVE';
 export type RouteType = 'SHORT' | 'MEDIUM' | 'VERTICAL';
+export type DefensiveAssignment = 'BLITZ' | 'MAN' | 'ZONE';
 
 export interface PlayOption {
   name: string;
@@ -39,7 +40,7 @@ export interface Entity {
   tackleImmunity?: number;
   type?: string;
   passRusher?: boolean;
-  defenseAssignment?: 'BLITZ' | 'MAN' | 'ZONE';
+  defenseAssignment?: DefensiveAssignment;
   assignedReceiver?: Entity | null;
   assignedCenter?: Entity;
   zoneX?: number;

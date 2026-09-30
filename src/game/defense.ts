@@ -1,4 +1,12 @@
-import type { Entity } from './types';
+import type { DefensiveAssignment, Entity } from './types';
+
+export interface CpuDefenseSituation {
+  down: number;
+  yardsToGo: number;
+  lineOfScrimmageY: number;
+  attackDirection: number;
+  recentPlays: Array<{ play: string; isPass: boolean }>;
+}
 
 export function alignDefenders(
   defenders: Entity[],
@@ -103,4 +111,106 @@ export function alignDefenders(
     defender.vx = 0;
     defender.vy = 0;
   });
+}
+
+export function chooseCpuDefensiveAssignments(
+  defenders: Entity[],
+  eligibleReceivers: Entity[],
+  situation: CpuDefenseSituation,
+  random: () => number = Math.random
+): Map<number, DefensiveAssignment> {
+  const assignments = new Map<number, DefensiveAssignment>();
+  defenders.forEach((defender, index) => {
+    assignments.set(index, defender.passRusher
+      ? 'BLITZ'
+      : defender.assignedReceiver
+        ? 'MAN'
+        : 'ZONE');
+  });
+
+  const recentPlays = situation.recentPlays.slice(-6);
+  const recentRuns = recentPlays.filter(play => !play.isPass).length;
+  const runRate = recentPlays.length > 0 ? recentRuns / recentPlays.length : 0.45;
+  const shortPassCount = recentPlays.filter(play => play.isPass && play.play !== 'DEEP_SHOT').length;
+  const deepPassCount = recentPlays.filter(play => play.play === 'DEEP_SHOT').length;
+  const runSituation =
+    ((situation.down === 3 || situation.down === 4) && situation.yardsToGo <= 3) ||
+    (situation.down <= 2 && situation.yardsToGo <= 2) ||
+    (recentPlays.length >= 3 && runRate >= 0.6 && situation.yardsToGo <= 6);
+  const passSituation =
+    ((situation.down === 3 || situation.down === 4) && situation.yardsToGo >= 6) ||
+    situation.yardsToGo >= 9;
+  const deepThreat = deepPassCount >= 2 ||
+    (passSituation && situation.yardsToGo >= 8 && runRate < 0.5);
+
+  const targetXs = eligibleReceivers.filter(receiver => !receiver.isRB).map(receiver => receiver.x);
+  const compactFormation = targetXs.length >= 3 && (
+    Math.max(...targetXs) - Math.min(...targetXs) <= 140 ||
+    targetXs.some((firstX, index) => targetXs.slice(index + 1).some(secondX => Math.abs(firstX - secondX) <= 35))
+  );
+  const shortPassThreat = shortPassCount >= 2 || compactFormation ||
+    ((situation.down === 3 || situation.down === 4) && situation.yardsToGo <= 5 && !runSituation);
+
+  if (shortPassThreat) {
+    const desiredManCount = shortPassCount >= 2 ? 3 : 2;
+    const currentManCount = () => [...assignments.values()].filter(assignment => assignment === 'MAN').length;
+    const manCandidates = defenders
+      .map((defender, index) => ({ defender, index }))
+      .filter(({ defender, index }) => {
+        if (index === 0 || index === defenders.length - 1 || assignments.get(index) !== 'ZONE') return false;
+        const depth = ((defender.startY ?? defender.y) - situation.lineOfScrimmageY) * situation.attackDirection;
+        return depth <= 145;
+      })
+      .map(candidate => ({
+        ...candidate,
+        distance: eligibleReceivers.length > 0
+          ? Math.min(...eligibleReceivers.map(receiver =>
+            Math.hypot(receiver.x - candidate.defender.x, receiver.y - candidate.defender.y)
+          ))
+          : Infinity
+      }))
+      .sort((first, second) => first.distance - second.distance || first.index - second.index);
+
+    while (currentManCount() < desiredManCount && manCandidates.length > 0) {
+      const candidate = manCandidates.shift();
+      if (candidate) assignments.set(candidate.index, 'MAN');
+    }
+  }
+
+  const rushCount = () => [...assignments.values()].filter(assignment => assignment === 'BLITZ').length;
+  const maxRushers = runSituation ? 4 : deepThreat ? 2 : passSituation ? 3 : 2;
+  const blitzChance = runSituation ? 0.84 : deepThreat ? 0.14 : passSituation ? 0.48 : runRate >= 0.5 ? 0.3 : 0.16;
+
+  while (rushCount() < maxRushers) {
+    if (random() >= blitzChance) break;
+
+    const candidates = defenders
+      .map((defender, index) => ({ defender, index }))
+      .filter(({ defender, index }) =>
+        index > 0 && index < defenders.length - 1 && assignments.get(index) !== 'BLITZ' &&
+        defender.type !== 'FS' && defender.type !== 'SS'
+      )
+      .map(candidate => {
+        const depth = Math.max(0, ((candidate.defender.startY ?? candidate.defender.y) - situation.lineOfScrimmageY) * situation.attackDirection);
+        const roleWeight = candidate.defender.type === 'LB' ? 3.5 : candidate.defender.type === 'CB' ? 1.8 : 2.5;
+        const depthWeight = Math.max(0.35, 1.5 - depth / 180);
+        const coverageCost = assignments.get(candidate.index) === 'MAN'
+          ? (runSituation ? 0.7 : 0.35)
+          : 1;
+        return { ...candidate, weight: roleWeight * depthWeight * coverageCost };
+      });
+
+    const totalWeight = candidates.reduce((sum, candidate) => sum + candidate.weight, 0);
+    if (totalWeight === 0) break;
+
+    let selection = Math.min(0.999999, Math.max(0, random())) * totalWeight;
+    const chosen = candidates.find(candidate => {
+      selection -= candidate.weight;
+      return selection < 0;
+    });
+    if (!chosen) break;
+    assignments.set(chosen.index, 'BLITZ');
+  }
+
+  return assignments;
 }

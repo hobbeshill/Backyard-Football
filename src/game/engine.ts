@@ -1,6 +1,6 @@
 import type { Ball, Entity, FumbleBall } from './types';
 import { defensiveKeys, defensivePlaybook, middleRoutes, offensiveKeys, offensivePlaybook, outsideRoutes, runningBackRoutes } from './playbook';
-import { alignDefenders } from './defense';
+import { alignDefenders, chooseCpuDefensiveAssignments } from './defense';
 import { createFumbleBall } from './fumbles';
 import { distToSegment, moveToward, resolveCollisions, updateRouteMovement } from './movement';
 import { resolvePlayResult } from './rules';
@@ -550,6 +550,19 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     alignDefenders(defenders, activeDefKey, attackDirection, lineOfScrimmageY, receivers, centerReceiver);
     if (rb && defenders[4] && !defenders[4].passRusher) {
       defenders[4].assignedReceiver = rb;
+    }
+    if (activeDefense === 'P2') {
+      defenseOverrides = chooseCpuDefensiveAssignments(
+        defenders,
+        [...receivers, centerReceiver, rb].filter((receiver): receiver is Entity => receiver !== null),
+        {
+          down: currentDown,
+          yardsToGo,
+          lineOfScrimmageY,
+          attackDirection,
+          recentPlays: userPlayHistory
+        }
+      );
     }
     applyDefenseOverrides();
   }
@@ -2443,7 +2456,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     ctx.stroke();
 
     // Offensive Route visualizer in PRE_SNAP
-    if (phase === 'PRE_SNAP') {
+    if (phase === 'PRE_SNAP' && activeOffense === 'P1') {
       const activeOffName = (activeOffense === 'P1') ? p1OffPlay : p2OffPlay;
       const playObj = offensivePlaybook[activeOffName];
       if (playObj && playObj.type === 'PASS') {
@@ -2455,7 +2468,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
     const activeOffName = (activeOffense === 'P1') ? p1OffPlay : p2OffPlay;
     const curPlayObj = offensivePlaybook[activeOffName];
-    if (curPlayObj.type !== 'PASS' && phase === 'PRE_SNAP' && rb) {
+    if (curPlayObj.type !== 'PASS' && phase === 'PRE_SNAP' && activeOffense === 'P1' && rb) {
       ctx.strokeStyle = curPlayObj.type === 'ISO' ? 'rgba(0, 255, 170, 0.6)' : 'rgba(173, 255, 47, 0.6)';
       ctx.lineWidth = 3;
       ctx.beginPath();
@@ -2570,7 +2583,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       ctx.beginPath();
       ctx.arc(d.x, d.y, d.radius, 0, Math.PI * 2);
       ctx.fill();
-      if (d.defenseAssignment) {
+      if (activeDefense === 'P1' && d.defenseAssignment) {
         ctx.strokeStyle = d.defenseAssignment === 'BLITZ'
           ? '#00ff66'
           : d.defenseAssignment === 'MAN'
@@ -2584,7 +2597,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       ctx.strokeStyle = '#000';
       ctx.lineWidth = 2;
       ctx.stroke();
-      if (d.defenseAssignment) {
+      if (activeDefense === 'P1' && d.defenseAssignment) {
         const assignmentLabel = d.defenseAssignment === 'BLITZ'
           ? 'B'
           : d.defenseAssignment === 'MAN'
