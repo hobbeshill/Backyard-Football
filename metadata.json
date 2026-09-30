@@ -1,0 +1,6 @@
+{
+  "name": "7 on 7 Football Sandbox",
+  "description": "7 on 7 tactical football sandbox game featuring route audibles, playbooks, passing mechanics, and defensive schemes.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
