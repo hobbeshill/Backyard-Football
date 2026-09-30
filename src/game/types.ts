@@ -1,6 +1,7 @@
 export interface PlayOption {
   name: string;
   type: string;
+  alignment?: 'SPREAD' | 'STACK' | 'TRIPS';
   left?: string;
   right?: string;
   center?: string;
@@ -38,6 +39,7 @@ export interface Entity {
   timer?: number;
   flash?: number;
   caught?: boolean;
+  hasBall?: boolean;
   isOutside?: boolean;
   isCenter?: boolean;
   isRB?: boolean;

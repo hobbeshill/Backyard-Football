@@ -1,10 +1,10 @@
 import type { DefOption, PlayOption } from './types';
 
 export const offensivePlaybook: Record<string, PlayOption> = {
-  SHORT_PASS: { name: 'SHORT PASS', type: 'PASS', left: 'SLANT-L', right: 'QUICK-OUT', center: 'SLANT-R', rbRoute: 'FLAT', desc: 'Quick short timing routes' },
-  CONTROL_PASS: { name: 'CONTROL PASS', type: 'PASS', left: 'COMEBACK', right: 'CROSS-L', center: 'CROSS-R', rbRoute: 'FLAT', desc: 'Reliable chain movers' },
-  DEEP_SHOT: { name: 'DEEP SHOT', type: 'PASS', left: 'FLAG-L', right: 'FLAG-R', center: 'GO', rbRoute: 'FLAT', desc: 'Vertical stretch (zooms out)' },
-  ISO: { name: 'RUN: ISO', type: 'ISO', left: 'GO', right: 'GO', center: 'SLANT-R', rbRoute: 'FLAT', desc: 'Direct handoff up middle' },
+  SHORT_PASS: { name: 'ALIGNMENT: SPREAD', type: 'PASS', alignment: 'SPREAD', left: 'SLANT-L', right: 'QUICK-OUT', center: 'SLANT-R', rbRoute: 'FLAT', desc: 'Balanced spacing with quick timing routes' },
+  CONTROL_PASS: { name: 'ALIGNMENT: STACK', type: 'PASS', alignment: 'STACK', left: 'COMEBACK', right: 'CROSS-L', center: 'CROSS-R', rbRoute: 'FLAT', desc: 'Compressed alignment for controlled throws' },
+  DEEP_SHOT: { name: 'ALIGNMENT: TRIPS', type: 'PASS', alignment: 'TRIPS', left: 'FLAG-L', right: 'FLAG-R', center: 'GO', rbRoute: 'FLAT', desc: 'Three-receiver vertical stretch' },
+  ISO: { name: 'RUN PLAY', type: 'ISO', left: 'GO', right: 'GO', center: 'SLANT-R', rbRoute: 'FLAT', desc: 'Tap the RB to choose the inside or angle path' },
   SWEEP: { name: 'RUN: SWEEP', type: 'SWEEP', left: 'GO', right: 'GO', center: 'SLANT-R', rbRoute: 'FLAT', desc: 'Outside edge attack vs coverage' },
   POWER: { name: 'RUN: POWER', type: 'POWER', left: 'GO', right: 'GO', center: 'SLANT-R', rbRoute: 'FLAT', desc: 'Off-tackle smash with WR blocking' }
 };
@@ -22,3 +22,4 @@ export const defensiveKeys = Object.keys(defensivePlaybook);
 export const offensiveKeys = Object.keys(offensivePlaybook);
 export const outsideRoutes = ['SLANT-L', 'SLANT-R', 'FLAG-L', 'FLAG-R', 'COMEBACK', 'GO'];
 export const middleRoutes = ['SLANT-L', 'SLANT-R', 'CROSS-L', 'CROSS-R', 'COMEBACK'];
+export const runningBackRoutes = ['FLAT', 'ANGLE'];

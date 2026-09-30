@@ -1,5 +1,5 @@
 import type { Ball, Entity, FumbleBall } from './types';
-import { defensiveKeys, defensivePlaybook, middleRoutes, offensiveKeys, offensivePlaybook, outsideRoutes } from './playbook';
+import { defensiveKeys, defensivePlaybook, middleRoutes, offensiveKeys, offensivePlaybook, outsideRoutes, runningBackRoutes } from './playbook';
 import { alignDefenders } from './defense';
 import { createFumbleBall } from './fumbles';
 import { distToSegment, moveToward, resolveCollisions, updateRouteMovement } from './movement';
@@ -19,6 +19,7 @@ export interface GameEngineHandle {
   resetDrill: () => void;
   resetGame: () => void;
   applyDefensiveAlignment: () => void;
+  selectOffense: (key: string) => void;
   selectDefense: (key: string) => void;
   openPlaybook: () => void;
   openDefPlaybook: () => void;
@@ -538,6 +539,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     qb.powerBoostTimer = 0;
     qb.tackleImmunity = 0;
     qb.brokenTacklesCount = 0;
+    qb.hasBall = false;
     currentViewHeight = 450;
     cameraScale = 1.0;
     cameraOffsetX = 0;
@@ -560,20 +562,26 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
     const activePlayName = (activeOffense === 'P1') ? p1OffPlay : p2OffPlay;
     const activePlay = offensivePlaybook[activePlayName];
+    const alignment = activePlay.alignment || 'SPREAD';
+    const alignmentPositions = alignment === 'STACK'
+      ? { left: 90, right: 270, center: 112, rb: 220, rbSide: 'right' as const }
+      : alignment === 'TRIPS'
+        ? { left: 210, right: 285, center: 250, rb: 90, rbSide: 'left' as const }
+        : { left: 50, right: 290, center: 170, rb: 220, rbSide: 'right' as const };
 
     receivers = [
-      { startX: 80, startY: lineOfScrimmageY, x: 80, y: lineOfScrimmageY, vx: 0, vy: 0, radius: 10, routeType: activePlay.left, routeIndex: 0, timer: 0, flash: 0, caught: false, isOutside: true, color: '#00ffff' },
-      { startX: 260, startY: lineOfScrimmageY, x: 260, y: lineOfScrimmageY, vx: 0, vy: 0, radius: 10, routeType: activePlay.right, routeIndex: 0, timer: 0, flash: 0, caught: false, isOutside: true, color: '#00ffff' }
+      { startX: alignmentPositions.left, startY: lineOfScrimmageY, x: alignmentPositions.left, y: lineOfScrimmageY, vx: 0, vy: 0, radius: 10, routeType: activePlay.left, routeIndex: 0, timer: 0, flash: 0, caught: false, isOutside: true, color: '#00ffff' },
+      { startX: alignmentPositions.right, startY: lineOfScrimmageY, x: alignmentPositions.right, y: lineOfScrimmageY, vx: 0, vy: 0, radius: 10, routeType: activePlay.right, routeIndex: 0, timer: 0, flash: 0, caught: false, isOutside: true, color: '#00ffff' }
     ];
 
     centerReceiver = {
-      startX: 170, startY: lineOfScrimmageY, x: 170, y: lineOfScrimmageY, vx: 0, vy: 0, radius: 10,
+      startX: alignmentPositions.center, startY: lineOfScrimmageY, x: alignmentPositions.center, y: lineOfScrimmageY, vx: 0, vy: 0, radius: 10,
       routeType: activePlay.center, routeIndex: 0, timer: 0, flash: 0, caught: false, isOutside: false, color: '#00ffff', isCenter: true
     };
 
     rb = {
-      startX: 220, startY: lineOfScrimmageY - (75 * attackDirection), x: 220, y: lineOfScrimmageY - (75 * attackDirection), vx: 0, vy: 0, radius: 10,
-      routeType: activePlay.rbRoute, routeIndex: 0, timer: 0, flash: 0, caught: false, color: '#00ffaa', isRB: true, side: 'right', handoffTimer: 0
+      startX: alignmentPositions.rb, startY: lineOfScrimmageY - (75 * attackDirection), x: alignmentPositions.rb, y: lineOfScrimmageY - (75 * attackDirection), vx: 0, vy: 0, radius: 10,
+      routeType: activePlay.rbRoute, routeIndex: 0, timer: 0, flash: 0, caught: false, hasBall: false, color: '#00ffaa', isRB: true, side: alignmentPositions.rbSide, handoffTimer: 0
     };
 
     linemen = [
@@ -626,6 +634,12 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     applyDefensiveAlignment: () => {
       applyDefensiveAlignment();
     },
+    selectOffense: (key: string) => {
+      if (activeOffense === 'P1' && offensivePlaybook[key]) {
+        p1OffPlay = key;
+        resetDrill();
+      }
+    },
     openPlaybook: () => {
       if (phase === 'PRE_SNAP' && activeOffense === 'P1') {
         setPlaybookModal('OFFENSE');
@@ -661,6 +675,15 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       return;
     }
 
+    const directRBTap = phase === 'PRE_SNAP' && activeOffense === 'P1' && rb && Math.hypot(rb.x - px, rb.y - py) < rb.radius + 18;
+    if (directRBTap && rb) {
+      rb.routeIndex = ((rb.routeIndex || 0) + 1) % runningBackRoutes.length;
+      rb.routeType = runningBackRoutes[rb.routeIndex];
+      lastTapTime = 0;
+      sounds.playJuke();
+      return;
+    }
+
     if (phase === 'PRE_SNAP' && activeOffense === 'P1' && currentTime - lastTapTime < 350) {
       if (rb) {
         if (px < fieldWidth / 2) {
@@ -688,6 +711,10 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       if (activeOffense === 'P2') {
         const cpuPlayObj = offensivePlaybook[p2OffPlay];
         sounds.playSnap();
+        qb.hasBall = true;
+        if (cpuPlayObj.type !== 'PASS') {
+          activeEntity = rb || qb;
+        }
         phase = (cpuPlayObj.type === 'PASS') ? 'QB_DROP' : 'HANDOFF';
         cpuPreSnapTimer = 0;
         return;
@@ -695,16 +722,9 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
       const play = offensivePlaybook[p1OffPlay];
       if (play.type === 'PASS') {
-        const allEligibleReceivers = [...receivers, centerReceiver, rb].filter(Boolean) as Entity[];
+        const allEligibleReceivers = [...receivers, centerReceiver].filter(Boolean) as Entity[];
         const tappedReceiver = allEligibleReceivers.find(r => r && Math.hypot(r.x - px, r.y - py) < r.radius + 18);
         if (tappedReceiver) {
-          if (tappedReceiver === rb) {
-            rb.side = (rb.side === 'right') ? 'left' : 'right';
-            rb.startX = (rb.side === 'right') ? 220 : 120;
-            rb.x = rb.startX;
-            sounds.playJuke();
-            return;
-          }
           const availableRoutes = tappedReceiver.isOutside ? outsideRoutes : middleRoutes;
           tappedReceiver.routeIndex = ((tappedReceiver.routeIndex || 0) + 1) % availableRoutes.length;
           tappedReceiver.routeType = availableRoutes[tappedReceiver.routeIndex];
@@ -718,13 +738,22 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         touchStartY = py;
         sounds.playSnap();
         if (play.type === 'PASS') {
+          qb.hasBall = true;
           phase = 'QB_DROP';
           isAiming = true;
         } else {
+          qb.hasBall = true;
+          if (rb) rb.hasBall = false;
+          activeEntity = rb || qb;
           phase = 'HANDOFF';
         }
         return;
       }
+      return;
+    }
+
+    if (phase === 'HANDOFF') {
+      isAiming = false;
       return;
     }
 
@@ -785,6 +814,11 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       return;
     }
 
+    if (phase === 'HANDOFF' || offensivePlaybook[p1OffPlay]?.type !== 'PASS') {
+      isAiming = false;
+      return;
+    }
+
     if (activeOffense === 'P1' && phase === 'QB_DROP' && isAiming) {
       isAiming = false;
 
@@ -834,6 +868,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         flightFrames: totalFlightFrames,
         currentFrame: 0
       };
+      qb.hasBall = false;
       phase = 'THROWN';
       sounds.playThrow();
     }
@@ -1170,6 +1205,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           flightFrames: T,
           currentFrame: 0
         };
+        qb.hasBall = false;
         phase = 'THROWN';
         sounds.playThrow();
       }
@@ -1185,9 +1221,11 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       moveToward(rb, targetX, targetY, 0.3, 2.08);
       rb.handoffTimer = (rb.handoffTimer || 0) + 1;
 
-      if (rb.handoffTimer > 25) {
+      if (rb.handoffTimer > 12) {
         phase = 'RUNNING';
         activeEntity = rb;
+        qb.hasBall = false;
+        rb.hasBall = true;
         activeEntity.vx = 0;
         activeEntity.vy = 0;
         const playObj = offensivePlaybook[activeOffName];
@@ -1197,6 +1235,9 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           rb.vx = (rb.side === 'right') ? 1.6 : -1.6;
         } else {
           rb.vx = (rb.side === 'right') ? 2.0 : -2.0;
+        }
+        if (rb.routeType === 'ANGLE') {
+          rb.vx = (rb.side === 'right') ? 1.4 : -1.4;
         }
       }
     }
@@ -1228,6 +1269,10 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           if (playObj.type === 'SWEEP' && activeEntity === rb) {
             const targetOutsideX = (rb.side === 'right') ? 280 : 60;
             rb.x += (targetOutsideX - rb.x) * 0.15;
+          }
+          if (rb && rb.routeType === 'ANGLE' && activeEntity === rb) {
+            const angleTargetX = (rb.side === 'right') ? 235 : 105;
+            rb.x += (angleTargetX - rb.x) * 0.10;
           }
         }
         if (activeEntity !== qb && activeOffense === 'P1') activeEntity.x = Math.max(25, Math.min(fieldWidth - 25, activeEntity.x));
@@ -1292,7 +1337,16 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         const sidelineX = (rb.startX! < 170) ? 45 : 295;
         let targetX = rb.x;
         let targetY = rb.y;
-        if (rb.timer < 18) {
+        if (rb.routeType === 'ANGLE') {
+          const angleTargetX = rb.startX! < 170 ? 210 : 130;
+          if (rb.timer < 22) {
+            targetX += (angleTargetX - rb.x) * 0.10;
+            targetY += rSpeed * 0.9 * dir;
+          } else {
+            targetX += (angleTargetX - rb.x) * 0.08;
+            targetY += rSpeed * 0.55 * dir;
+          }
+        } else if (rb.timer < 18) {
           targetX += (sidelineX - rb.x) * 0.12;
           targetY += rSpeed * 0.4 * dir;
         } else {
@@ -1986,6 +2040,10 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     } else if (r.routeType === 'FLAT') {
       const outX = (r.startX < 170) ? 45 : 295;
       ctx!.lineTo(outX, lineOfScrimmageY + (10 * dir));
+    } else if (r.routeType === 'ANGLE') {
+      const angleX = (r.startX < 170) ? 210 : 130;
+      ctx!.lineTo(r.startX, r.startY + (45 * dir));
+      ctx!.lineTo(angleX, r.startY + (85 * dir));
     }
     ctx!.stroke();
 
@@ -2111,13 +2169,12 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       ctx.lineWidth = 3;
       ctx.beginPath();
       ctx.moveTo(rb.startX || rb.x, rb.startY || rb.y);
-      if (curPlayObj.type === 'ISO') {
-        ctx.lineTo(170, lineOfScrimmageY - (140 * attackDirection));
-      } else if (curPlayObj.type === 'POWER') {
-        ctx.lineTo(rb.side === 'right' ? 260 : 80, lineOfScrimmageY - (80 * attackDirection));
+      if (rb.routeType === 'ANGLE') {
+        const angleTargetX = rb.side === 'right' ? 235 : 105;
+        ctx.lineTo(rb.startX || rb.x, lineOfScrimmageY + (55 * attackDirection));
+        ctx.lineTo(angleTargetX, lineOfScrimmageY + (105 * attackDirection));
       } else {
-        const sweepX = (rb.side === 'right') ? 310 : 30;
-        ctx.lineTo(sweepX, lineOfScrimmageY - (60 * attackDirection));
+        ctx.lineTo(170, lineOfScrimmageY + (140 * attackDirection));
       }
       ctx.stroke();
     }
@@ -2131,6 +2188,12 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     ctx.strokeStyle = '#fff';
     ctx.lineWidth = 2;
     ctx.stroke();
+    if (qb.hasBall) {
+      ctx.fillStyle = '#d2691e';
+      ctx.beginPath();
+      ctx.arc(qb.x + 10, qb.y + 2, 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
 
     // Forward-projecting aiming vector visualizer (slingshot aim)
     if (isAiming && phase === 'QB_DROP' && activeOffense === 'P1') {
@@ -2178,6 +2241,12 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       ctx.strokeStyle = '#000';
       ctx.lineWidth = 2;
       ctx.stroke();
+      if (rb && rb.hasBall) {
+        ctx.fillStyle = '#d2691e';
+        ctx.beginPath();
+        ctx.arc(rb.x + 10, rb.y + 2, 4, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
 
     // Receivers

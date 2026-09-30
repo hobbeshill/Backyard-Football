@@ -56,37 +56,35 @@ export default function App() {
     cx.stroke();
 
     if (!isDefense) {
+      const alignment = offensivePlaybook[playKey]?.alignment || 'SPREAD';
+      const positions = alignment === 'STACK'
+        ? [24, 38, 72]
+        : alignment === 'TRIPS'
+          ? [68, 82, 94]
+          : [12, 50, 88];
+
       cx.fillStyle = '#ffcc00';
       cx.beginPath();
-      cx.arc(canvas.width / 2, canvas.height / 2 + 15, 4, 0, Math.PI * 2);
+      cx.arc(canvas.width / 2, canvas.height / 2 + 14, 3.5, 0, Math.PI * 2);
       cx.fill();
-      cx.strokeStyle = '#00ffff';
-      cx.lineWidth = 1.5;
-      if (playKey === 'SHORT_PASS') {
+      cx.fillStyle = '#00ffff';
+      positions.forEach((position, index) => {
+        const x = canvas.width * position / 100;
+        const y = canvas.height / 2;
         cx.beginPath();
-        cx.moveTo(20, canvas.height / 2);
-        cx.lineTo(30, 25);
-        cx.moveTo(canvas.width - 20, canvas.height / 2);
-        cx.lineTo(canvas.width - 30, 25);
-        cx.stroke();
-      } else if (playKey === 'DEEP_SHOT') {
-        cx.beginPath();
-        cx.moveTo(20, canvas.height / 2);
-        cx.lineTo(20, 5);
-        cx.moveTo(canvas.width - 20, canvas.height / 2);
-        cx.lineTo(canvas.width - 20, 5);
-        cx.stroke();
-      } else {
-        cx.fillStyle = '#00ffaa';
-        cx.beginPath();
-        cx.arc(canvas.width / 2 + 15, canvas.height / 2 + 10, 3, 0, Math.PI * 2);
+        cx.arc(x, y, 3.5, 0, Math.PI * 2);
         cx.fill();
-        cx.strokeStyle = '#adff2f';
+        cx.strokeStyle = '#00ffff';
+        cx.lineWidth = 1.2;
         cx.beginPath();
-        cx.moveTo(canvas.width / 2 + 15, canvas.height / 2 + 10);
-        cx.lineTo(canvas.width / 2 + 15, 20);
+        cx.moveTo(x, y);
+        cx.lineTo(x + (index === 0 ? -8 : index === 2 ? 8 : 0), 8 + index * 3);
         cx.stroke();
-      }
+      });
+      cx.fillStyle = '#00ffaa';
+      cx.beginPath();
+      cx.arc(alignment === 'TRIPS' ? 22 : canvas.width - 22, canvas.height / 2 + 12, 3, 0, Math.PI * 2);
+      cx.fill();
     } else {
       cx.fillStyle = '#ff6666';
       if (playKey === 'BLITZ') {
@@ -151,8 +149,7 @@ export default function App() {
     if (activeOffenseState === 'P1') {
       setP1OffPlayState(key);
       if (engineRef.current) {
-        engineRef.current.p1OffPlay = key;
-        engineRef.current.resetDrill();
+        engineRef.current.selectOffense(key);
       }
     }
     setPlaybookModal(null);
@@ -187,6 +184,28 @@ export default function App() {
       engineRef.current.resetGame();
       showAnnouncement("GAME RESET - P1 BALL 1ST & 10", "#00ffff");
     }
+  };
+
+  const offensiveAlignmentKeys = offensiveKeys.filter(key => offensivePlaybook[key].type === 'PASS');
+  const offensiveRunKeys = ['ISO'];
+
+  const renderOffensivePlayCard = (key: string) => {
+    const play = offensivePlaybook[key];
+    return (
+      <div
+        key={key}
+        onClick={() => handleSelectOffensePlay(key)}
+        className={`bg-[#112211] border-2 rounded-lg p-2.5 text-center cursor-pointer transition hover:bg-[#1a331a] hover:scale-102 flex flex-col items-center justify-between shadow ${
+          p1OffPlayState === key ? 'border-[#ffcc00] ring-1 ring-[#ffcc00]' : 'border-[#00ffff]'
+        }`}
+      >
+        <h3 className="text-[#ffcc00] font-bold text-[0.72rem] m-0 mb-1">{play.name}</h3>
+        <p className="text-[#adff2f] text-[0.52rem] leading-tight m-0 mb-2">{play.desc}</p>
+        <div className="w-[100px] h-[50px] bg-[#114418] border border-white/40 rounded flex items-center justify-center overflow-hidden">
+          <PlaySchematicMini playKey={key} isDefense={false} onRender={drawCardSchematic} />
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -338,24 +357,12 @@ export default function App() {
 
           <div className="grid grid-cols-2 gap-2.5 max-w-[360px] w-full max-h-[75vh] overflow-y-auto p-1 scrollbar-thin">
             {playbookModal === 'OFFENSE' ? (
-              Object.keys(offensivePlaybook).map((key) => {
-                const play = offensivePlaybook[key];
-                return (
-                  <div
-                    key={key}
-                    onClick={() => handleSelectOffensePlay(key)}
-                    className={`bg-[#112211] border-2 rounded-lg p-2.5 text-center cursor-pointer transition hover:bg-[#1a331a] hover:scale-102 flex flex-col items-center justify-between shadow ${
-                      p1OffPlayState === key ? 'border-[#ffcc00] ring-1 ring-[#ffcc00]' : 'border-[#00ffff]'
-                    }`}
-                  >
-                    <h3 className="text-[#ffcc00] font-bold text-[0.72rem] m-0 mb-1">{play.name}</h3>
-                    <p className="text-[#adff2f] text-[0.52rem] leading-tight m-0 mb-2">{play.desc}</p>
-                    <div className="w-[100px] h-[50px] bg-[#114418] border border-white/40 rounded flex items-center justify-center overflow-hidden">
-                      <PlaySchematicMini playKey={key} isDefense={false} onRender={drawCardSchematic} />
-                    </div>
-                  </div>
-                );
-              })
+              <>
+                <div className="col-span-2 text-[#00ffff] text-[0.62rem] font-bold tracking-wider text-left px-1">ALIGNMENTS</div>
+                {offensiveAlignmentKeys.map(renderOffensivePlayCard)}
+                <div className="col-span-2 text-[#00ffaa] text-[0.62rem] font-bold tracking-wider text-left px-1 mt-1">RUN PLAYS</div>
+                {offensiveRunKeys.map(renderOffensivePlayCard)}
+              </>
             ) : (
               Object.keys(defensivePlaybook).map((key) => {
                 const play = defensivePlaybook[key];
@@ -408,7 +415,8 @@ export default function App() {
                 <span className="text-[#00ffff] font-bold block mb-1">1. PRE-SNAP TACTICS:</span>
                 <ul className="list-disc list-inside space-y-1 text-neutral-300">
                   <li><b className="text-white">Snap the Ball:</b> On offense, tap the QB (yellow circle) to snap. On defense, pick your scheme and tap anywhere on the field to start the play!</li>
-                  <li><b className="text-white">Audible Routes:</b> Tap any receiver (cyan) to cycle their individual route pattern (Slants, Out, Comeback, Cross, Go).</li>
+                  <li><b className="text-white">Alignments:</b> Choose Spread, Stack, or Trips before the snap to change receiver spacing, or select a run play.</li>
+                  <li><b className="text-white">Audible Routes:</b> Tap a receiver (cyan) to cycle its route. Tap the RB (green) to switch between Flat and Angle paths.</li>
                   <li><b className="text-white">Flip Running Back:</b> Quick double-tap left or right of center to shift the RB side.</li>
                 </ul>
               </div>

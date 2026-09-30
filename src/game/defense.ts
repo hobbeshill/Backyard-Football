@@ -70,6 +70,31 @@ export function alignDefenders(
     defenders[6].startX = 170; defenders[6].startY = lineOfScrimmageY + (220 * attackDirection); defenders[6].zoneX = 170; defenders[6].zoneY = lineOfScrimmageY + (250 * attackDirection);
   }
 
+  // Shift the shell to the offense's actual alignment before the snap.
+  // The coverage roles above remain the same, but defenders should not reset to
+  // a stock spread when the offense stacks or overloads one side.
+  const leftReceiverX = receivers[0]?.x ?? 80;
+  const rightReceiverX = receivers[1]?.x ?? 260;
+  const slotReceiverX = centerReceiver?.x ?? 170;
+  const clampX = (x: number) => Math.max(35, Math.min(305, x));
+
+  if (playKey === 'COVER2MAN' || playKey === 'BLITZ' || playKey === 'ROBBER') {
+    defenders[1].startX = clampX(leftReceiverX);
+    defenders[2].startX = clampX(rightReceiverX);
+    defenders[3].startX = clampX(slotReceiverX);
+  } else if (playKey === 'QUARTERS') {
+    defenders[1].startX = clampX(leftReceiverX);
+    defenders[2].startX = clampX(rightReceiverX);
+    defenders[5].startX = clampX((leftReceiverX + slotReceiverX) / 2);
+    defenders[6].startX = clampX((rightReceiverX + slotReceiverX) / 2);
+  } else {
+    defenders[1].startX = clampX(leftReceiverX);
+    defenders[2].startX = clampX(rightReceiverX);
+    defenders[3].startX = clampX(leftReceiverX + (slotReceiverX - leftReceiverX) * 0.35);
+    defenders[4].startX = clampX(rightReceiverX + (slotReceiverX - rightReceiverX) * 0.35);
+    defenders[5].startX = clampX(slotReceiverX);
+  }
+
   defenders.forEach(defender => {
     defender.x = defender.startX || 170;
     defender.y = defender.startY || lineOfScrimmageY;
