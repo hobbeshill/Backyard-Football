@@ -1,14 +1,19 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { alignDefenders, chooseCpuDefensiveAssignments } from './defense';
+import { alignDefenderAcrossFromRunningBack, alignDefenders, chooseCpuDefensiveAssignments } from './defense';
 import type { Entity } from './types';
 
-function createAlignedDefense(playKey: string) {
+function createAlignedDefense(playKey: string, formation: 'SPREAD' | 'STACK' | 'TRIPS' = 'SPREAD') {
+  const positions = formation === 'STACK'
+    ? { left: 90, right: 270, center: 125 }
+    : formation === 'TRIPS'
+      ? { left: 210, right: 285, center: 250 }
+      : { left: 50, right: 290, center: 200 };
   const receivers: Entity[] = [
-    { x: 50, y: 500, startX: 50, startY: 500, radius: 10 },
-    { x: 290, y: 500, startX: 290, startY: 500, radius: 10 }
+    { x: positions.left, y: 500, startX: positions.left, startY: 500, radius: 10 },
+    { x: positions.right, y: 500, startX: positions.right, startY: 500, radius: 10 }
   ];
-  const centerReceiver: Entity = { x: 170, y: 500, startX: 170, startY: 500, radius: 10 };
+  const centerReceiver: Entity = { x: positions.center, y: 500, startX: positions.center, startY: 500, radius: 10 };
   const defenders: Entity[] = Array.from({ length: 7 }, (_, index) => ({
     x: 170,
     y: 500,
@@ -108,4 +113,47 @@ test('CPU tightens man coverage against a compact receiver formation', () => {
   );
 
   assert.equal([...assignments.values()].filter(assignment => assignment === 'MAN').length, 2);
+});
+
+test('pre-snap coverage defenders keep visible separation from receivers', () => {
+  const playKeys = ['COVER3', 'COVER2MAN', 'TAMPA2', 'BLITZ', 'QUARTERS', 'ROBBER'];
+  const formations = ['SPREAD', 'STACK', 'TRIPS'] as const;
+
+  for (const formation of formations) {
+    for (const playKey of playKeys) {
+      const { defenders, eligibleReceivers } = createAlignedDefense(playKey, formation);
+      for (const defender of defenders) {
+        for (const receiver of eligibleReceivers) {
+          const distance = Math.hypot(defender.x - receiver.x, defender.y - receiver.y);
+          assert.ok(
+            distance >= (defender.radius || 10) + (receiver.radius || 10),
+            `${playKey} overlaps a receiver in ${formation}`
+          );
+        }
+      }
+    }
+  }
+});
+
+test('pre-snap front defender stays clear of the offensive line', () => {
+  const { defenders, eligibleReceivers } = createAlignedDefense('COVER3');
+  const noseDefender = defenders[0];
+  const centerReceiver = eligibleReceivers[2];
+  const distance = Math.hypot(noseDefender.x - centerReceiver.x, noseDefender.y - centerReceiver.y);
+
+  assert.ok(distance >= (noseDefender.radius || 10) + (centerReceiver.radius || 10));
+});
+
+test('RB coverage aligns across the line on the RB side for either attack direction', () => {
+  for (const attackDirection of [-1, 1]) {
+    const defender: Entity = { x: 140, y: 500, radius: 10 };
+    const runningBack: Entity = { x: 285, y: 500 - (75 * attackDirection), radius: 10 };
+
+    alignDefenderAcrossFromRunningBack(defender, runningBack, 500, attackDirection);
+
+    assert.equal(defender.x, runningBack.x);
+    assert.equal(defender.y, 500 + (24 * attackDirection));
+    assert.equal(defender.startX, defender.x);
+    assert.equal(defender.startY, defender.y);
+  }
 });

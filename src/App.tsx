@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Volume2, VolumeX, BookOpen, RefreshCw, HelpCircle, X, Shield, Award, ChevronRight } from 'lucide-react';
+import { Volume2, VolumeX, BookOpen, RefreshCw, HelpCircle, X, Shield, Award, ChevronLeft, ChevronRight } from 'lucide-react';
 import { defensiveKeys, defensivePlaybook, offensiveKeys, offensivePlaybook } from './game/playbook';
 import { sounds } from './game/sound';
 import { mountFootballGame, type GameEngineHandle } from './game/engine';
@@ -12,13 +12,13 @@ export default function App() {
   const [cpuScore, setCpuScore] = useState(0);
   const [downDistanceText, setDownDistanceText] = useState('1st & 10 at OWN 20');
   const [p1OffPlayState, setP1OffPlayState] = useState('SHORT_PASS');
+  const [p1OffFormationState, setP1OffFormationState] = useState('SHORT_PASS');
   const [p1DefPlayState, setP1DefPlayState] = useState('COVER3');
   const [p2OffPlayState, setP2OffPlayState] = useState('SHORT_PASS');
   const [p2DefPlayState, setP2DefPlayState] = useState('COVER3');
   const [activeOffenseState, setActiveOffenseState] = useState('P1');
   const [momentumState, setMomentumState] = useState(0);
   const [gameClockState, setGameClockState] = useState({ quarter: 1, seconds: 240 });
-  const [playClockSeconds, setPlayClockSeconds] = useState(20);
   const [p1TimeoutsLeft, setP1TimeoutsLeft] = useState(3);
   const [p2TimeoutsLeft, setP2TimeoutsLeft] = useState(3);
   const [banner, setBanner] = useState<{ text: string; color: string; visible: boolean }>({
@@ -27,6 +27,8 @@ export default function App() {
     visible: false
   });
   const [playbookModal, setPlaybookModal] = useState<'OFFENSE' | 'DEFENSE' | null>(null);
+  const formationSwipeStartRef = useRef<{ x: number; y: number } | null>(null);
+  const [formationDirection, setFormationDirection] = useState(1);
   const [showHelp, setShowHelp] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
 
@@ -63,10 +65,10 @@ export default function App() {
     if (!isDefense) {
       const alignment = offensivePlaybook[playKey]?.alignment || 'SPREAD';
       const positions = alignment === 'STACK'
-        ? [24, 38, 72]
+        ? [26, 37, 79]
         : alignment === 'TRIPS'
-          ? [68, 82, 94]
-          : [12, 50, 88];
+          ? [62, 74, 84]
+          : [12, 59, 88];
 
       cx.fillStyle = '#ffcc00';
       cx.beginPath();
@@ -173,8 +175,6 @@ export default function App() {
 
   // Keep ref to mutable game engine to avoid stale closures in requestAnimationFrame
   const engineRef = useRef<GameEngineHandle | null>(null);
-  const playClockRef = useRef(20);
-
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -194,30 +194,15 @@ export default function App() {
     });
   }, []);
 
-  useEffect(() => {
-    if (!playbookModal) return;
-    playClockRef.current = 20;
-    setPlayClockSeconds(20);
-    const timer = window.setInterval(() => {
-      playClockRef.current--;
-      if (playClockRef.current <= 0) {
-        engineRef.current?.applyDelayOfGame();
-        playClockRef.current = 20;
-      }
-      setPlayClockSeconds(playClockRef.current);
-    }, 1000);
-    return () => window.clearInterval(timer);
-  }, [playbookModal]);
-
   // Handlers for user changing offensive/defensive plays (user only controls their own side)
   const handleSelectOffensePlay = (key: string) => {
     if (activeOffenseState === 'P1') {
       setP1OffPlayState(key);
+      if (offensivePlaybook[key]?.alignment) setP1OffFormationState(key);
       if (engineRef.current) {
         engineRef.current.selectOffense(key);
       }
     }
-    setPlaybookModal(null);
   };
 
   const handleSelectDefensePlay = (key: string) => {
@@ -227,7 +212,27 @@ export default function App() {
         engineRef.current.selectDefense(key);
       }
     }
-    setPlaybookModal(null);
+  };
+
+  const handleShiftFormation = (direction: number) => {
+    if (!playbookModal) return;
+    const keys = playbookModal === 'OFFENSE' ? offensiveFormationKeys : defensiveKeys;
+    const activeKey = playbookModal === 'OFFENSE' ? p1OffFormationState : p1DefPlayState;
+    const nextIndex = (keys.indexOf(activeKey) + direction + keys.length) % keys.length;
+    setFormationDirection(direction);
+    if (playbookModal === 'OFFENSE') handleSelectOffensePlay(keys[nextIndex]);
+    else handleSelectDefensePlay(keys[nextIndex]);
+  };
+
+  const handleFormationPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
+    const start = formationSwipeStartRef.current;
+    formationSwipeStartRef.current = null;
+    if (!start) return;
+    const deltaX = event.clientX - start.x;
+    const deltaY = event.clientY - start.y;
+    if (Math.abs(deltaX) > 40 && Math.abs(deltaX) > Math.abs(deltaY)) {
+      handleShiftFormation(deltaX < 0 ? 1 : -1);
+    }
   };
 
   const handleOpenPlaybook = () => {
@@ -273,27 +278,17 @@ export default function App() {
     showAnnouncement('TIMEOUT CALLED', '#00ffff');
   };
 
-  const offensiveAlignmentKeys = offensiveKeys.filter(key => offensivePlaybook[key].type === 'PASS');
-  const offensiveRunKeys = ['ISO'];
-
-  const renderOffensivePlayCard = (key: string) => {
-    const play = offensivePlaybook[key];
-    return (
-      <div
-        key={key}
-        onClick={() => handleSelectOffensePlay(key)}
-        className={`bg-[#112211] border-2 rounded-lg p-2.5 text-center cursor-pointer transition hover:bg-[#1a331a] hover:scale-102 flex flex-col items-center justify-between shadow ${
-          p1OffPlayState === key ? 'border-[#ffcc00] ring-1 ring-[#ffcc00]' : 'border-[#00ffff]'
-        }`}
-      >
-        <h3 className="text-[#ffcc00] font-bold text-[0.72rem] m-0 mb-1">{play.name}</h3>
-        <p className="text-[#adff2f] text-[0.52rem] leading-tight m-0 mb-2">{play.desc}</p>
-        <div className="w-[100px] h-[50px] bg-[#114418] border border-white/40 rounded flex items-center justify-center overflow-hidden">
-          <PlaySchematicMini playKey={key} isDefense={false} onRender={drawCardSchematic} />
-        </div>
-      </div>
-    );
-  };
+  const offensiveFormationKeys = offensiveKeys.filter(key => offensivePlaybook[key].alignment);
+  const offensiveRunKeys = offensiveKeys.filter(key => !offensivePlaybook[key].alignment);
+  const formationKeys = playbookModal === 'OFFENSE' ? offensiveFormationKeys : defensiveKeys;
+  const activeFormationKey = playbookModal === 'OFFENSE' ? p1OffFormationState : p1DefPlayState;
+  const activeFormationIndex = Math.max(0, formationKeys.indexOf(activeFormationKey));
+  const activeFormation = playbookModal === 'OFFENSE'
+    ? offensivePlaybook[activeFormationKey]
+    : defensivePlaybook[activeFormationKey];
+  const activeFormationLabel = playbookModal === 'OFFENSE'
+    ? (offensivePlaybook[activeFormationKey]?.alignment || offensivePlaybook[activeFormationKey]?.name || activeFormationKey)
+    : (defensivePlaybook[activeFormationKey]?.name || activeFormationKey);
 
   return (
     <div className="relative w-screen h-screen overflow-hidden flex flex-col items-center justify-center bg-[#030704] text-white font-mono select-none">
@@ -418,10 +413,117 @@ export default function App() {
       )}
 
       {/* Canvas Element */}
-      <canvas
-        ref={canvasRef}
-        className="bg-[#176620] shadow-[0_8px_30px_rgba(0,0,0,0.9)] rounded-md border-3 border-white max-w-full touch-none"
-      />
+      <div className="relative max-w-full">
+        <canvas
+          ref={canvasRef}
+          className="bg-[#176620] shadow-[0_8px_30px_rgba(0,0,0,0.9)] rounded-md border-3 border-white max-w-full touch-none"
+        />
+        {playbookModal && (
+          <div
+            onPointerDown={(event) => event.stopPropagation()}
+            onPointerUp={(event) => event.stopPropagation()}
+            onClick={(event) => event.stopPropagation()}
+            className="fixed bottom-2 left-1/2 -translate-x-1/2 z-30 w-[calc(100vw-28px)] max-w-[356px] pointer-events-auto"
+          >
+            <div className="bg-black/85 backdrop-blur-sm border border-white/35 rounded-md p-2 shadow-lg">
+              <div className="flex items-center justify-between gap-2 mb-1.5">
+                <div className="min-w-0 flex items-center gap-2">
+                  <span className={`text-[0.58rem] font-extrabold ${playbookModal === 'OFFENSE' ? 'text-[#00ffff]' : 'text-[#ff7777]'}`}>
+                    {playbookModal === 'OFFENSE' ? 'OFFENSE' : 'DEFENSE'}
+                  </span>
+                  <span className="text-[0.55rem] text-neutral-400 truncate">{downDistanceText}</span>
+                </div>
+                <div className="flex shrink-0 items-center gap-1.5">
+                  <button
+                    onClick={handleUseTimeout}
+                    className="border border-[#00ffff]/60 text-[#00ffff] px-1.5 py-1 rounded text-[0.52rem] font-bold disabled:opacity-40"
+                    disabled={p1TimeoutsLeft <= 0}
+                  >
+                    TIMEOUT
+                  </button>
+                  <button
+                    onClick={() => setPlaybookModal(null)}
+                    className="bg-[#ffcc00] text-black px-2 py-1 rounded text-[0.52rem] font-bold"
+                    aria-label="Close formation controls"
+                  >
+                    DONE
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => handleShiftFormation(-1)}
+                  className="shrink-0 w-8 h-9 flex items-center justify-center border border-white/30 bg-neutral-900/90 text-white rounded"
+                  title="Previous formation"
+                  aria-label="Previous formation"
+                >
+                  <ChevronLeft size={18} />
+                </button>
+
+                <div
+                  key={activeFormationKey}
+                  onPointerDown={(event) => {
+                    formationSwipeStartRef.current = { x: event.clientX, y: event.clientY };
+                    event.currentTarget.setPointerCapture(event.pointerId);
+                  }}
+                  onPointerUp={handleFormationPointerUp}
+                  onPointerCancel={() => { formationSwipeStartRef.current = null; }}
+                  className={`flex-1 min-w-0 h-11 flex items-center justify-between gap-2 px-2 bg-[#102216]/95 border ${playbookModal === 'OFFENSE' ? 'border-[#00ffff]/70' : 'border-[#ff6666]/70'} rounded touch-pan-y ${formationDirection > 0 ? 'formation-slide-next' : 'formation-slide-prev'}`}
+                >
+                  <div className="min-w-0">
+                    <div className="text-[0.65rem] leading-tight text-[#ffcc00] font-extrabold truncate">
+                      {activeFormationLabel}
+                      <span className="ml-1 text-[0.52rem] text-neutral-400 font-normal">{activeFormationIndex + 1}/{formationKeys.length}</span>
+                    </div>
+                    <div className="text-[0.52rem] leading-tight text-neutral-300 truncate">{activeFormation?.desc}</div>
+                  </div>
+                  <div className="shrink-0 max-w-[82px] text-right text-[0.52rem] leading-tight text-neutral-300">
+                    Swipe to choose alignment
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => handleShiftFormation(1)}
+                  className="shrink-0 w-8 h-9 flex items-center justify-center border border-white/30 bg-neutral-900/90 text-white rounded"
+                  title="Next formation"
+                  aria-label="Next formation"
+                >
+                  <ChevronRight size={18} />
+                </button>
+              </div>
+
+              <div className="flex items-center justify-center gap-2 mt-1.5">
+                {formationKeys.map((key, index) => (
+                  <button
+                    key={key}
+                    onClick={() => playbookModal === 'OFFENSE' ? handleSelectOffensePlay(key) : handleSelectDefensePlay(key)}
+                    className={`w-2 h-2 rounded-full border ${index === activeFormationIndex ? 'bg-[#ffcc00] border-[#ffcc00]' : 'bg-transparent border-white/50'}`}
+                    aria-label={`Select ${playbookModal === 'OFFENSE' ? (offensivePlaybook[key].alignment || offensivePlaybook[key].name) : defensivePlaybook[key].name}`}
+                    aria-current={index === activeFormationIndex ? 'true' : undefined}
+                  />
+                ))}
+              </div>
+
+              {playbookModal === 'OFFENSE' && (
+                <div className="flex items-center gap-1.5 mt-1.5">
+                  <span className="shrink-0 text-[0.52rem] font-bold text-neutral-400">RUN</span>
+                  {offensiveRunKeys.map(key => (
+                    <button
+                      key={key}
+                      onClick={() => handleSelectOffensePlay(key)}
+                      className={`flex-1 px-1 py-1 border rounded text-[0.52rem] font-bold truncate ${p1OffPlayState === key ? 'border-[#ffcc00] text-[#ffcc00] bg-[#322800]' : 'border-neutral-600 text-neutral-300 bg-neutral-900/90'}`}
+                      aria-pressed={p1OffPlayState === key}
+                    >
+                      {offensivePlaybook[key].name.replace('RUN: ', '')}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* Footer Controls & Info */}
       <footer className="mt-1 text-[0.54rem] text-[#adff2f] text-center z-20 px-2 max-w-[420px] flex items-center justify-between gap-2">
@@ -432,81 +534,6 @@ export default function App() {
             : 'Select Defense • Tap Screen to Start Play'}
         </span>
       </footer>
-
-      {/* Playbook Overlay Modal */}
-      {playbookModal && (
-        <div
-          onPointerDown={(e) => e.stopPropagation()}
-          onPointerUp={(e) => e.stopPropagation()}
-          onClick={(e) => e.stopPropagation()}
-          className="absolute inset-0 bg-black/92 flex flex-col items-center justify-center z-100 p-4"
-        >
-          <div className="flex items-center justify-between w-full max-w-[360px] mb-2 px-1">
-            <h2 className="text-[#ffcc00] font-bold text-sm tracking-wider flex items-center gap-1.5">
-              <BookOpen size={16} />
-              {playbookModal === 'OFFENSE' ? 'P1: SELECT OFFENSIVE PLAY' : 'P1: CALL DEFENSIVE SCHEME'}
-            </h2>
-            <div className="flex items-center gap-1.5">
-              <button
-                onClick={handleUseTimeout}
-                className="bg-[#0b2a2a] border border-[#00ffff] text-[#00ffff] px-2 py-1 rounded text-[0.58rem] font-bold disabled:opacity-40"
-                disabled={p1TimeoutsLeft <= 0}
-              >
-                TIMEOUT ({p1TimeoutsLeft})
-              </button>
-              <button
-                onClick={() => setPlaybookModal(null)}
-                className="text-neutral-400 hover:text-white p-1 rounded-md"
-              >
-                <X size={18} />
-              </button>
-            </div>
-          </div>
-
-          <div className="mb-2 flex items-center justify-between text-[0.58rem] text-neutral-300 bg-black/40 border border-neutral-700 rounded px-2 py-1">
-            <span>PLAY CALL SCREEN</span>
-            <span className={playClockSeconds <= 5 ? 'text-red-400 font-bold' : 'text-[#00ffff]'}>PLAY CLOCK: {playClockSeconds}s</span>
-            <span>P1 TIMEOUTS: {p1TimeoutsLeft}/3</span>
-          </div>
-
-          <div className="grid grid-cols-2 gap-2.5 max-w-[360px] w-full max-h-[75vh] overflow-y-auto p-1 scrollbar-thin">
-            {playbookModal === 'OFFENSE' ? (
-              <>
-                <div className="col-span-2 text-[#00ffff] text-[0.62rem] font-bold tracking-wider text-left px-1">ALIGNMENTS</div>
-                {offensiveAlignmentKeys.map(renderOffensivePlayCard)}
-                <div className="col-span-2 text-[#00ffaa] text-[0.62rem] font-bold tracking-wider text-left px-1 mt-1">RUN PLAYS</div>
-                {offensiveRunKeys.map(renderOffensivePlayCard)}
-              </>
-            ) : (
-              Object.keys(defensivePlaybook).map((key) => {
-                const play = defensivePlaybook[key];
-                return (
-                  <div
-                    key={key}
-                    onClick={() => handleSelectDefensePlay(key)}
-                    className={`bg-[#112211] border-2 rounded-lg p-2.5 text-center cursor-pointer transition hover:bg-[#1a331a] hover:scale-102 flex flex-col items-center justify-between shadow ${
-                      p1DefPlayState === key ? 'border-[#ffcc00] ring-1 ring-[#ffcc00]' : 'border-[#ff6666]'
-                    }`}
-                  >
-                    <h3 className="text-[#ffcc00] font-bold text-[0.72rem] m-0 mb-1">{play.name}</h3>
-                    <p className="text-[#adff2f] text-[0.52rem] leading-tight m-0 mb-2">{play.desc}</p>
-                    <div className="w-[100px] h-[50px] bg-[#114418] border border-white/40 rounded flex items-center justify-center overflow-hidden">
-                      <PlaySchematicMini playKey={key} isDefense={true} onRender={drawCardSchematic} />
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </div>
-
-          <div
-            onClick={() => setPlaybookModal(null)}
-            className="mt-3 text-[0.65rem] text-neutral-400 hover:text-white cursor-pointer underline underline-offset-4"
-          >
-            [ Tap anywhere here to close ]
-          </div>
-        </div>
-      )}
 
       {/* Game Manual / Help Modal */}
       {showHelp && (

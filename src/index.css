@@ -1,1 +1,19 @@
 @import "tailwindcss";
+
+@keyframes formation-slide-next {
+	from { opacity: 0.35; transform: translateX(24px); }
+	to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes formation-slide-prev {
+	from { opacity: 0.35; transform: translateX(-24px); }
+	to { opacity: 1; transform: translateX(0); }
+}
+
+.formation-slide-next {
+	animation: formation-slide-next 220ms ease-out;
+}
+
+.formation-slide-prev {
+	animation: formation-slide-prev 220ms ease-out;
+}

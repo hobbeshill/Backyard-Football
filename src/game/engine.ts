@@ -1,6 +1,6 @@
 import type { Ball, Entity, FumbleBall } from './types';
 import { defensiveKeys, defensivePlaybook, middleRoutes, offensiveKeys, offensivePlaybook, outsideRoutes, runningBackRoutes } from './playbook';
-import { alignDefenders, chooseCpuDefensiveAssignments } from './defense';
+import { alignDefenderAcrossFromRunningBack, alignDefenders, chooseCpuDefensiveAssignments } from './defense';
 import { createFumbleBall } from './fumbles';
 import { distToSegment, moveToward, resolveCollisions, updateRouteMovement } from './movement';
 import { resolvePlayResult } from './rules';
@@ -23,7 +23,6 @@ export interface GameEngineHandle {
   selectDefense: (key: string) => void;
   openPlaybook: () => void;
   openDefPlaybook: () => void;
-  applyDelayOfGame: () => void;
 }
 
 export interface GameEngineCallbacks {
@@ -124,6 +123,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   let activeDefense = 'P2';
 
   let p1OffPlay = 'SHORT_PASS';
+  let p1OffFormation: 'SPREAD' | 'STACK' | 'TRIPS' = 'SPREAD';
   let p1DefPlay = 'COVER3';
   let p2OffPlay = 'SHORT_PASS';
   let p2DefPlay = 'COVER3';
@@ -141,6 +141,14 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   let momentum = 0;
   let defenseOverrides = new Map<number, 'BLITZ' | 'MAN' | 'ZONE'>();
   let playEnding = false;
+  let formationTransitionFrame = 0;
+  let formationTransitions: Array<{
+    entity: Entity;
+    fromX: number;
+    fromY: number;
+    toX: number;
+    toY: number;
+  }> = [];
 
   function clamp(value: number, min: number, max: number): number {
     return Math.min(Math.max(value, min), max);
@@ -189,9 +197,10 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
   function applyDefenseOverrides() {
     defenders.forEach((defender, index) => {
-      const assignment = defenseOverrides.get(index);
+      const override = defenseOverrides.get(index);
+      const assignment = override ?? (defender.passRusher ? 'BLITZ' : defender.assignedReceiver ? 'MAN' : 'ZONE');
       defender.defenseAssignment = assignment;
-      if (!assignment) return;
+      if (!override) return;
       defender.passRusher = assignment === 'BLITZ';
       defender.assignedReceiver = undefined;
     });
@@ -216,6 +225,28 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           Math.hypot(second.x - defender.x, second.y - defender.y)
         )[0];
     });
+  }
+
+  function positionRBDefender() {
+    const runningBack = rb;
+    if (!runningBack || defenders.length === 0) return;
+
+    const currentMatch = defenders.find(defender => defender.assignedReceiver === runningBack && !defender.passRusher);
+    const eligibleDefenders = defenders.filter(defender => !defender.passRusher && defender.defenseAssignment !== 'BLITZ');
+    const unassignedDefenders = eligibleDefenders.filter(defender => !defender.assignedReceiver);
+    const candidates = unassignedDefenders.length > 0 ? unassignedDefenders : eligibleDefenders;
+    const rbDefender = currentMatch || candidates.slice().sort((first, second) =>
+      Math.hypot(first.x - runningBack.x, first.y - runningBack.y) - Math.hypot(second.x - runningBack.x, second.y - runningBack.y)
+    )[0];
+
+    if (!rbDefender) return;
+    const previousPosition = { x: rbDefender.x, y: rbDefender.y };
+    rbDefender.assignedReceiver = runningBack;
+    rbDefender.defenseAssignment = 'MAN';
+    alignDefenderAcrossFromRunningBack(rbDefender, runningBack, lineOfScrimmageY, attackDirection, fieldWidth);
+    if (phase === 'PRE_SNAP' && (previousPosition.x !== rbDefender.x || previousPosition.y !== rbDefender.y)) {
+      startFormationTransition([rbDefender], [previousPosition]);
+    }
   }
 
   let touchStartX = 0;
@@ -528,9 +559,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     }
 
     if (gameOver) return;
-    if (phase === 'QB_DROP' || phase === 'HANDOFF' || phase === 'RUNNING' || phase === 'THROWN' || phase === 'FUMBLE') {
-      gameClockRunning = true;
-    }
+    gameClockRunning = phase === 'QB_DROP' || phase === 'HANDOFF' || phase === 'RUNNING' || phase === 'THROWN' || phase === 'FUMBLE';
     if (!gameClockRunning) return;
 
     gameClockRemainderMs += elapsedMs;
@@ -538,6 +567,11 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       gameClockRemainderMs -= 1000;
       gameClockSeconds--;
       publishGameClock();
+      if (gameClockSeconds === 30) {
+        showAnnouncement(`30 SECONDS LEFT IN QUARTER ${quarter}`, '#ffcc00');
+      } else if (gameClockSeconds === 10) {
+        showAnnouncement(`10 SECONDS LEFT IN QUARTER ${quarter}`, '#ff6666');
+      }
       if (gameClockSeconds === 0) {
         endQuarter();
         return;
@@ -545,8 +579,11 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     }
   }
 
-  function applyDefensiveAlignment() {
+  function applyDefensiveAlignment(preservePositions = false, assignRBDefender = true) {
     const activeDefKey = (activeDefense === 'P1') ? p1DefPlay : p2DefPlay;
+    const previousPositions = preservePositions
+      ? defenders.map(({ x, y }) => ({ x, y }))
+      : null;
     alignDefenders(defenders, activeDefKey, attackDirection, lineOfScrimmageY, receivers, centerReceiver);
     if (rb && defenders[4] && !defenders[4].passRusher) {
       defenders[4].assignedReceiver = rb;
@@ -565,6 +602,13 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       );
     }
     applyDefenseOverrides();
+    if (previousPositions) {
+      defenders.forEach((defender, index) => {
+        defender.x = previousPositions[index].x;
+        defender.y = previousPositions[index].y;
+      });
+    }
+    if (assignRBDefender) positionRBDefender();
   }
 
   function swapPossession() {
@@ -631,6 +675,12 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     } else {
       updateDownDisplay();
     }
+  }
+
+  function scheduleDrillReset() {
+    setTimeout(() => {
+      resetDrill();
+    }, 1600);
   }
 
   function handlePlayEnd(endingY: number, resultType: string, customMessage?: string, customColor?: string) {
@@ -708,12 +758,30 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
     runCpuAiPlaySelection();
 
-    setTimeout(() => {
-      resetDrill();
-    }, 1600);
+    scheduleDrillReset();
   }
 
-  function resetDrill() {
+  function startFormationTransition(entities: Entity[], fromPositions: Array<{ x: number; y: number }>) {
+    formationTransitions = [];
+    if (entities.length !== fromPositions.length) return;
+    formationTransitionFrame = 0;
+    formationTransitions = entities.map((entity, index) => ({
+      entity,
+      fromX: fromPositions[index].x,
+      fromY: fromPositions[index].y,
+      toX: entity.x,
+      toY: entity.y
+    }));
+    formationTransitions.forEach(({ entity, fromX, fromY }) => {
+      entity.x = fromX;
+      entity.y = fromY;
+    });
+  }
+
+  function resetDrill(animateAlignment = false) {
+    const previousEntities = [...receivers, centerReceiver, rb, ...defenders].filter((entity): entity is Entity => entity !== null);
+    const previousPositions = animateAlignment ? previousEntities.map(({ x, y }) => ({ x, y })) : [];
+    formationTransitions = [];
     if (gameOver || quarterBreakRemainingMs > 0) return;
     phase = 'PRE_SNAP';
     playEnding = false;
@@ -764,12 +832,12 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
     const activePlayName = (activeOffense === 'P1') ? p1OffPlay : p2OffPlay;
     const activePlay = offensivePlaybook[activePlayName];
-    const alignment = activePlay.alignment || 'SPREAD';
+    const alignment = activeOffense === 'P1' ? p1OffFormation : activePlay.alignment || 'SPREAD';
     const alignmentPositions = alignment === 'STACK'
-      ? { left: 90, right: 270, center: 112, rb: 220, rbSide: 'right' as const }
+      ? { left: 90, right: 270, center: 125, rb: 220, rbSide: 'right' as const }
       : alignment === 'TRIPS'
         ? { left: 210, right: 285, center: 250, rb: 90, rbSide: 'left' as const }
-        : { left: 50, right: 290, center: 170, rb: 220, rbSide: 'right' as const };
+        : { left: 50, right: 290, center: 200, rb: 220, rbSide: 'right' as const };
 
     receivers = [
       { startX: alignmentPositions.left, startY: lineOfScrimmageY, x: alignmentPositions.left, y: lineOfScrimmageY, vx: 0, vy: 0, radius: 10, routeType: activePlay.left, routeIndex: 0, timer: 0, flash: 0, caught: false, isOutside: true, color: '#00ffff' },
@@ -802,6 +870,10 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
     defenseOverrides.clear();
     applyDefensiveAlignment();
+    if (animateAlignment) {
+      const alignedEntities = [...receivers, centerReceiver, rb, ...defenders].filter((entity): entity is Entity => entity !== null);
+      startFormationTransition(alignedEntities, previousPositions);
+    }
     activeEntity = qb;
     cpuPreSnapTimer = 0;
   }
@@ -851,7 +923,10 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     selectOffense: (key: string) => {
       if (activeOffense === 'P1' && offensivePlaybook[key]) {
         p1OffPlay = key;
-        resetDrill();
+        if (offensivePlaybook[key].alignment) {
+          p1OffFormation = offensivePlaybook[key].alignment!;
+        }
+        resetDrill(true);
       }
     },
     openPlaybook: () => {
@@ -864,20 +939,15 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         setPlaybookModal('DEFENSE');
       }
     },
-    applyDelayOfGame: () => {
-      if (phase !== 'PRE_SNAP' || gameOver || quarterBreakRemainingMs > 0) return;
-      lineOfScrimmageY -= 50 * attackDirection;
-      yardsToGo += 5;
-      updateDownDisplay();
-      showAnnouncement('DELAY OF GAME! 5-YARD PENALTY. DOWN UNCHANGED.', '#ff6666');
-    },
     selectDefense: (key: string) => {
       if (activeDefense === 'P1') {
         lastDefenseSelectTime = Date.now();
+        const previousPositions = defenders.map(({ x, y }) => ({ x, y }));
         p1DefPlay = key;
         setP1DefPlayState(key);
         defenseOverrides.clear();
         applyDefensiveAlignment();
+        startFormationTransition(defenders, previousPositions);
       }
     }
   };
@@ -930,6 +1000,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           rb.side = 'right';
           rb.startX = 220; rb.x = 220;
         }
+        positionRBDefender();
       }
       lastTapTime = 0;
       return;
@@ -954,7 +1025,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           const nextAssignment = assignments[(currentIndex + 1) % assignments.length];
           if (nextAssignment) defenseOverrides.set(defenderIndex, nextAssignment);
           else defenseOverrides.delete(defenderIndex);
-          applyDefensiveAlignment();
+          applyDefensiveAlignment(true, false);
           const announcement = nextAssignment === 'BLITZ'
             ? 'BLITZ ASSIGNED'
             : nextAssignment === 'MAN'
@@ -1153,6 +1224,17 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   }
 
   function update() {
+    if (formationTransitions.length > 0) {
+      formationTransitionFrame++;
+      const progress = Math.min(formationTransitionFrame / 18, 1);
+      const easedProgress = 1 - Math.pow(1 - progress, 3);
+      formationTransitions.forEach(({ entity, fromX, fromY, toX, toY }) => {
+        entity.x = fromX + (toX - fromX) * easedProgress;
+        entity.y = fromY + (toY - fromY) * easedProgress;
+      });
+      if (progress === 1) formationTransitions = [];
+    }
+
     if (phase === 'PRE_SNAP') {
       return;
     }
@@ -1198,6 +1280,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
               screenShakeTimer = 30;
               showAnnouncement("DEFENSE RECOVERS THE FUMBLE! TURNOVER! 🛡️⚡", "#ff3333");
               swapPossessionOnPlay(recoveryY);
+              scheduleDrillReset();
             } else {
               // Offense recovers
               screenShakeTimer = 18;
@@ -1225,6 +1308,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         if (isDefender) {
           showAnnouncement("DEFENSE FALLS ON FUMBLE! TURNOVER!", "#ff3333");
           swapPossessionOnPlay(recoveryY);
+          scheduleDrillReset();
         } else {
           showAnnouncement("OFFENSE FALLS ON FUMBLE!", "#00ffff");
           handlePlayEnd(recoveryY, 'TACKLE', 'OFFENSE RECOVERED FUMBLE');
@@ -2583,35 +2667,40 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       ctx.beginPath();
       ctx.arc(d.x, d.y, d.radius, 0, Math.PI * 2);
       ctx.fill();
-      if (activeDefense === 'P1' && d.defenseAssignment) {
-        ctx.strokeStyle = d.defenseAssignment === 'BLITZ'
-          ? '#00ff66'
-          : d.defenseAssignment === 'MAN'
-            ? '#ffcc00'
-            : '#ff3333';
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-        ctx.arc(d.x, d.y, (d.radius || 10) + 6, 0, Math.PI * 2);
-        ctx.stroke();
-      }
       ctx.strokeStyle = '#000';
       ctx.lineWidth = 2;
       ctx.stroke();
       if (activeDefense === 'P1' && d.defenseAssignment) {
-        const assignmentLabel = d.defenseAssignment === 'BLITZ'
-          ? 'B'
+        const assignmentColor = d.defenseAssignment === 'BLITZ'
+          ? '#00ff66'
           : d.defenseAssignment === 'MAN'
-            ? 'M'
-            : 'Z';
+            ? '#ffcc00'
+            : '#ff3333';
+        const radius = d.radius || 10;
         ctx.save();
-        ctx.font = 'bold 11px monospace';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.lineWidth = 2;
-        ctx.strokeStyle = '#000';
-        ctx.strokeText(assignmentLabel, d.x, d.y);
-        ctx.fillStyle = '#fff';
-        ctx.fillText(assignmentLabel, d.x, d.y);
+        ctx.strokeStyle = assignmentColor;
+        ctx.fillStyle = assignmentColor;
+        ctx.lineWidth = 2 / cameraScale;
+        ctx.lineCap = 'round';
+        if (d.defenseAssignment === 'MAN') {
+          ctx.beginPath();
+          ctx.moveTo(d.x - radius - 6, d.y);
+          ctx.lineTo(d.x + radius + 6, d.y);
+          ctx.stroke();
+        } else {
+          const direction = d.defenseAssignment === 'BLITZ' ? -attackDirection : attackDirection;
+          const startY = d.y + direction * (radius - 1);
+          const endY = d.y + direction * (radius + 8);
+          ctx.beginPath();
+          ctx.moveTo(d.x, startY);
+          ctx.lineTo(d.x, endY);
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.moveTo(d.x - 3.5, endY - direction * 3.5);
+          ctx.lineTo(d.x, endY);
+          ctx.lineTo(d.x + 3.5, endY - direction * 3.5);
+          ctx.stroke();
+        }
         ctx.restore();
       }
     });

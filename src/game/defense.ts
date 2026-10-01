@@ -8,6 +8,24 @@ export interface CpuDefenseSituation {
   recentPlays: Array<{ play: string; isPass: boolean }>;
 }
 
+export function alignDefenderAcrossFromRunningBack(
+  defender: Entity,
+  runningBack: Entity,
+  lineOfScrimmageY: number,
+  attackDirection: number,
+  fieldWidth = 340
+): void {
+  const radius = defender.radius || 10;
+  const targetX = Math.max(radius, Math.min(fieldWidth - radius, runningBack.x));
+  const targetY = lineOfScrimmageY + (24 * attackDirection);
+  defender.startX = targetX;
+  defender.startY = targetY;
+  defender.x = targetX;
+  defender.y = targetY;
+  defender.vx = 0;
+  defender.vy = 0;
+}
+
 export function alignDefenders(
   defenders: Entity[],
   playKey: string,
@@ -17,7 +35,7 @@ export function alignDefenders(
   centerReceiver: Entity | null
 ): void {
   if (defenders.length < 7) return;
-  const defOffset = 3 * attackDirection;
+  const defOffset = 24 * attackDirection;
 
   defenders.forEach(defender => {
     defender.assignedReceiver = undefined;
@@ -43,9 +61,9 @@ export function alignDefenders(
     defenders[5].startX = 170; defenders[5].startY = lineOfScrimmageY + (90 * attackDirection); defenders[5].zoneX = 170; defenders[5].zoneY = lineOfScrimmageY + (110 * attackDirection);
     defenders[6].startX = 170; defenders[6].startY = lineOfScrimmageY + (220 * attackDirection); defenders[6].zoneX = 170; defenders[6].zoneY = lineOfScrimmageY + (250 * attackDirection);
   } else if (playKey === 'COVER2MAN') {
-    defenders[1].startX = 80; defenders[1].startY = lineOfScrimmageY + (18 * attackDirection); defenders[1].assignedReceiver = receivers[0];
-    defenders[2].startX = 260; defenders[2].startY = lineOfScrimmageY + (18 * attackDirection); defenders[2].assignedReceiver = receivers[1];
-    defenders[3].startX = 175; defenders[3].startY = lineOfScrimmageY + (25 * attackDirection); defenders[3].assignedReceiver = centerReceiver;
+    defenders[1].startX = 80; defenders[1].startY = lineOfScrimmageY + (28 * attackDirection); defenders[1].assignedReceiver = receivers[0];
+    defenders[2].startX = 260; defenders[2].startY = lineOfScrimmageY + (28 * attackDirection); defenders[2].assignedReceiver = receivers[1];
+    defenders[3].startX = 175; defenders[3].startY = lineOfScrimmageY + (32 * attackDirection); defenders[3].assignedReceiver = centerReceiver;
     defenders[4].startX = 170; defenders[4].startY = lineOfScrimmageY + (65 * attackDirection); defenders[4].zoneX = 170; defenders[4].zoneY = lineOfScrimmageY + (75 * attackDirection);
     defenders[5].startX = 95; defenders[5].startY = lineOfScrimmageY + (190 * attackDirection); defenders[5].zoneX = 95; defenders[5].zoneY = lineOfScrimmageY + (230 * attackDirection);
     defenders[6].startX = 245; defenders[6].startY = lineOfScrimmageY + (190 * attackDirection); defenders[6].zoneX = 245; defenders[6].zoneY = lineOfScrimmageY + (230 * attackDirection);
@@ -58,11 +76,11 @@ export function alignDefenders(
     defenders[6].startX = 200; defenders[6].startY = lineOfScrimmageY + (200 * attackDirection); defenders[6].zoneX = 200; defenders[6].zoneY = lineOfScrimmageY + (240 * attackDirection);
   } else if (playKey === 'BLITZ') {
     defenders[0].startX = 145; defenders[0].passRusher = true;
-    defenders[1].startX = 195; defenders[1].startY = lineOfScrimmageY + (3 * attackDirection); defenders[1].type = 'DL'; defenders[1].passRusher = true;
-    defenders[2].startX = 170; defenders[2].startY = lineOfScrimmageY + (3 * attackDirection); defenders[2].type = 'DL'; defenders[2].passRusher = true;
-    defenders[3].startX = 80; defenders[3].startY = lineOfScrimmageY + (18 * attackDirection); defenders[3].assignedReceiver = receivers[0];
-    defenders[4].startX = 260; defenders[4].startY = lineOfScrimmageY + (18 * attackDirection); defenders[4].assignedReceiver = receivers[1];
-    defenders[5].startX = 175; defenders[5].startY = lineOfScrimmageY + (22 * attackDirection); defenders[5].assignedReceiver = centerReceiver;
+    defenders[1].startX = 195; defenders[1].startY = lineOfScrimmageY + (28 * attackDirection); defenders[1].type = 'DL'; defenders[1].passRusher = true;
+    defenders[2].startX = 170; defenders[2].startY = lineOfScrimmageY + (28 * attackDirection); defenders[2].type = 'DL'; defenders[2].passRusher = true;
+    defenders[3].startX = 80; defenders[3].startY = lineOfScrimmageY + (28 * attackDirection); defenders[3].assignedReceiver = receivers[0];
+    defenders[4].startX = 260; defenders[4].startY = lineOfScrimmageY + (28 * attackDirection); defenders[4].assignedReceiver = receivers[1];
+    defenders[5].startX = 175; defenders[5].startY = lineOfScrimmageY + (32 * attackDirection); defenders[5].assignedReceiver = centerReceiver;
     defenders[6].startX = 170; defenders[6].startY = lineOfScrimmageY + (70 * attackDirection); defenders[6].zoneX = 170; defenders[6].zoneY = lineOfScrimmageY + (80 * attackDirection);
   } else if (playKey === 'QUARTERS') {
     defenders[3].startX = 120; defenders[3].startY = lineOfScrimmageY + (50 * attackDirection); defenders[3].zoneX = 115; defenders[3].zoneY = lineOfScrimmageY + (65 * attackDirection); defenders[3].type = 'LB'; defenders[3].color = '#ff5555';
@@ -72,9 +90,9 @@ export function alignDefenders(
     defenders[5].startX = 125; defenders[5].startY = lineOfScrimmageY + (160 * attackDirection); defenders[5].zoneX = 120; defenders[5].zoneY = lineOfScrimmageY + (235 * attackDirection); defenders[5].type = 'FS';
     defenders[6].startX = 215; defenders[6].startY = lineOfScrimmageY + (160 * attackDirection); defenders[6].zoneX = 220; defenders[6].zoneY = lineOfScrimmageY + (235 * attackDirection); defenders[6].type = 'SS';
   } else if (playKey === 'ROBBER') {
-    defenders[1].startX = 80; defenders[1].startY = lineOfScrimmageY + (18 * attackDirection); defenders[1].assignedReceiver = receivers[0];
-    defenders[2].startX = 260; defenders[2].startY = lineOfScrimmageY + (18 * attackDirection); defenders[2].assignedReceiver = receivers[1];
-    defenders[3].startX = 175; defenders[3].startY = lineOfScrimmageY + (25 * attackDirection); defenders[3].assignedReceiver = centerReceiver;
+    defenders[1].startX = 80; defenders[1].startY = lineOfScrimmageY + (28 * attackDirection); defenders[1].assignedReceiver = receivers[0];
+    defenders[2].startX = 260; defenders[2].startY = lineOfScrimmageY + (28 * attackDirection); defenders[2].assignedReceiver = receivers[1];
+    defenders[3].startX = 175; defenders[3].startY = lineOfScrimmageY + (32 * attackDirection); defenders[3].assignedReceiver = centerReceiver;
     defenders[4].startX = 120; defenders[4].startY = lineOfScrimmageY + (50 * attackDirection); defenders[4].zoneX = 120; defenders[4].zoneY = lineOfScrimmageY + (65 * attackDirection);
     defenders[5].startX = 170; defenders[5].startY = lineOfScrimmageY + (65 * attackDirection); defenders[5].zoneX = 170; defenders[5].zoneY = lineOfScrimmageY + (65 * attackDirection);
     defenders[6].startX = 170; defenders[6].startY = lineOfScrimmageY + (220 * attackDirection); defenders[6].zoneX = 170; defenders[6].zoneY = lineOfScrimmageY + (250 * attackDirection);
