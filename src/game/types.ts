@@ -1,6 +1,6 @@
 export type PlayRisk = 'SAFE' | 'BALANCED' | 'EXPLOSIVE';
 export type RouteType = 'SHORT' | 'MEDIUM' | 'VERTICAL';
-export type DefensiveAssignment = 'BLITZ' | 'MAN' | 'ZONE';
+export type DefensiveAssignment = 'BLITZ' | 'MAN' | 'ZONE' | 'QB_SPY' | 'RB_SPY';
 
 export interface PlayOption {
   name: string;
@@ -63,6 +63,25 @@ export interface Entity {
   reactionTimer?: number;
   brokenTacklesCount?: number;
   brokenTackleStun?: number;
+  isBlocker?: boolean;
+  blockingDefender?: Entity | null;
+  jukeTimer?: number;
+  jukeVx?: number;
+  jukeCount?: number;
+  jukeCooldownTimer?: number;
+  isQbSpy?: boolean;
+  isEngagedWithBlocker?: boolean;
+  blockEngagedTimer?: number;
+  coverageMistake?: 'BIT_UNDERNEATH' | 'STUMBLE' | 'BLOWN_ZONE' | null;
+  mistakeTimer?: number;
+  mistakeAnnounced?: boolean;
+  dropStepTimer?: number;
+  isOpenDeep?: boolean;
+  speechBubble?: {
+    text: string;
+    timer: number;
+    color?: string;
+  };
 }
 
 export interface FumbleBall {

@@ -75,18 +75,31 @@ export default function App() {
       cx.arc(canvas.width / 2, canvas.height / 2 + 14, 3.5, 0, Math.PI * 2);
       cx.fill();
       cx.fillStyle = '#00ffff';
+      const play = offensivePlaybook[playKey];
+      const isCenterBlocker = play?.center === 'BLOCK';
       positions.forEach((position, index) => {
         const x = canvas.width * position / 100;
         const y = canvas.height / 2;
         cx.beginPath();
         cx.arc(x, y, 3.5, 0, Math.PI * 2);
         cx.fill();
-        cx.strokeStyle = '#00ffff';
-        cx.lineWidth = 1.2;
-        cx.beginPath();
-        cx.moveTo(x, y);
-        cx.lineTo(x + (index === 0 ? -8 : index === 2 ? 8 : 0), 8 + index * 3);
-        cx.stroke();
+        if (index === 1 && isCenterBlocker) {
+          // Center assigned block on run plays: white horizontal bar across top
+          cx.strokeStyle = '#ffffff';
+          cx.lineWidth = 1.6;
+          cx.beginPath();
+          cx.moveTo(x - 5.5, y - 4);
+          cx.lineTo(x + 5.5, y - 4);
+          cx.stroke();
+        } else {
+          cx.strokeStyle = '#00ffff';
+          cx.lineWidth = 1.2;
+          cx.beginPath();
+          cx.moveTo(x, y);
+          const destX = index === 0 ? x - 8 : (index === 1 ? x + 2 : x + 8);
+          cx.lineTo(destX, 8 + index * 3);
+          cx.stroke();
+        }
       });
       cx.fillStyle = '#00ffaa';
       cx.beginPath();
@@ -190,7 +203,10 @@ export default function App() {
       setMomentumState,
       setGameClockState: (quarter, seconds) => setGameClockState({ quarter, seconds }),
       showAnnouncement,
-      onEngineReady: engine => { engineRef.current = engine; }
+      onEngineReady: engine => { engineRef.current = engine; },
+      onFormationShifted: (direction: number) => {
+        handleShiftFormation(direction);
+      }
     });
   }, []);
 
@@ -293,112 +309,66 @@ export default function App() {
   return (
     <div className="relative w-screen h-screen overflow-hidden flex flex-col items-center justify-center bg-[#030704] text-white font-mono select-none">
       
-      {/* Top Header & Scoreboard */}
-      <header className="flex flex-col items-center justify-center z-20 mb-1 w-full max-w-[420px] px-2">
-        <div className="flex items-center justify-between w-full bg-black/85 border-2 border-[#ffcc00] px-3 py-1 rounded-md text-[0.7rem] font-bold tracking-wider shadow-lg mb-1.5">
+      {/* Top Header & Scoreboard - Uncluttered, clean, high-visibility score */}
+      <header className="flex flex-col items-center justify-center z-20 mb-1 w-full max-w-[430px] px-2 pt-1">
+        <div className="flex items-center justify-between w-full bg-black/90 border-2 border-[#ffcc00] px-3 py-1.5 rounded-lg shadow-xl">
+          {/* P2 CPU Score */}
           <div className="flex items-center gap-1.5">
-            <span className="text-red-400">P2 (CPU):</span>
-            <span className="text-white text-[0.8rem]">{cpuScore}</span>
+            <span className="text-red-400 font-extrabold text-[0.72rem] tracking-wide">P2 (CPU):</span>
+            <span className="text-white text-base font-black bg-red-950/80 border border-red-500/50 px-2 py-0.5 rounded leading-none">
+              {cpuScore}
+            </span>
           </div>
-          <div className="text-[#00ffff] font-extrabold tracking-normal">
-            {downDistanceText}
+
+          {/* Down, Distance & Quarter / Clock Center */}
+          <div className="flex flex-col items-center text-center px-1">
+            <span className="text-[#00ffff] font-extrabold text-[0.72rem] tracking-wide">
+              {downDistanceText}
+            </span>
+            <div className="flex items-center gap-2 text-[0.58rem] text-neutral-300 font-bold mt-0.5">
+              <span className="text-[#ffcc00]">Q{gameClockState.quarter}</span>
+              <span className={gameClockState.seconds <= 30 ? 'text-red-400 font-extrabold animate-pulse' : 'text-neutral-200'}>
+                {Math.floor(gameClockState.seconds / 60)}:{String(gameClockState.seconds % 60).padStart(2, '0')}
+              </span>
+              {momentumState !== 0 && (
+                <span className={momentumState > 0 ? 'text-[#00ffaa]' : 'text-[#ff6666]'}>
+                  {momentumState > 0 ? `+${momentumState}` : momentumState} MOM
+                </span>
+              )}
+            </div>
           </div>
+
+          {/* P1 YOU Score & Quick Controls */}
           <div className="flex items-center gap-1.5">
-            <span className="text-green-400">P1 (YOU):</span>
-            <span className="text-white text-[0.8rem]">{userScore}</span>
+            <span className="text-white text-base font-black bg-emerald-950/80 border border-emerald-500/50 px-2 py-0.5 rounded leading-none">
+              {userScore}
+            </span>
+            <span className="text-[#00ffaa] font-extrabold text-[0.72rem] tracking-wide">P1 (YOU)</span>
+
+            <div className="flex items-center gap-1 ml-1 border-l border-white/20 pl-1">
+              <button
+                onClick={toggleSound}
+                className="p-1 text-[#ffcc00] hover:text-white transition cursor-pointer"
+                title={soundEnabled ? "Mute" : "Unmute"}
+              >
+                {soundEnabled ? <Volume2 size={13} /> : <VolumeX size={13} className="text-neutral-500" />}
+              </button>
+              <button
+                onClick={() => setShowHelp(true)}
+                className="p-1 text-[#00ffff] hover:text-white transition cursor-pointer"
+                title="Help & Controls"
+              >
+                <HelpCircle size={13} />
+              </button>
+              <button
+                onClick={handleResetGame}
+                className="p-1 text-emerald-400 hover:text-white transition cursor-pointer"
+                title="Reset Game"
+              >
+                <RefreshCw size={13} />
+              </button>
+            </div>
           </div>
-        </div>
-
-        <div className="flex items-center justify-between w-full bg-black/75 border border-white/20 rounded-md px-2 py-0.5 text-[0.62rem] text-white/90 mb-1.5">
-          <span className="text-[#ffcc00]">Q{gameClockState.quarter}</span>
-          <span className={gameClockState.seconds <= 30 ? 'text-red-400 font-bold' : 'text-[#00ffff]'}>
-            GAME {Math.floor(gameClockState.seconds / 60)}:{String(gameClockState.seconds % 60).padStart(2, '0')}
-          </span>
-        </div>
-
-        <div className="flex items-center justify-center w-full bg-black/75 border border-[#00ffff]/60 rounded-md px-2 py-0.5 text-[0.62rem] text-white/90 mb-1.5">
-          <span className="mr-1 text-[#ffcc00]">Momentum:</span>
-          <span className={momentumState >= 0 ? 'text-[#00ffaa]' : 'text-[#ff6666]'}>{momentumState >= 0 ? '+' : ''}{momentumState}</span>
-        </div>
-
-        {/* Action Buttons Bar: Only active side is accessible to user; CPU calls its own plays */}
-        <div className="flex items-center gap-1.5 w-full justify-between">
-          {activeOffenseState === 'P1' ? (
-            <>
-              {/* P1 on Offense: Clickable Offensive Playbook */}
-              <button
-                onClick={handleOpenPlaybook}
-                className="flex-1 bg-black/85 hover:bg-neutral-900 border-2 border-[#ffcc00] px-2 py-1 rounded-md text-[0.68rem] font-bold text-center cursor-pointer transition active:scale-95 text-white flex items-center justify-center gap-1 shadow"
-                title="Choose your offensive play (Pass/Run)"
-              >
-                <span className="text-[#00ffff]">P1 OFF:</span>
-                <span className="truncate">{offensivePlaybook[p1OffPlayState]?.name || 'SHORT PASS'}</span>
-                <span className="text-[0.6rem] text-[#ffcc00] ml-0.5">▼</span>
-              </button>
-
-              {/* CPU on Defense: Autonomous CPU Defense - Non-clickable */}
-              <div
-                className="flex-1 bg-neutral-950/90 border border-neutral-700 px-2 py-1 rounded-md text-[0.68rem] font-bold text-center text-neutral-300 flex items-center justify-center gap-1 shadow select-none"
-                title="CPU Defensive Coordinator calls its own scheme autonomously"
-              >
-                <span className="text-red-400 font-extrabold">CPU DEF:</span>
-                <span className="text-white truncate">
-                  {activeOffenseState === 'P1' ? '??' : defensivePlaybook[p2DefPlayState]?.name || 'COVER 3'}
-                </span>
-                <span className="text-[0.55rem] px-1 py-0.2 bg-red-950 border border-red-500/50 text-red-300 rounded uppercase font-semibold tracking-wider">AI</span>
-              </div>
-            </>
-          ) : (
-            <>
-              {/* CPU on Offense: Autonomous CPU Offense - Non-clickable */}
-              <div
-                className="flex-1 bg-neutral-950/90 border border-neutral-700 px-2 py-1 rounded-md text-[0.68rem] font-bold text-center text-neutral-300 flex items-center justify-center gap-1 shadow select-none"
-                title="CPU Offensive Coordinator calls its own play autonomously"
-              >
-                <span className="text-red-400 font-extrabold">CPU OFF:</span>
-                <span className="text-white truncate">
-                  {activeOffenseState === 'P2' ? '??' : offensivePlaybook[p2OffPlayState]?.name || 'SHORT PASS'}
-                </span>
-                <span className="text-[0.55rem] px-1 py-0.2 bg-red-950 border border-red-500/50 text-red-300 rounded uppercase font-semibold tracking-wider">AI</span>
-              </div>
-
-              {/* P1 on Defense: Clickable Defensive Playbook */}
-              <button
-                onClick={handleOpenDefPlaybook}
-                className="flex-1 bg-black/85 hover:bg-neutral-900 border-2 border-[#ffcc00] px-2 py-1 rounded-md text-[0.68rem] font-bold text-center cursor-pointer transition active:scale-95 text-white flex items-center justify-center gap-1 shadow"
-                title="Call your defensive scheme"
-              >
-                <span className="text-[#ff6666]">P1 DEF:</span>
-                <span className="truncate">{defensivePlaybook[p1DefPlayState]?.name || 'COVER 3'}</span>
-                <span className="text-[0.6rem] text-[#ffcc00] ml-0.5">▼</span>
-              </button>
-            </>
-          )}
-
-          {/* Utility Quick Buttons */}
-          <button
-            onClick={toggleSound}
-            className="bg-black/85 hover:bg-neutral-900 border-2 border-[#ffcc00] p-1.5 rounded-md text-[#ffcc00] cursor-pointer transition active:scale-90"
-            title={soundEnabled ? "Mute Sound" : "Enable Sound"}
-          >
-            {soundEnabled ? <Volume2 size={14} /> : <VolumeX size={14} className="text-neutral-500" />}
-          </button>
-
-          <button
-            onClick={() => setShowHelp(true)}
-            className="bg-black/85 hover:bg-neutral-900 border-2 border-[#ffcc00] p-1.5 rounded-md text-[#00ffff] cursor-pointer transition active:scale-90"
-            title="View playbook manual & mechanics"
-          >
-            <HelpCircle size={14} />
-          </button>
-
-          <button
-            onClick={handleResetGame}
-            className="bg-black/85 hover:bg-neutral-900 border-2 border-[#ffcc00] p-1.5 rounded-md text-emerald-400 cursor-pointer transition active:scale-90"
-            title="Reset Ball & Scrimmage"
-          >
-            <RefreshCw size={14} />
-          </button>
         </div>
       </header>
 
@@ -423,103 +393,83 @@ export default function App() {
             onPointerDown={(event) => event.stopPropagation()}
             onPointerUp={(event) => event.stopPropagation()}
             onClick={(event) => event.stopPropagation()}
-            className="fixed bottom-2 left-1/2 -translate-x-1/2 z-30 w-[calc(100vw-28px)] max-w-[356px] pointer-events-auto"
+            className="fixed bottom-2 left-1/2 -translate-x-1/2 z-30 pointer-events-auto"
           >
-            <div className="bg-black/85 backdrop-blur-sm border border-white/35 rounded-md p-2 shadow-lg">
-              <div className="flex items-center justify-between gap-2 mb-1.5">
-                <div className="min-w-0 flex items-center gap-2">
-                  <span className={`text-[0.58rem] font-extrabold ${playbookModal === 'OFFENSE' ? 'text-[#00ffff]' : 'text-[#ff7777]'}`}>
-                    {playbookModal === 'OFFENSE' ? 'OFFENSE' : 'DEFENSE'}
-                  </span>
-                  <span className="text-[0.55rem] text-neutral-400 truncate">{downDistanceText}</span>
-                </div>
-                <div className="flex shrink-0 items-center gap-1.5">
-                  <button
-                    onClick={handleUseTimeout}
-                    className="border border-[#00ffff]/60 text-[#00ffff] px-1.5 py-1 rounded text-[0.52rem] font-bold disabled:opacity-40"
-                    disabled={p1TimeoutsLeft <= 0}
-                  >
-                    TIMEOUT
-                  </button>
-                  <button
-                    onClick={() => setPlaybookModal(null)}
-                    className="bg-[#ffcc00] text-black px-2 py-1 rounded text-[0.52rem] font-bold"
-                    aria-label="Close formation controls"
-                  >
-                    DONE
-                  </button>
-                </div>
-              </div>
+            {/* Minimized sleek formation pill */}
+            <div className="flex items-center gap-1.5 px-2.5 py-1 bg-black/75 backdrop-blur-md border border-white/20 rounded-full shadow-[0_4px_20px_rgba(0,0,0,0.6)]">
+              {/* Prev button */}
+              <button
+                onClick={() => handleShiftFormation(-1)}
+                className="w-6 h-6 flex items-center justify-center text-white/80 hover:text-white rounded-full bg-white/10 active:scale-90 transition cursor-pointer"
+                aria-label="Previous formation"
+                title="Previous formation (or swipe field)"
+              >
+                <ChevronLeft size={16} />
+              </button>
 
-              <div className="flex items-center gap-1.5">
-                <button
-                  onClick={() => handleShiftFormation(-1)}
-                  className="shrink-0 w-8 h-9 flex items-center justify-center border border-white/30 bg-neutral-900/90 text-white rounded"
-                  title="Previous formation"
-                  aria-label="Previous formation"
-                >
-                  <ChevronLeft size={18} />
-                </button>
+              {/* Swipable compact badge */}
+              <div
+                key={activeFormationKey}
+                onPointerDown={(event) => {
+                  formationSwipeStartRef.current = { x: event.clientX, y: event.clientY };
+                  event.currentTarget.setPointerCapture(event.pointerId);
+                }}
+                onPointerUp={handleFormationPointerUp}
+                onPointerCancel={() => { formationSwipeStartRef.current = null; }}
+                className="flex items-center gap-1.5 px-2 cursor-ew-resize select-none touch-pan-y"
+                title="Swipe horizontally to change formation"
+              >
+                <span className={`text-[0.65rem] font-black ${playbookModal === 'OFFENSE' ? 'text-[#00ffff]' : 'text-[#ff6666]'}`}>
+                  {playbookModal === 'OFFENSE' ? '⚡' : '🛡️'}
+                </span>
+                <span className={`text-xs font-black tracking-wider uppercase ${playbookModal === 'OFFENSE' ? 'text-[#00ffff]' : 'text-[#ff6666]'}`}>
+                  {activeFormationLabel}
+                </span>
 
-                <div
-                  key={activeFormationKey}
-                  onPointerDown={(event) => {
-                    formationSwipeStartRef.current = { x: event.clientX, y: event.clientY };
-                    event.currentTarget.setPointerCapture(event.pointerId);
-                  }}
-                  onPointerUp={handleFormationPointerUp}
-                  onPointerCancel={() => { formationSwipeStartRef.current = null; }}
-                  className={`flex-1 min-w-0 h-11 flex items-center justify-between gap-2 px-2 bg-[#102216]/95 border ${playbookModal === 'OFFENSE' ? 'border-[#00ffff]/70' : 'border-[#ff6666]/70'} rounded touch-pan-y ${formationDirection > 0 ? 'formation-slide-next' : 'formation-slide-prev'}`}
-                >
-                  <div className="min-w-0">
-                    <div className="text-[0.65rem] leading-tight text-[#ffcc00] font-extrabold truncate">
-                      {activeFormationLabel}
-                      <span className="ml-1 text-[0.52rem] text-neutral-400 font-normal">{activeFormationIndex + 1}/{formationKeys.length}</span>
-                    </div>
-                    <div className="text-[0.52rem] leading-tight text-neutral-300 truncate">{activeFormation?.desc}</div>
-                  </div>
-                  <div className="shrink-0 max-w-[82px] text-right text-[0.52rem] leading-tight text-neutral-300">
-                    Swipe to choose alignment
-                  </div>
-                </div>
-
-                <button
-                  onClick={() => handleShiftFormation(1)}
-                  className="shrink-0 w-8 h-9 flex items-center justify-center border border-white/30 bg-neutral-900/90 text-white rounded"
-                  title="Next formation"
-                  aria-label="Next formation"
-                >
-                  <ChevronRight size={18} />
-                </button>
-              </div>
-
-              <div className="flex items-center justify-center gap-2 mt-1.5">
-                {formationKeys.map((key, index) => (
-                  <button
-                    key={key}
-                    onClick={() => playbookModal === 'OFFENSE' ? handleSelectOffensePlay(key) : handleSelectDefensePlay(key)}
-                    className={`w-2 h-2 rounded-full border ${index === activeFormationIndex ? 'bg-[#ffcc00] border-[#ffcc00]' : 'bg-transparent border-white/50'}`}
-                    aria-label={`Select ${playbookModal === 'OFFENSE' ? (offensivePlaybook[key].alignment || offensivePlaybook[key].name) : defensivePlaybook[key].name}`}
-                    aria-current={index === activeFormationIndex ? 'true' : undefined}
-                  />
-                ))}
-              </div>
-
-              {playbookModal === 'OFFENSE' && (
-                <div className="flex items-center gap-1.5 mt-1.5">
-                  <span className="shrink-0 text-[0.52rem] font-bold text-neutral-400">RUN</span>
-                  {offensiveRunKeys.map(key => (
+                {/* Mini Dots */}
+                <div className="flex items-center gap-1 ml-0.5">
+                  {formationKeys.map((key, index) => (
                     <button
                       key={key}
-                      onClick={() => handleSelectOffensePlay(key)}
-                      className={`flex-1 px-1 py-1 border rounded text-[0.52rem] font-bold truncate ${p1OffPlayState === key ? 'border-[#ffcc00] text-[#ffcc00] bg-[#322800]' : 'border-neutral-600 text-neutral-300 bg-neutral-900/90'}`}
-                      aria-pressed={p1OffPlayState === key}
-                    >
-                      {offensivePlaybook[key].name.replace('RUN: ', '')}
-                    </button>
+                      onClick={() => playbookModal === 'OFFENSE' ? handleSelectOffensePlay(key) : handleSelectDefensePlay(key)}
+                      className={`w-1.5 h-1.5 rounded-full transition cursor-pointer ${index === activeFormationIndex ? 'bg-[#ffcc00] scale-125' : 'bg-white/30'}`}
+                      aria-label={`Select ${key}`}
+                    />
                   ))}
                 </div>
+              </div>
+
+              {/* Next button */}
+              <button
+                onClick={() => handleShiftFormation(1)}
+                className="w-6 h-6 flex items-center justify-center text-white/80 hover:text-white rounded-full bg-white/10 active:scale-90 transition cursor-pointer"
+                aria-label="Next formation"
+                title="Next formation (or swipe field)"
+              >
+                <ChevronRight size={16} />
+              </button>
+
+              {/* Tiny divider */}
+              <div className="w-[1px] h-3.5 bg-white/20 mx-0.5" />
+
+              {/* Timeout button if timeouts remaining */}
+              {p1TimeoutsLeft > 0 && (
+                <button
+                  onClick={handleUseTimeout}
+                  className="text-[0.55rem] font-bold text-neutral-300 hover:text-white px-1.5 py-0.5 rounded bg-white/10 cursor-pointer"
+                >
+                  TO ({p1TimeoutsLeft})
+                </button>
               )}
+
+              {/* Small ready button */}
+              <button
+                onClick={() => setPlaybookModal(null)}
+                className="bg-[#ffcc00] hover:bg-yellow-400 text-black px-2 py-0.5 rounded-full text-[0.55rem] font-black cursor-pointer shadow active:scale-95"
+                aria-label="Close formation controls"
+              >
+                READY ✓
+              </button>
             </div>
           </div>
         )}
@@ -530,8 +480,8 @@ export default function App() {
         <span className="font-bold opacity-90">v2.8.6 • 7v7 Football Sandbox</span>
         <span className="text-neutral-300">
           {activeOffenseState === 'P1'
-            ? 'Tap QB to Snap • Slingshot Throw • Swipe Juke'
-            : 'Select Defense • Tap Screen to Start Play'}
+            ? 'Draw Route Lines • Tap for Run Blocking • Tap QB to Snap'
+            : 'Flick / Tap Defenders to Assign • Tap Screen to Start Play'}
         </span>
       </footer>
 
@@ -553,21 +503,28 @@ export default function App() {
 
             <div className="space-y-3 text-[0.62rem] text-neutral-200 leading-relaxed font-mono">
               <div className="bg-black/60 p-2.5 rounded border border-neutral-800">
-                <span className="text-[#00ffff] font-bold block mb-1">1. PRE-SNAP TACTICS:</span>
+                <span className="text-[#00ffff] font-bold block mb-1">1. BACKYARD PLAYMAKER (LINE DRAWING & RUN BLOCKING):</span>
                 <ul className="list-disc list-inside space-y-1 text-neutral-300">
-                  <li><b className="text-white">Snap the Ball:</b> On offense, tap the QB (yellow circle) to snap. On defense, pick your scheme and tap anywhere on the field to start the play!</li>
-                  <li><b className="text-white">Alignments:</b> Choose Spread, Stack, or Trips before the snap to change receiver spacing, or select a run play.</li>
-                  <li><b className="text-white">Audible Routes:</b> Tap a receiver (cyan) to cycle its route. Tap the RB (green) to switch between Flat and Angle paths.</li>
+                  <li><b className="text-white">Draw Routes in the Dirt:</b> Touch any player and draw a line in the direction you want them to run:
+                    <ul className="list-disc list-inside ml-2 text-neutral-300">
+                      <li><b className="text-[#00ffaa]">Running Back (RB):</b> Straight forward line calls a <b>FLY / GO</b> route streaking deep downfield! Diagonal line calls a <b>FLAT</b> checkdown route!</li>
+                      <li><b className="text-[#00ffff]">Receivers (WR / Center):</b> Straight line = Fly, Inside diagonal = Slant, Horizontal = Cross, Outside diagonal = Corner, Pull back = Curl!</li>
+                    </ul>
+                  </li>
+                  <li><b className="text-white">Single Tap for Run Blocking:</b> Simply tap any player (WR, Center, or RB) to assign them to <b>RUN BLOCKING</b>! A white block bar appears across them and they lead-block for the runner! Tap again to toggle back to route.</li>
+                  <li><b className="text-white">Snap the Ball:</b> Tap the QB (yellow circle) to snap. On defense, tap anywhere on the field to start the play!</li>
                   <li><b className="text-white">Flip Running Back:</b> Quick double-tap left or right of center to shift the RB side.</li>
                 </ul>
               </div>
 
               <div className="bg-black/60 p-2.5 rounded border border-neutral-800">
-                <span className="text-[#ffcc00] font-bold block mb-1">2. PASSING & SCRAMBLING:</span>
+                <span className="text-[#ffcc00] font-bold block mb-1">2. PASSING & REALISTIC ARC (OVER THE LINEMEN):</span>
                 <ul className="list-disc list-inside space-y-1 text-neutral-300">
-                  <li><b className="text-white">Slingshot Pass:</b> Touch and drag backwards to aim. The yellow trajectory line and reticle show your target. Release to launch the football cleanly!</li>
-                  <li><b className="text-white">Throw to RB:</b> Aim directly at your Running Back (green circle) leaking into the flat for quick checkdowns and screen plays!</li>
-                  <li><b className="text-white">QB Scramble:</b> Tap the QB during dropback to tuck the ball and scramble as a runner!</li>
+                  <li><b className="text-white">High Clearance Over Linemen:</b> Passes release overhand from shoulder height into a realistic parabolic trajectory that climbs high over the helmets and blocks of offensive and defensive linemen in the pocket, complete with a realistic 3D turf drop shadow underneath the football!</li>
+                  <li><b className="text-white">Slingshot Pass:</b> Touch and drag backwards to aim forward. Release to launch the football cleanly!</li>
+                  <li><b className="text-white">Backward Throw / QB Run:</b> Aiming and releasing backwards turns the QB into a runner with all teammates lead-blocking!</li>
+                  <li><b className="text-white">Throw to RB:</b> Hit your Running Back streaking deep on a fly or checking down into the flat!</li>
+                  <li><b className="text-white">QB Scramble:</b> Tap the QB during dropback to tuck and scramble!</li>
                 </ul>
               </div>
 

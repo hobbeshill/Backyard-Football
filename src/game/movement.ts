@@ -25,7 +25,7 @@ export function moveToward(
   if (entity.vx === undefined) entity.vx = 0;
   if (entity.vy === undefined) entity.vy = 0;
 
-  const adjustedSpeed = maxSpeed * 0.8;
+  const adjustedSpeed = maxSpeed * 0.68;
   const angle = Math.atan2(targetY - entity.y, targetX - entity.x);
   const targetVx = Math.cos(angle) * adjustedSpeed;
   const targetVy = Math.sin(angle) * adjustedSpeed;
@@ -93,13 +93,13 @@ export function updateRouteMovement(
 
   let isCutting = false;
   if (receiver.routeType === 'SLANT-L' || receiver.routeType === 'SLANT-R') {
-    isCutting = receiver.timer >= 35 && receiver.timer <= 52;
+    isCutting = receiver.timer >= 38 && receiver.timer <= 58;
   } else if (receiver.routeType === 'FLAG-L' || receiver.routeType === 'FLAG-R') {
-    isCutting = receiver.timer >= 50 && receiver.timer <= 68;
+    isCutting = receiver.timer >= 55 && receiver.timer <= 76;
   } else if (receiver.routeType === 'COMEBACK') {
-    isCutting = receiver.timer >= 55 && receiver.timer <= 72;
+    isCutting = receiver.timer >= 60 && receiver.timer <= 80;
   } else if (receiver.routeType === 'CROSS-L' || receiver.routeType === 'CROSS-R') {
-    isCutting = receiver.timer >= 45 && receiver.timer <= 65;
+    isCutting = receiver.timer >= 50 && receiver.timer <= 72;
   }
   receiver.isCutting = isCutting;
 
@@ -113,7 +113,10 @@ export function updateRouteMovement(
     }
   }
 
-  const speed = isCutting ? (isChucked ? 1.35 : 1.76) : 1.28;
+  const isDeepRoute = receiver.routeType === 'GO' || receiver.routeType === 'FLAG-L' || receiver.routeType === 'FLAG-R';
+  const speed = isDeepRoute
+    ? (isChucked ? 1.40 : 1.95)
+    : (isCutting ? (isChucked ? 1.15 : 1.55) : 1.40);
   let targetX = receiver.x;
   let targetY = receiver.y;
 
@@ -124,22 +127,22 @@ export function updateRouteMovement(
     if (receiver.timer < 35) targetY += speed * direction;
     else { targetY += speed * 0.45 * direction; targetX += speed * 1.1; }
   } else if (receiver.routeType === 'FLAG-L') {
-    if (receiver.timer < 50) targetY += speed * direction;
-    else { targetY += speed * 0.5 * direction; targetX -= speed * 1.35; }
+    if (receiver.timer < 45) targetY += speed * 1.1 * direction;
+    else { targetY += speed * 0.7 * direction; targetX -= speed * 1.35; }
   } else if (receiver.routeType === 'FLAG-R') {
-    if (receiver.timer < 50) targetY += speed * direction;
-    else { targetY += speed * 0.5 * direction; targetX += speed * 1.35; }
+    if (receiver.timer < 45) targetY += speed * 1.1 * direction;
+    else { targetY += speed * 0.7 * direction; targetX += speed * 1.35; }
   } else if (receiver.routeType === 'COMEBACK') {
     if (receiver.timer < 55) targetY += speed * 1.15 * direction;
     else targetY -= speed * 0.75 * direction;
   } else if (receiver.routeType === 'CROSS-L') {
     if (receiver.timer < 45) targetY += speed * direction;
-    else { targetY += speed * 0.25 * direction; targetX -= speed * 1.4; }
+    else { targetY += speed * 0.35 * direction; targetX -= speed * 1.4; }
   } else if (receiver.routeType === 'CROSS-R') {
     if (receiver.timer < 45) targetY += speed * direction;
-    else { targetY += speed * 0.25 * direction; targetX += speed * 1.4; }
+    else { targetY += speed * 0.35 * direction; targetX += speed * 1.4; }
   } else if (receiver.routeType === 'GO') {
-    targetY += speed * 1.15 * direction;
+    targetY += speed * 1.25 * direction;
   }
 
   moveToward(receiver, targetX, targetY, isCutting ? 0.35 : 0.25, speed);

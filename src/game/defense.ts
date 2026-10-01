@@ -5,7 +5,21 @@ export interface CpuDefenseSituation {
   yardsToGo: number;
   lineOfScrimmageY: number;
   attackDirection: number;
-  recentPlays: Array<{ play: string; isPass: boolean }>;
+  recentPlays: Array<{
+    play: string;
+    isPass: boolean;
+    isQbRun?: boolean;
+    targetWasRb?: boolean;
+    isFlatPass?: boolean;
+    formation?: string;
+    routes?: {
+      left?: string;
+      slot?: string;
+      center?: string;
+      right?: string;
+      rb?: string;
+    };
+  }>;
 }
 
 export function alignDefenderAcrossFromRunningBack(
@@ -102,7 +116,7 @@ export function alignDefenders(
   // The coverage roles above remain the same, but defenders should not reset to
   // a stock spread when the offense stacks or overloads one side.
   const leftReceiverX = receivers[0]?.x ?? 80;
-  const rightReceiverX = receivers[1]?.x ?? 260;
+  const rightReceiverX = receivers[receivers.length - 1]?.x ?? 260;
   const slotReceiverX = centerReceiver?.x ?? 170;
   const clampX = (x: number) => Math.max(35, Math.min(305, x));
 
@@ -121,6 +135,16 @@ export function alignDefenders(
     defenders[3].startX = clampX(leftReceiverX + (slotReceiverX - leftReceiverX) * 0.35);
     defenders[4].startX = clampX(rightReceiverX + (slotReceiverX - rightReceiverX) * 0.35);
     defenders[5].startX = clampX(slotReceiverX);
+  }
+
+  // Roll safety support toward overloaded formations (like TRIPS)
+  const allReceivers = [...receivers, centerReceiver].filter((r): r is Entity => Boolean(r));
+  const rightOverload = allReceivers.filter(r => r.x > 185).length >= 3;
+  const leftOverload = allReceivers.filter(r => r.x < 155).length >= 3;
+  if (rightOverload && defenders[6] && playKey !== 'COVER2MAN') {
+    defenders[6].startX = clampX(235);
+  } else if (leftOverload && defenders[6] && playKey !== 'COVER2MAN') {
+    defenders[6].startX = clampX(105);
   }
 
   defenders.forEach(defender => {
@@ -228,6 +252,59 @@ export function chooseCpuDefensiveAssignments(
     });
     if (!chosen) break;
     assignments.set(chosen.index, 'BLITZ');
+  }
+
+  // QB Scramble & Run Adaptation:
+  // If the user has scrambled or run with the QB recently, assign a linebacker to QB_SPY to shadow the QB
+  const recentQbRuns = recentPlays.filter(play => play.isQbRun).length;
+  if (recentQbRuns >= 1) {
+    const spyCandidateIndex = [5, 4, 3].find(idx => assignments.get(idx) === 'ZONE' && defenders[idx]?.type !== 'FS')
+      ?? [5, 4, 3].find(idx => assignments.get(idx) === 'MAN' && defenders[idx]?.type !== 'FS');
+    if (spyCandidateIndex !== undefined) {
+      assignments.set(spyCandidateIndex, 'QB_SPY');
+    }
+    // If QB runs are spammed (2+ times in recent history, or back-to-back), also assign an edge contain rusher
+    if (recentQbRuns >= 2) {
+      const containCandidate = [3, 4, 2, 1].find(idx => idx !== spyCandidateIndex && assignments.get(idx) !== 'BLITZ' && defenders[idx]?.type !== 'FS' && defenders[idx]?.type !== 'SS');
+      if (containCandidate !== undefined) {
+        assignments.set(containCandidate, 'BLITZ');
+      }
+    }
+  }
+
+  // RB Pass & Flat Spam Adaptation:
+  // If the user has targeted the RB or spammed passes to the RB in the flat, assign a defender to RB_SPY
+  const recentRbPasses = recentPlays.filter(play => play.targetWasRb || play.isFlatPass || play.routes?.rb === 'FLAT').length;
+  if (recentRbPasses >= 1) {
+    const rbSpyCandidateIndex = [4, 3, 5, 2, 1].find(idx => assignments.get(idx) === 'ZONE' && defenders[idx]?.type !== 'FS' && defenders[idx]?.type !== 'SS')
+      ?? [4, 3, 5, 2, 1].find(idx => assignments.get(idx) !== 'BLITZ' && defenders[idx]?.type !== 'FS' && defenders[idx]?.type !== 'SS');
+    if (rbSpyCandidateIndex !== undefined) {
+      assignments.set(rbSpyCandidateIndex, 'RB_SPY');
+    }
+    // If RB passes/flats are spammed (2+ times), also match an extra defender to lock down the flat
+    if (recentRbPasses >= 2) {
+      const flatHelpIdx = [3, 4, 2, 1].find(idx => idx !== rbSpyCandidateIndex && assignments.get(idx) === 'ZONE' && defenders[idx]?.type !== 'FS');
+      if (flatHelpIdx !== undefined) {
+        assignments.set(flatHelpIdx, 'MAN');
+      }
+    }
+  }
+
+  // Repeated Play Spam Adaptation (same play called 2+ times in recent history or back-to-back)
+  const lastPlay = recentPlays[recentPlays.length - 1];
+  const secondLastPlay = recentPlays.length >= 2 ? recentPlays[recentPlays.length - 2] : null;
+  const isPlaySpammed = Boolean(
+    (secondLastPlay && lastPlay?.play === secondLastPlay?.play) ||
+    (recentPlays.length >= 3 && recentPlays.filter(p => p.play === lastPlay?.play).length >= 2)
+  );
+
+  const currentManCount = () => [...assignments.values()].filter(assignment => assignment === 'MAN').length;
+  if (isPlaySpammed && lastPlay?.isPass && currentManCount() < Math.min(3, eligibleReceivers.length)) {
+    // Blanket spammed pass play by matching extra receivers in tight man coverage
+    const zoneDefenderIdx = [3, 4, 2, 1].find(idx => assignments.get(idx) === 'ZONE');
+    if (zoneDefenderIdx !== undefined) {
+      assignments.set(zoneDefenderIdx, 'MAN');
+    }
   }
 
   return assignments;

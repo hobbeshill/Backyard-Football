@@ -6,7 +6,7 @@ export const offensivePlaybook: Record<string, PlayOption> = {
     type: 'PASS',
     alignment: 'SPREAD',
     left: 'SLANT-L',
-    right: 'QUICK-OUT',
+    right: 'SLANT-R',
     center: 'SLANT-R',
     rbRoute: 'FLAT',
     desc: 'Balanced spacing with quick timing routes',
@@ -51,7 +51,7 @@ export const offensivePlaybook: Record<string, PlayOption> = {
     type: 'ISO',
     left: 'GO',
     right: 'GO',
-    center: 'SLANT-R',
+    center: 'BLOCK',
     rbRoute: 'FLAT',
     desc: 'Tap the RB to choose the inside or angle path',
     risk: 'BALANCED',
@@ -65,7 +65,7 @@ export const offensivePlaybook: Record<string, PlayOption> = {
     type: 'SWEEP',
     left: 'GO',
     right: 'GO',
-    center: 'SLANT-R',
+    center: 'BLOCK',
     rbRoute: 'FLAT',
     desc: 'Outside edge attack vs coverage',
     risk: 'BALANCED',
@@ -79,7 +79,7 @@ export const offensivePlaybook: Record<string, PlayOption> = {
     type: 'POWER',
     left: 'GO',
     right: 'GO',
-    center: 'SLANT-R',
+    center: 'BLOCK',
     rbRoute: 'FLAT',
     desc: 'Off-tackle smash with WR blocking',
     risk: 'SAFE',
@@ -131,6 +131,7 @@ export const defensivePlaybook: Record<string, DefOption> = {
 
 export const defensiveKeys = Object.keys(defensivePlaybook);
 export const offensiveKeys = Object.keys(offensivePlaybook);
-export const outsideRoutes = ['SLANT-L', 'SLANT-R', 'FLAG-L', 'FLAG-R', 'COMEBACK', 'GO'];
-export const middleRoutes = ['SLANT-L', 'SLANT-R', 'CROSS-L', 'CROSS-R', 'COMEBACK'];
-export const runningBackRoutes = ['FLAT', 'ANGLE'];
+export const wrRoutes = ['SLANT-L', 'SLANT-R', 'FLAG-L', 'FLAG-R', 'COMEBACK', 'CROSS-L', 'CROSS-R', 'GO', 'BLOCK'];
+export const outsideRoutes = wrRoutes;
+export const middleRoutes = wrRoutes;
+export const runningBackRoutes = ['FLAT', 'GO', 'ANGLE', 'BLOCK'];
