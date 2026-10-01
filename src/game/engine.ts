@@ -60,6 +60,9 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   const fieldWidth = 340;
   const fieldHeight = 1200;
   const endZoneHeight = 100;
+  const cameraRunoff = 225;
+  const cameraWorldTop = -cameraRunoff;
+  const cameraWorldBottom = fieldHeight + cameraRunoff;
 
   let cameraY = 0;
   let currentViewHeight = 450;
@@ -805,7 +808,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     cameraScale = 1.0;
     cameraOffsetX = 0;
 
-    cameraY = Math.max(0, Math.min(fieldHeight - 450, lineOfScrimmageY - 210));
+    cameraY = Math.max(cameraWorldTop, Math.min(cameraWorldBottom - 450, lineOfScrimmageY - 225));
     updateDownDisplay();
 
     if (activeOffense === 'P2') {
@@ -2271,7 +2274,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     }
 
     // --- DYNAMIC CAMERA & VIEWPORT AUTO-ZOOM ---
-    const baseScrimmageCamY = Math.max(0, Math.min(fieldHeight - 450, lineOfScrimmageY - 210));
+    const baseScrimmageCamY = Math.max(cameraWorldTop, Math.min(cameraWorldBottom - 450, lineOfScrimmageY - 225));
     let targetViewHeight = 450;
     let targetCamY = baseScrimmageCamY;
 
@@ -2385,8 +2388,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     cameraOffsetX = (canvas!.width - fieldWidth * cameraScale) / 2;
 
     // Clamp camera vertical position to field boundaries
-    const maxCamY = fieldHeight - currentViewHeight;
-    const minCamY = 0;
+    const maxCamY = cameraWorldBottom - currentViewHeight;
+    const minCamY = cameraWorldTop;
     targetCamY = Math.max(minCamY, Math.min(maxCamY, targetCamY));
     cameraY += (targetCamY - cameraY) * 0.10;
     cameraY = Math.max(minCamY, Math.min(maxCamY, cameraY));
@@ -2464,14 +2467,14 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
     // Playing field surface
     ctx.fillStyle = '#176620';
-    ctx.fillRect(20, endZoneHeight, fieldWidth - 40, fieldHeight - 2 * endZoneHeight);
+    ctx.fillRect(20, cameraWorldTop, fieldWidth - 40, cameraWorldBottom - cameraWorldTop);
 
     // Sideline boundaries
     ctx.strokeStyle = '#ffffff';
     ctx.lineWidth = 3;
     ctx.beginPath();
-    ctx.moveTo(20, 0); ctx.lineTo(20, fieldHeight);
-    ctx.moveTo(fieldWidth - 20, 0); ctx.lineTo(fieldWidth - 20, fieldHeight);
+    ctx.moveTo(20, cameraWorldTop); ctx.lineTo(20, cameraWorldBottom);
+    ctx.moveTo(fieldWidth - 20, cameraWorldTop); ctx.lineTo(fieldWidth - 20, cameraWorldBottom);
     ctx.stroke();
 
     // Field turf pattern
@@ -2492,6 +2495,16 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         ctx.font = 'bold 16px Courier New, monospace';
         ctx.textAlign = 'left';
         ctx.fillText(yardNum.toString(), 30, y + 6);
+
+        // End-zone back boundaries
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 6;
+        ctx.beginPath();
+        ctx.moveTo(20, 0);
+        ctx.lineTo(fieldWidth - 20, 0);
+        ctx.moveTo(20, fieldHeight);
+        ctx.lineTo(fieldWidth - 20, fieldHeight);
+        ctx.stroke();
         ctx.textAlign = 'right';
         ctx.fillText(yardNum.toString(), fieldWidth - 30, y + 6);
       }
