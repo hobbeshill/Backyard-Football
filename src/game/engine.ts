@@ -1550,10 +1550,6 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           rb.side = 'right';
           rb.startX = 220; rb.x = 220;
         }
-        positionRBDefender();
-        if (activeDefense === 'P2') {
-          applyDefensiveAlignment(true, true);
-        }
         lastTapTime = 0;
         return;
       }
@@ -3863,6 +3859,119 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     }
   }
 
+  function drawHelmet(entity: Entity, shellColor: string, stripeColor: string, forwardDirection: number) {
+    const radius = entity.radius;
+    const velocityX = entity.vx || 0;
+    const velocityY = entity.vy || 0;
+    const moving = Math.hypot(velocityX, velocityY) > 0.5;
+    const rotation = moving
+      ? Math.atan2(velocityX, -velocityY)
+      : forwardDirection === -1 ? 0 : Math.PI;
+    const drawShellPath = () => {
+      ctx!.beginPath();
+      ctx!.moveTo(-radius * 0.68, radius * 0.42);
+      ctx!.quadraticCurveTo(-radius * 0.96, radius * 0.08, -radius * 0.82, -radius * 0.48);
+      ctx!.quadraticCurveTo(-radius * 0.68, -radius * 1.04, 0, -radius * 1.08);
+      ctx!.quadraticCurveTo(radius * 0.68, -radius * 1.04, radius * 0.82, -radius * 0.48);
+      ctx!.quadraticCurveTo(radius * 0.96, radius * 0.08, radius * 0.68, radius * 0.42);
+      ctx!.quadraticCurveTo(0, radius * 1.08, -radius * 0.68, radius * 0.42);
+      ctx!.closePath();
+    };
+
+    ctx!.save();
+    ctx!.translate(entity.x, entity.y);
+    ctx!.rotate(rotation);
+    ctx!.fillStyle = shellColor;
+    drawShellPath();
+    ctx!.fill();
+    ctx!.strokeStyle = '#111820';
+    ctx!.lineWidth = Math.max(1.3, radius * 0.16);
+    ctx!.stroke();
+
+    ctx!.save();
+    drawShellPath();
+    ctx!.clip();
+    const shellShade = ctx!.createLinearGradient(-radius, 0, radius, 0);
+    shellShade.addColorStop(0, 'rgba(255, 255, 255, 0.3)');
+    shellShade.addColorStop(0.48, 'rgba(255, 255, 255, 0.02)');
+    shellShade.addColorStop(1, 'rgba(0, 0, 0, 0.32)');
+    ctx!.fillStyle = shellShade;
+    ctx!.fillRect(-radius, -radius * 1.1, radius * 2, radius * 2.2);
+    ctx!.restore();
+
+    ctx!.save();
+    ctx!.scale(0.86, 0.86);
+    drawShellPath();
+    ctx!.strokeStyle = 'rgba(255, 255, 255, 0.34)';
+    ctx!.lineWidth = Math.max(0.8, radius * 0.07);
+    ctx!.stroke();
+    ctx!.restore();
+
+    for (const side of [-1, 1]) {
+      ctx!.fillStyle = '#111820';
+      ctx!.beginPath();
+      ctx!.ellipse(side * radius * 0.72, radius * 0.03, radius * 0.13, radius * 0.18, side * 0.12, 0, Math.PI * 2);
+      ctx!.fill();
+      ctx!.fillStyle = 'rgba(255, 255, 255, 0.3)';
+      ctx!.beginPath();
+      ctx!.ellipse(side * radius * 0.72, radius * 0.03, radius * 0.055, radius * 0.085, side * 0.12, 0, Math.PI * 2);
+      ctx!.fill();
+    }
+
+    ctx!.fillStyle = '#202a32';
+    ctx!.beginPath();
+    ctx!.moveTo(-radius * 0.43, radius * 0.73);
+    ctx!.quadraticCurveTo(0, radius * 0.99, radius * 0.43, radius * 0.73);
+    ctx!.lineTo(radius * 0.34, radius * 0.59);
+    ctx!.quadraticCurveTo(0, radius * 0.78, -radius * 0.34, radius * 0.59);
+    ctx!.closePath();
+    ctx!.fill();
+    ctx!.strokeStyle = 'rgba(255, 255, 255, 0.26)';
+    ctx!.lineWidth = Math.max(0.7, radius * 0.06);
+    ctx!.stroke();
+
+    ctx!.strokeStyle = 'rgba(0, 0, 0, 0.42)';
+    ctx!.lineWidth = Math.max(2.4, radius * 0.3);
+    ctx!.lineCap = 'round';
+    ctx!.beginPath();
+    ctx!.moveTo(0, -radius * 0.84);
+    ctx!.lineTo(0, radius * 0.68);
+    ctx!.stroke();
+    ctx!.strokeStyle = stripeColor;
+    ctx!.lineWidth = Math.max(1.5, radius * 0.2);
+    ctx!.stroke();
+
+    ctx!.strokeStyle = '#111820';
+    ctx!.lineWidth = Math.max(2.4, radius * 0.26);
+    ctx!.beginPath();
+    ctx!.moveTo(-radius * 0.64, -radius * 0.49);
+    ctx!.quadraticCurveTo(0, -radius * 1.04, radius * 0.64, -radius * 0.49);
+    ctx!.moveTo(-radius * 0.52, -radius * 0.39);
+    ctx!.lineTo(radius * 0.52, -radius * 0.39);
+    ctx!.moveTo(-radius * 0.35, -radius * 0.57);
+    ctx!.lineTo(-radius * 0.35, -radius * 0.25);
+    ctx!.moveTo(0, -radius * 0.72);
+    ctx!.lineTo(0, -radius * 0.22);
+    ctx!.moveTo(radius * 0.35, -radius * 0.57);
+    ctx!.lineTo(radius * 0.35, -radius * 0.25);
+    ctx!.stroke();
+    ctx!.strokeStyle = '#f4f1e8';
+    ctx!.lineWidth = Math.max(1, radius * 0.1);
+    ctx!.stroke();
+    ctx!.restore();
+  }
+
+  function getColorLuminance(color: string) {
+    const hex = color.replace('#', '');
+    if (hex.length !== 6) return 1;
+    const channels = [0, 2, 4].map(index => Number.parseInt(hex.slice(index, index + 2), 16) / 255);
+    if (channels.some(channel => !Number.isFinite(channel))) return 1;
+    const [red, green, blue] = channels.map(channel =>
+      channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4
+    );
+    return red * 0.2126 + green * 0.7152 + blue * 0.0722;
+  }
+
   function draw() {
     if (!ctx || !canvas) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -3997,15 +4106,28 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       ctx.stroke();
     }
 
-    // QB Rendering
-    ctx.fillStyle = (activeEntity === qb) ? '#ff00ff' : qb.color || '#ffcc00';
-    if ((qb.powerBoostTimer || 0) > 0) ctx.fillStyle = '#00ffff';
-    ctx.beginPath();
-    ctx.arc(qb.x, qb.y, qb.radius, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = '#fff';
-    ctx.lineWidth = 2;
-    ctx.stroke();
+    const offenseTeam = activeOffense === 'P1' ? p1Team : p2Team;
+    const defenseTeam = activeDefense === 'P1' ? p1Team : p2Team;
+    const bothTeamsHaveDarkHelmets = getColorLuminance(p1Team.primaryColor) < 0.18
+      && getColorLuminance(p2Team.primaryColor) < 0.18;
+    const getHelmetColors = (team: TeamProfile, isP2: boolean) => {
+      const useWhiteShell = bothTeamsHaveDarkHelmets && isP2;
+      return {
+        shell: useWhiteShell ? '#f4f1e8' : team.primaryColor,
+        stripe: useWhiteShell ? team.primaryColor : team.secondaryColor
+      };
+    };
+    const offenseHelmet = getHelmetColors(offenseTeam, activeOffense === 'P2');
+    const defenseHelmet = getHelmetColors(defenseTeam, activeDefense === 'P2');
+
+    drawHelmet(qb, offenseHelmet.shell, offenseHelmet.stripe, attackDirection);
+    if (activeEntity === qb || (qb.powerBoostTimer || 0) > 0) {
+      ctx.strokeStyle = (qb.powerBoostTimer || 0) > 0 ? '#00ffff' : '#ff00ff';
+      ctx.lineWidth = 2.5 / cameraScale;
+      ctx.beginPath();
+      ctx.arc(qb.x, qb.y, qb.radius + 3, 0, Math.PI * 2);
+      ctx.stroke();
+    }
     if (qb.hasBall) {
       ctx.fillStyle = '#d2691e';
       ctx.beginPath();
@@ -4090,24 +4212,19 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
     // Linemen
     linemen.forEach(l => {
-      ctx.fillStyle = '#1e90ff';
-      ctx.beginPath();
-      ctx.arc(l.x, l.y, l.radius, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = '#fff';
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
+      drawHelmet(l, offenseHelmet.shell, offenseHelmet.stripe, attackDirection);
     });
 
     // Center Receiver
     if (centerReceiver) {
-      ctx.fillStyle = (centerReceiver.flash || 0) > 0 ? '#00ff00' : centerReceiver.color || '#00ffff';
-      ctx.beginPath();
-      ctx.arc(centerReceiver.x, centerReceiver.y, centerReceiver.radius, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = '#000';
-      ctx.lineWidth = 2;
-      ctx.stroke();
+      drawHelmet(centerReceiver, offenseHelmet.shell, offenseHelmet.stripe, attackDirection);
+      if ((centerReceiver.flash || 0) > 0) {
+        ctx.strokeStyle = '#00ff00';
+        ctx.lineWidth = 2.5 / cameraScale;
+        ctx.beginPath();
+        ctx.arc(centerReceiver.x, centerReceiver.y, centerReceiver.radius + 3, 0, Math.PI * 2);
+        ctx.stroke();
+      }
 
       // The center should always be assigned pass block and act as the RB does when he is pass blocking
       if (centerReceiver.isBlocker || centerReceiver.routeType === 'BLOCK') {
@@ -4126,13 +4243,14 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
     // Receivers
     receivers.forEach(r => {
-      ctx.fillStyle = (r.flash || 0) > 0 ? '#00ff00' : r.color || '#00ffff';
-      ctx.beginPath();
-      ctx.arc(r.x, r.y, r.radius, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = '#000';
-      ctx.lineWidth = 2;
-      ctx.stroke();
+      drawHelmet(r, offenseHelmet.shell, offenseHelmet.stripe, attackDirection);
+      if ((r.flash || 0) > 0) {
+        ctx.strokeStyle = '#00ff00';
+        ctx.lineWidth = 2.5 / cameraScale;
+        ctx.beginPath();
+        ctx.arc(r.x, r.y, r.radius + 3, 0, Math.PI * 2);
+        ctx.stroke();
+      }
 
       if (r.isBlocker || r.routeType === 'BLOCK') {
         const barWidth = r.radius * 2 + 10;
@@ -4167,14 +4285,14 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
     // Running Back
     if (rb) {
-      ctx.fillStyle = (activeEntity === rb) ? '#ff00ff' : rb.color || '#00ffaa';
-      if ((rb.powerBoostTimer || 0) > 0) ctx.fillStyle = '#00ffff';
-      ctx.beginPath();
-      ctx.arc(rb.x, rb.y, rb.radius, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = '#000';
-      ctx.lineWidth = 2;
-      ctx.stroke();
+      drawHelmet(rb, offenseHelmet.shell, offenseHelmet.stripe, attackDirection);
+      if (activeEntity === rb || (rb.powerBoostTimer || 0) > 0) {
+        ctx.strokeStyle = (rb.powerBoostTimer || 0) > 0 ? '#00ffff' : '#ff00ff';
+        ctx.lineWidth = 2.5 / cameraScale;
+        ctx.beginPath();
+        ctx.arc(rb.x, rb.y, rb.radius + 3, 0, Math.PI * 2);
+        ctx.stroke();
+      }
 
       // When he is a blocker, place a white line horizontal across the top of the circle, wider than the circle to signify blocking
       if (rb.isBlocker || rb.routeType === 'BLOCK') {
@@ -4226,13 +4344,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         ctx.stroke();
         ctx.restore();
       }
-      ctx.fillStyle = d.color || '#ff3333';
-      ctx.beginPath();
-      ctx.arc(d.x, d.y, d.radius, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = '#000';
-      ctx.lineWidth = 2;
-      ctx.stroke();
+      drawHelmet(d, defenseHelmet.shell, defenseHelmet.stripe, -attackDirection);
       if (isInterceptionReturn && d === activeEntity) {
         ctx.save();
         ctx.strokeStyle = '#ffd166';

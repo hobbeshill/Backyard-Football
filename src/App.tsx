@@ -5,6 +5,19 @@ import { sounds } from './game/sound';
 import { mountFootballGame, type GameEngineHandle } from './game/engine';
 import { TEAMS, getAllTeams, type TeamProfile } from './game/teams';
 
+function getTeamTextStyle(color: string) {
+  const hex = color.replace('#', '');
+  const channels = [0, 2, 4].map(index => Number.parseInt(hex.slice(index, index + 2), 16) / 255);
+  const luminance = channels
+    .map(channel => channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4)
+    .reduce((total, channel, index) => total + channel * [0.2126, 0.7152, 0.0722][index], 0);
+
+  return {
+    color,
+    backgroundColor: luminance < 0.18 ? '#f2f5f2' : undefined
+  };
+}
+
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   
@@ -278,16 +291,16 @@ export default function App() {
           title="Change Teams, Rosters & Strengths/Weaknesses"
         >
           <Users size={11} className="text-[#ffcc00]" />
-          <span style={{ color: p1TeamState.primaryColor }}>{p1TeamState.nickname.toUpperCase()}</span>
+          <span className="rounded-sm px-0.5" style={getTeamTextStyle(p1TeamState.primaryColor)}>{p1TeamState.nickname.toUpperCase()}</span>
           <span className="text-neutral-400 font-normal">VS</span>
-          <span style={{ color: p2TeamState.primaryColor }}>{p2TeamState.nickname.toUpperCase()}</span>
+          <span className="rounded-sm px-0.5" style={getTeamTextStyle(p2TeamState.primaryColor)}>{p2TeamState.nickname.toUpperCase()}</span>
           <span className="text-[#ffcc00] ml-1">▾ TEAMS</span>
         </button>
 
         <div className="flex items-center justify-between w-full bg-black/90 border-2 border-[#ffcc00] px-3 py-1.5 rounded-lg shadow-xl">
           {/* P2 CPU Score */}
           <div className="flex items-center gap-1.5">
-            <span className="font-extrabold text-[0.68rem] tracking-wide" style={{ color: p2TeamState.primaryColor }}>
+            <span className="rounded-sm px-0.5 font-extrabold text-[0.68rem] tracking-wide" style={getTeamTextStyle(p2TeamState.primaryColor)}>
               {p2TeamState.nickname.toUpperCase()} (CPU):
             </span>
             <span className="text-white text-base font-black bg-red-950/80 border border-red-500/50 px-2 py-0.5 rounded leading-none">
@@ -318,7 +331,7 @@ export default function App() {
             <span className="text-white text-base font-black bg-emerald-950/80 border border-emerald-500/50 px-2 py-0.5 rounded leading-none">
               {userScore}
             </span>
-            <span className="font-extrabold text-[0.68rem] tracking-wide" style={{ color: p1TeamState.primaryColor }}>
+            <span className="rounded-sm px-0.5 font-extrabold text-[0.68rem] tracking-wide" style={getTeamTextStyle(p1TeamState.primaryColor)}>
               {p1TeamState.nickname.toUpperCase()} (YOU)
             </span>
 
@@ -384,7 +397,7 @@ export default function App() {
       {banner.visible && (
         <div
           className={`absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-black/95 border-3 rounded-lg font-extrabold text-center z-50 tracking-wider shadow-[0_5px_30px_rgba(0,0,0,0.9)] animate-pulse ${banner.big ? 'max-w-[92vw] px-4 py-4 text-2xl leading-tight' : 'max-w-[90vw] px-6 py-3 text-[0.95rem]'}`}
-          style={{ borderColor: banner.color, color: banner.color }}
+          style={{ borderColor: banner.color, ...getTeamTextStyle(banner.color) }}
         >
           {banner.text}
         </div>
