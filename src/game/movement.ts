@@ -2,6 +2,10 @@ import type { Entity } from './types';
 
 export const GAME_SPEED_SCALE = 0.77;
 
+export function canEngagePassBlock(blocker: Entity, rusher: Entity): boolean {
+  return Math.hypot(rusher.x - blocker.x, rusher.y - blocker.y) <= blocker.radius + rusher.radius + 6;
+}
+
 export function distToSegment(
   p1: { x: number; y: number },
   p2: { x: number; y: number },

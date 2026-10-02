@@ -1,9 +1,9 @@
 import type { Ball, Entity, FumbleBall } from './types';
 import { defensiveKeys, defensivePlaybook, middleRoutes, offensiveKeys, offensivePlaybook, outsideRoutes, runningBackRoutes, wrRoutes } from './playbook';
-import { alignDefenderAcrossFromRunningBack, alignDefenders, chooseCpuDefensiveAssignments } from './defense';
+import { alignDefenderAcrossFromRunningBack, alignDefenders, chooseCpuDefensiveAssignments, getBracketCoverageTarget, matchCpuDefendersToReceivers } from './defense';
 import { evaluateCpuOffensiveAudibles, evaluateCpuBallCarrierMoves, shouldCpuReleasePass, shouldCpuScramble, scoreRunBlockTarget } from './ai';
 import { createFumbleBall } from './fumbles';
-import { distToSegment, GAME_SPEED_SCALE, moveToward, resolveCollisions, updateRouteMovement } from './movement';
+import { canEngagePassBlock, distToSegment, GAME_SPEED_SCALE, moveToward, resolveCollisions, updateRouteMovement } from './movement';
 import { resolvePlayResult, calculateBrokenTackleChance, calculateYardsToGo, getDriveStartY, getSnapBallPosition, getPassArcHeight, getPassArcMaxHeight, getPassFlightFrames, findTappedPassReceiver, getPassLeadTarget, getRoutePassLeadTarget, canDefenderDeflectPass, canTackleQuarterback, resolveCatchContestOutcome, evaluateQbThrowAccuracy } from './rules';
 import { sounds } from './sound';
 import { evaluateDirtSwipeGesture, drawDirtSwipeGesture } from './chalkMenu';
@@ -330,9 +330,10 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     });
 
     const eligibleReceivers = [...receivers, centerReceiver, rb]
-      .filter((receiver): receiver is Entity => receiver !== null && !receiver.caught);
+      .filter((receiver): receiver is Entity => receiver !== null && !receiver.caught && !receiver.isBlocker && receiver.routeType !== 'BLOCK');
 
     defenders.forEach((defender, index) => {
+      if (activeDefense === 'P2') return;
       if (defenseOverrides.get(index) !== 'MAN') return;
       const coveredReceivers = new Set(
         defenders
@@ -349,11 +350,20 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           Math.hypot(second.x - defender.x, second.y - defender.y)
         )[0];
     });
+    if (activeDefense === 'P2') {
+      matchCpuDefendersToReceivers(defenders, [...receivers, centerReceiver, rb].filter((receiver): receiver is Entity => receiver !== null), {
+        down: currentDown,
+        yardsToGo,
+        lineOfScrimmageY,
+        attackDirection,
+        recentPlays: userPlayHistory
+      });
+    }
   }
 
   function positionRBDefender() {
     const runningBack = rb;
-    if (!runningBack || defenders.length === 0) return;
+    if (!runningBack || runningBack.isBlocker || runningBack.routeType === 'BLOCK' || defenders.length === 0) return;
 
     const currentMatch = defenders.find(defender => defender.assignedReceiver === runningBack && !defender.passRusher);
     const eligibleDefenders = defenders.filter(defender => !defender.passRusher && defender.defenseAssignment !== 'BLITZ');
@@ -376,7 +386,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   function executeAiPreSnapShift(): void {
     if (activeDefense !== 'P2' || defenders.length === 0) return;
     const recentRbPasses = userPlayHistory.slice(-4).filter(p => p.targetWasRb || p.isFlatPass || p.routes?.rb === 'FLAT').length;
-    if (recentRbPasses >= 1 && rb) {
+    if (recentRbPasses >= 1 && rb && !rb.isBlocker && rb.routeType !== 'BLOCK') {
       const targetSideX = rb.x > 170 ? Math.min(270, rb.x + 25) : Math.max(70, rb.x - 25);
       const flatDef = defenders.find(d => d && (d.defenseAssignment === 'RB_SPY' || d.assignedReceiver === rb))
         || defenders[4] || defenders[3];
@@ -386,7 +396,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       }
     } else {
       const lb = defenders[3] || defenders[4];
-      if (lb && (currentDown === 3 || currentDown === 4) && yardsToGo <= 3) {
+      if (lb && !lb.coverageLeverage && (currentDown === 3 || currentDown === 4) && yardsToGo <= 3) {
         lb.startY = lineOfScrimmageY + (16 * attackDirection);
       }
     }
@@ -401,6 +411,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   let aimCurrentX = 0, aimCurrentY = 0;
   let aimScreenCurrentX = 0, aimScreenCurrentY = 0;
   let lastTapTime = 0;
+  let rbDoubleTapConsumed = false;
   let lastDefenseSelectTime = 0;
 
   function getScreenCoords(clientX: number, clientY: number): { x: number; y: number } {
@@ -1417,6 +1428,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
   // Pointer events
   const handlePointerDown = (e: PointerEvent) => {
+    rbDoubleTapConsumed = false;
     const { x: px, y: py } = screenToWorld(e.clientX, e.clientY);
     const screenPos = getScreenCoords(e.clientX, e.clientY);
 
@@ -1542,9 +1554,12 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       // 4. Open grass touch: Record start position for field swipe formation change!
       preSnapFieldSwipeStartX = px;
       preSnapFieldSwipeStartY = py;
+      touchScreenStartX = e.clientX;
+      touchScreenStartY = e.clientY;
 
       // Double tap empty field flips RB side
       if (activeOffense === 'P1' && currentTime - lastTapTime < 350 && rb) {
+        rbDoubleTapConsumed = true;
         if (px < fieldWidth / 2) {
           rb.side = 'left';
           rb.startX = 120; rb.x = 120;
@@ -1640,6 +1655,10 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   };
 
   const handlePointerUp = (e: PointerEvent) => {
+    if (rbDoubleTapConsumed) {
+      rbDoubleTapConsumed = false;
+      return;
+    }
     if (phase === 'PRE_SNAP') {
       const { x: curX, y: curY } = screenToWorld(e.clientX, e.clientY);
       const screenDeltaX = e.clientX - touchScreenStartX;
@@ -2614,14 +2633,10 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         const baseHoldTime = hasExtraBlitzer ? 140 : 310;
         const blockHoldTime = Math.round(baseHoldTime * (offTeam.ratings.passProtection || 1.0) / (defTeam.ratings.passRush || 1.0));
 
-        if (passRushers.length > 0) {
+        if (passRushers.length > 0 && canEngagePassBlock(l, passRushers[0])) {
           const interiorRusher = passRushers[0];
           if ((l.blockTimer || 0) <= blockHoldTime) {
             interiorRusher.isEngagedWithBlocker = true;
-            interiorRusher.x = 170;
-            interiorRusher.y = lineOfScrimmageY + (3 * attackDirection);
-            l.x = 170;
-            l.y = lineOfScrimmageY - (3 * attackDirection);
             interiorRusher.vx = 0;
             interiorRusher.vy = 0;
           } else {
@@ -2635,12 +2650,9 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       if (phase === 'QB_DROP' && passRushers.length > 1) {
         passRushers.slice(1).forEach((extraRusher, idx) => {
           const matchingBlocker = extraPassBlockers[idx];
-          if (matchingBlocker) {
+          if (matchingBlocker && canEngagePassBlock(matchingBlocker, extraRusher)) {
             // Extra blocker meets and stones the extra blitzer!
             extraRusher.isEngagedWithBlocker = true;
-            extraRusher.x = matchingBlocker.x;
-            extraRusher.y = lineOfScrimmageY + (6 * attackDirection);
-            matchingBlocker.y = lineOfScrimmageY - (4 * attackDirection);
             extraRusher.vx = 0;
             extraRusher.vy = 0;
           } else {
@@ -2775,16 +2787,12 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
         if (targetRusher) {
           moveToward(blocker, (targetRusher as Entity).x, (targetRusher as Entity).y, 0.42, 2.1);
-          const distToRusher = Math.hypot(blocker.x - (targetRusher as Entity).x, blocker.y - (targetRusher as Entity).y);
-          if (distToRusher < (blocker.radius || 10) + (targetRusher as Entity).radius + 6) {
+          if (canEngagePassBlock(blocker, targetRusher as Entity)) {
             // Engage pass protection block: stop the rusher
             (targetRusher as Entity).isEngagedWithBlocker = true;
             (targetRusher as Entity).blockEngagedTimer = ((targetRusher as Entity).blockEngagedTimer || 0) + 1;
             (targetRusher as Entity).vx = 0;
             (targetRusher as Entity).vy = 0;
-            const offsetDir = blocker.x >= qb.x ? 8 : -8;
-            (targetRusher as Entity).x = blocker.x + offsetDir;
-            (targetRusher as Entity).y = blocker.y + (3 * attackDirection);
           }
         } else {
           moveToward(blocker, defaultBlockX, defaultBlockY, 0.28, 1.4);
@@ -3241,11 +3249,18 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           targetY = (rec.routeType === 'COMEBACK' && (rec.timer || 0) >= 50) ? rec.y - (4 * dir) : rec.y + ((isSpammed ? 3 : 10) * dir);
           moveSpeed = isSpammed ? 1.94 : 1.76;
           moveAccel = isSpammed ? 0.44 : 0.32;
+          if (d.coverageLeverage) {
+            const bracketTarget = getBracketCoverageTarget(d, rec, dir);
+            targetX = bracketTarget.x;
+            targetY = bracketTarget.y;
+            moveSpeed = isSpammed ? 2.15 : 2.05;
+            moveAccel = 0.44;
+          }
         } else if (d.defenseAssignment === 'ZONE') {
           const zoneX = d.zoneX ?? d.startX ?? d.x;
           const zoneY = d.zoneY ?? (lineOfScrimmageY + (80 * dir));
           const eligibleZoneReceivers = [...receivers, centerReceiver, ...(rb && !rb.isBlocker ? [rb] : [])]
-            .filter((receiver): receiver is Entity => receiver !== null && !receiver.caught);
+            .filter((receiver): receiver is Entity => receiver !== null && !receiver.caught && !receiver.isBlocker && receiver.routeType !== 'BLOCK');
           const zoneTargets = eligibleZoneReceivers
             .filter(receiver => Math.abs(receiver.x - zoneX) <= 75 && Math.abs(receiver.y - zoneY) <= 85)
             .sort((first, second) =>

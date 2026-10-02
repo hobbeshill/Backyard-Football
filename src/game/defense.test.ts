@@ -1,10 +1,41 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { scoreRunBlockTarget, shouldCpuReleasePass, shouldCpuScramble } from './ai';
-import { alignDefenderAcrossFromRunningBack, alignDefenders, chooseCpuDefensiveAssignments } from './defense';
+import { alignDefenderAcrossFromRunningBack, alignDefenders, chooseCpuDefensiveAssignments, getBracketCoverageTarget, matchCpuDefendersToReceivers } from './defense';
 import { calculateYardsToGo, canDefenderDeflectPass, canTackleQuarterback, findTappedPassReceiver, getDefenderPassReachHeight, getDriveStartY, getSnapBallPosition, getPassArcHeight, getPassArcMaxHeight, getPassFlightFrames, getPassLeadTarget, getRoutePassLeadTarget, resolvePlayResult } from './rules';
-import { updateRouteMovement } from './movement';
+import { canEngagePassBlock, moveToward, updateRouteMovement } from './movement';
 import type { Entity } from './types';
+
+test('deep blitzers must run to a blocker before pass protection can engage them', () => {
+  for (const attackDirection of [-1, 1]) {
+    const blocker: Entity = { x: 170, y: 500, radius: 10 };
+    const rusher: Entity = { x: 170, y: 500 + 200 * attackDirection, radius: 10, defenseAssignment: 'BLITZ' };
+    const quarterback: Entity = { x: 170, y: 500 - 48 * attackDirection, radius: 12 };
+    const initialY = rusher.y;
+    assert.equal(canEngagePassBlock(blocker, rusher), false);
+    moveToward(rusher, quarterback.x, quarterback.y, 0.22, 1.28, 0);
+    assert.ok(Math.abs(rusher.y - initialY) < 1);
+    assert.equal(canEngagePassBlock(blocker, rusher), false);
+    let frames = 1;
+    while (!canEngagePassBlock(blocker, rusher) && frames < 500) {
+      moveToward(rusher, quarterback.x, quarterback.y, 0.22, 1.28, 0);
+      frames++;
+    }
+    assert.ok(frames > 100 && frames < 500);
+    assert.equal(canEngagePassBlock(blocker, rusher), true);
+  }
+});
+
+test('pass protection engagement checks real contact without moving either player', () => {
+  const blocker: Entity = { x: 170, y: 500, radius: 10 };
+  const rusher: Entity = { x: 170, y: 526, radius: 10 };
+  const originalBlocker = { ...blocker };
+  const originalRusher = { ...rusher };
+  assert.equal(canEngagePassBlock(blocker, rusher), true);
+  assert.deepEqual(blocker, originalBlocker);
+  assert.deepEqual(rusher, originalRusher);
+  assert.equal(canEngagePassBlock(blocker, { ...rusher, y: 527 }), false);
+});
 
 test('snaps travel from the center in front of the QB to the QB carrying position in either direction', () => {
   const center: Entity = { x: 170, y: 500, radius: 10 };
@@ -305,6 +336,77 @@ test('CPU adapts to repeated hot routes across different plays and formations', 
   );
 
   assert.equal([...assignments.values()].filter(assignment => assignment === 'MAN').length, 3);
+});
+
+test('CPU brackets a lone receiving threat instead of defending blockers or sitting in deep zones', () => {
+  for (const playKey of ['COVER3', 'QUARTERS', 'BLITZ', 'COVER2MAN']) {
+    for (const randomValue of [0, 1]) {
+      const { defenders, eligibleReceivers } = createAlignedDefense(playKey);
+      eligibleReceivers.forEach((receiver, index) => {
+        receiver.routeType = index === 0 ? 'GO' : 'BLOCK';
+        receiver.isBlocker = index !== 0;
+      });
+      const assignments = chooseCpuDefensiveAssignments(defenders, eligibleReceivers, {
+        down: 1,
+        yardsToGo: 10,
+        lineOfScrimmageY: 500,
+        attackDirection: -1,
+        recentPlays: []
+      }, () => randomValue);
+      assert.equal([...assignments.values()].filter(assignment => assignment === 'MAN').length, 2);
+      assert.equal([...assignments.values()].filter(assignment => assignment === 'BLITZ').length, 3);
+      assert.equal(assignments.get(5), 'QB_SPY');
+      assert.equal(assignments.get(6), 'ZONE');
+    }
+  }
+});
+
+test('CPU live matchups bracket only the lone receiver and tighten after repeated routes', () => {
+  for (const attackDirection of [-1, 1]) {
+    for (const loneIndex of [0, 1, 2]) {
+      const { defenders, eligibleReceivers } = createAlignedDefense('QUARTERS');
+      eligibleReceivers.forEach((receiver, index) => {
+        receiver.routeType = index === loneIndex ? 'GO' : 'BLOCK';
+        receiver.isBlocker = index !== loneIndex;
+      });
+      const receiver = eligibleReceivers[loneIndex];
+      const situation = { down: 1, yardsToGo: 10, lineOfScrimmageY: 500, attackDirection, recentPlays: [] as Array<{ play: string; isPass: boolean; routes: { left: string } }> };
+      const assignments = chooseCpuDefensiveAssignments(defenders, eligibleReceivers, situation, () => 1);
+      defenders.forEach((defender, index) => {
+        defender.defenseAssignment = assignments.get(index);
+        defender.passRusher = defender.defenseAssignment === 'BLITZ';
+      });
+      matchCpuDefendersToReceivers(defenders, eligibleReceivers, situation);
+      const coverage = defenders.filter(defender => defender.defenseAssignment === 'MAN');
+      assert.equal(coverage.length, 2);
+      assert.ok(coverage.every(defender => defender.assignedReceiver === receiver));
+      assert.deepEqual(coverage.map(defender => defender.coverageLeverage), ['INSIDE', 'OUTSIDE']);
+      const targets = coverage.map(defender => getBracketCoverageTarget(defender, receiver, attackDirection));
+      assert.ok(Math.abs(targets[0].x - targets[1].x) >= 16);
+      assert.ok(Math.abs(targets[0].y - targets[1].y) >= 16);
+      assert.equal(defenders[6].zoneX, receiver.x);
+      const originalCushion = (coverage[0].y - 500) * attackDirection;
+      situation.recentPlays = [
+        { play: 'SHORT_PASS', isPass: true, routes: { left: 'GO' } },
+        { play: 'MESH', isPass: true, routes: { left: 'GO' } }
+      ];
+      matchCpuDefendersToReceivers(defenders, eligibleReceivers, situation);
+      assert.ok((coverage[0].y - 500) * attackDirection < originalCushion);
+      assert.equal((defenders[6].zoneY! - 500) * attackDirection, 95);
+    }
+  }
+});
+
+test('CPU man coverage ignores blockers and releases brackets when more routes are added', () => {
+  const { defenders, eligibleReceivers } = createAlignedDefense('COVER2MAN');
+  defenders.forEach(defender => { defender.defenseAssignment = 'MAN'; defender.coverageLeverage = 'INSIDE'; });
+  eligibleReceivers[0].isBlocker = true;
+  eligibleReceivers[0].routeType = 'BLOCK';
+  matchCpuDefendersToReceivers(defenders, eligibleReceivers, {
+    down: 1, yardsToGo: 10, lineOfScrimmageY: 500, attackDirection: -1, recentPlays: []
+  });
+  assert.ok(defenders.every(defender => defender.assignedReceiver !== eligibleReceivers[0]));
+  assert.ok(defenders.every(defender => defender.coverageLeverage === undefined));
 });
 
 test('CPU tightens man coverage against a compact receiver formation', () => {
@@ -860,6 +962,64 @@ test('Tapping RB on offense does NOT start play (RB touch takes priority over sn
 
   assert.equal(gestureRole, 'RB', 'Touch on RB should be recognized as RB interaction');
   assert.equal(playStarted, false, 'Tapping RB must NOT start the play');
+});
+
+test('offensive double-taps only reposition the RB on offset and scaled canvases', async (context) => {
+  const { readFileSync } = await import('node:fs');
+  const { stripTypeScriptTypes } = await import('node:module');
+  const source = readFileSync(new URL('./engine.ts', import.meta.url), 'utf8');
+  const downStart = source.indexOf('  const handlePointerDown =');
+  const moveStart = source.indexOf('  const handlePointerMove =', downStart);
+  const upStart = source.indexOf('  const handlePointerUp =', moveStart);
+  const listenersStart = source.indexOf("  canvas.addEventListener('pointerdown'", upStart);
+  assert.ok(downStart >= 0 && moveStart > downStart && upStart > moveStart && listenersStart > upStart);
+  const handlers = stripTypeScriptTypes(source.slice(downStart, moveStart) + source.slice(upStart, listenersStart));
+  let timestamp = 1000;
+  context.mock.method(Date, 'now', () => timestamp);
+  const createHandlers = new Function('cyclePreSnapFormation', 'canvasLeft', 'canvasTop', 'scale', `
+    let phase = 'PRE_SNAP', activeOffense = 'P1', activeDefense = 'P2';
+    let rbDoubleTapConsumed = false, lastDefenseSelectTime = 0, lastTapTime = 0;
+    let tapThrowTarget = null, gestureEntity = null, isDirtGestureActive = false;
+    let touchStartX = 0, touchStartY = 0, touchScreenStartX = 0, touchScreenStartY = 0;
+    let aimScreenCurrentX = 0, aimScreenCurrentY = 0, touchStartTime = 0;
+    let preSnapFieldSwipeStartX = 0, preSnapFieldSwipeStartY = 0;
+    const fieldWidth = 340, centerReceiver = null, receivers = [];
+    const qb = { x: 170, y: 948, radius: 12 };
+    const rb = { x: 220, y: 975, startX: 220, radius: 10, side: 'right', routeType: 'FLAT', isBlocker: false };
+    const screenToWorld = (clientX, clientY) => ({ x: (clientX - canvasLeft) / scale, y: (clientY - canvasTop) / scale + 700 });
+    const getScreenCoords = (clientX, clientY) => ({ x: clientX - canvasLeft, y: clientY - canvasTop });
+    ${handlers}
+    return { down: handlePointerDown, up: handlePointerUp, getRunningBack: () => ({ ...rb }) };
+  `) as (cycle: (direction: number) => void, left: number, top: number, scale: number) => {
+    down: (event: { clientX: number; clientY: number }) => void;
+    up: (event: { clientX: number; clientY: number }) => void;
+    getRunningBack: () => { x: number; y: number; startX: number; side: string; routeType: string; isBlocker: boolean };
+  };
+  for (const [left, top, scale] of [[420, 80, 1.5], [20, 120, 0.75]]) {
+    const formationChanges: number[] = [];
+    const handlers = createHandlers(direction => formationChanges.push(direction), left, top, scale);
+    const eventAt = (x: number) => ({ clientX: left + x * scale, clientY: top + 80 * scale });
+    for (const [tapX, expectedX, expectedSide] of [[35, 120, 'left'], [285, 220, 'right']] as const) {
+      timestamp += 500;
+      handlers.down(eventAt(tapX));
+      handlers.up(eventAt(tapX));
+      timestamp += 100;
+      handlers.down(eventAt(tapX));
+      handlers.up(eventAt(tapX + 60));
+      assert.equal(formationChanges.length, 0);
+      const runningBack = handlers.getRunningBack();
+      assert.equal(runningBack.x, expectedX);
+      assert.equal(runningBack.startX, expectedX);
+      assert.equal(runningBack.side, expectedSide);
+      assert.equal(runningBack.y, 975);
+      assert.equal(runningBack.routeType, 'FLAT');
+      assert.equal(runningBack.isBlocker, false);
+    }
+    timestamp += 500;
+    handlers.down(eventAt(35));
+    handlers.up(eventAt(100));
+    assert.deepEqual(formationChanges, [-1]);
+  }
 });
 
 test('Swiping field cycles formations correctly in both directions', () => {

@@ -44,6 +44,7 @@ export interface Entity {
   passRusher?: boolean;
   defenseAssignment?: DefensiveAssignment;
   assignedReceiver?: Entity | null;
+  coverageLeverage?: 'INSIDE' | 'OUTSIDE';
   assignedCenter?: Entity;
   zoneX?: number;
   zoneY?: number;

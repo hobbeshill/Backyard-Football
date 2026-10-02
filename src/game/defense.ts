@@ -53,6 +53,7 @@ export function alignDefenders(
 
   defenders.forEach(defender => {
     defender.assignedReceiver = undefined;
+    defender.coverageLeverage = undefined;
     defender.assignedCenter = undefined;
     defender.zoneX = undefined;
     defender.zoneY = undefined;
@@ -162,6 +163,7 @@ export function chooseCpuDefensiveAssignments(
   random: () => number = Math.random
 ): Map<number, DefensiveAssignment> {
   const assignments = new Map<number, DefensiveAssignment>();
+  const receivingThreats = eligibleReceivers.filter(receiver => !receiver.isBlocker && receiver.routeType !== 'BLOCK');
   defenders.forEach((defender, index) => {
     assignments.set(index, defender.passRusher
       ? 'BLITZ'
@@ -174,7 +176,7 @@ export function chooseCpuDefensiveAssignments(
   const routeCounts = new Map<string, number>();
   recentPlays.forEach(play => {
     if (!play.isPass || !play.routes) return;
-    new Set(Object.values(play.routes).filter((route): route is string => Boolean(route)))
+    new Set(Object.values(play.routes).filter((route): route is string => Boolean(route) && route !== 'BLOCK'))
       .forEach(route => routeCounts.set(route, (routeCounts.get(route) || 0) + 1));
   });
   const repeatedRoutes = new Set(
@@ -198,7 +200,7 @@ export function chooseCpuDefensiveAssignments(
   const deepThreat = deepPassCount >= 2 || repeatedVerticalRoute ||
     (passSituation && situation.yardsToGo >= 8 && runRate < 0.5);
 
-  const targetXs = eligibleReceivers.filter(receiver => !receiver.isRB).map(receiver => receiver.x);
+  const targetXs = receivingThreats.filter(receiver => !receiver.isRB).map(receiver => receiver.x);
   const compactFormation = targetXs.length >= 3 && (
     Math.max(...targetXs) - Math.min(...targetXs) <= 140 ||
     targetXs.some((firstX, index) => targetXs.slice(index + 1).some(secondX => Math.abs(firstX - secondX) <= 35))
@@ -218,8 +220,8 @@ export function chooseCpuDefensiveAssignments(
       })
       .map(candidate => ({
         ...candidate,
-        distance: eligibleReceivers.length > 0
-          ? Math.min(...eligibleReceivers.map(receiver =>
+        distance: receivingThreats.length > 0
+          ? Math.min(...receivingThreats.map(receiver =>
             Math.hypot(receiver.x - candidate.defender.x, receiver.y - candidate.defender.y)
           ))
           : Infinity
@@ -312,7 +314,7 @@ export function chooseCpuDefensiveAssignments(
   );
 
   const currentManCount = () => [...assignments.values()].filter(assignment => assignment === 'MAN').length;
-  if ((isPlaySpammed || repeatedRoutes.size > 0) && lastPlay?.isPass && currentManCount() < Math.min(3, eligibleReceivers.length)) {
+  if ((isPlaySpammed || repeatedRoutes.size > 0) && lastPlay?.isPass && currentManCount() < Math.min(3, receivingThreats.length)) {
     // Match extra receivers when either the play call or route concept repeats.
     const zoneDefenderIdx = [3, 4, 2, 1].find(idx => assignments.get(idx) === 'ZONE');
     if (zoneDefenderIdx !== undefined) {
@@ -320,5 +322,71 @@ export function chooseCpuDefensiveAssignments(
     }
   }
 
+  const blockerCount = eligibleReceivers.length - receivingThreats.length;
+  if (receivingThreats.length === 1 && blockerCount >= 2 && defenders.length >= 7) {
+    const loneReceiver = receivingThreats[0];
+    const coverageCandidates = [1, 2, 3, 4].sort((first, second) =>
+      Math.abs(defenders[first].x - loneReceiver.x) - Math.abs(defenders[second].x - loneReceiver.x)
+    );
+    assignments.set(0, 'BLITZ');
+    coverageCandidates.forEach((index, order) => assignments.set(index, order < 2 ? 'MAN' : 'BLITZ'));
+    assignments.set(5, 'QB_SPY');
+    assignments.set(6, 'ZONE');
+  }
+
   return assignments;
+}
+
+export function getBracketCoverageTarget(defender: Entity, receiver: Entity, attackDirection: number): { x: number; y: number } {
+  const insideDirection = receiver.x >= 170 ? -1 : 1;
+  const isInside = defender.coverageLeverage === 'INSIDE';
+  return {
+    x: receiver.x + insideDirection * (isInside ? 8 : -8),
+    y: receiver.y + attackDirection * (isInside ? 4 : 20)
+  };
+}
+
+export function matchCpuDefendersToReceivers(defenders: Entity[], eligibleReceivers: Entity[], situation: CpuDefenseSituation): void {
+  const threats = eligibleReceivers.filter(receiver => !receiver.caught && !receiver.isBlocker && receiver.routeType !== 'BLOCK');
+  const matched = new Set<Entity>();
+  defenders.forEach(defender => {
+    defender.coverageLeverage = undefined;
+    if (defender.defenseAssignment !== 'MAN') return;
+    const unmatched = threats.filter(receiver => !matched.has(receiver));
+    const candidates = unmatched.length > 0 ? unmatched : threats;
+    defender.assignedReceiver = candidates.slice().sort((first, second) =>
+      Math.hypot(first.x - defender.x, first.y - defender.y) - Math.hypot(second.x - defender.x, second.y - defender.y)
+    )[0];
+    if (defender.assignedReceiver) matched.add(defender.assignedReceiver);
+  });
+
+  if (threats.length !== 1 || eligibleReceivers.length - threats.length < 2 || defenders.length < 7) return;
+  const receiver = threats[0];
+  const repeatedRouteCount = situation.recentPlays.slice(-6).filter(play =>
+    play.isPass && receiver.routeType !== undefined && Object.values(play.routes || {}).includes(receiver.routeType)
+  ).length;
+  const coverageDefenders = defenders.filter(defender => defender.defenseAssignment === 'MAN');
+  coverageDefenders.forEach((defender, index) => {
+    defender.coverageLeverage = index === 0 ? 'INSIDE' : 'OUTSIDE';
+    const target = getBracketCoverageTarget(defender, receiver, situation.attackDirection);
+    defender.startX = Math.max(25, Math.min(315, target.x));
+    defender.startY = situation.lineOfScrimmageY + situation.attackDirection * (index === 0
+      ? repeatedRouteCount >= 2 ? 24 : 30
+      : repeatedRouteCount >= 2 ? 45 : 60);
+    defender.x = defender.startX;
+    defender.y = defender.startY;
+  });
+  const safety = defenders[6];
+  safety.zoneX = receiver.x;
+  safety.zoneY = situation.lineOfScrimmageY + situation.attackDirection * (repeatedRouteCount >= 2 ? 95 : 120);
+  safety.startX = safety.zoneX;
+  safety.startY = safety.zoneY;
+  safety.x = safety.startX;
+  safety.y = safety.startY;
+  defenders.filter(defender => defender.passRusher).forEach((defender, index) => {
+    defender.startX = index === 0 ? 170 : index === 1 ? 105 : 235;
+    defender.startY = situation.lineOfScrimmageY + 24 * situation.attackDirection;
+    defender.x = defender.startX;
+    defender.y = defender.startY;
+  });
 }
