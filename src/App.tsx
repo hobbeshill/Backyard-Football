@@ -17,7 +17,7 @@ export default function App() {
   const [p2DefPlayState, setP2DefPlayState] = useState('COVER3');
   const [activeOffenseState, setActiveOffenseState] = useState('P1');
   const [momentumState, setMomentumState] = useState(0);
-  const [gameClockState, setGameClockState] = useState({ quarter: 1, seconds: 240 });
+  const [gameClockState, setGameClockState] = useState({ quarter: 1, seconds: 120 });
   const [banner, setBanner] = useState<{ text: string; color: string; visible: boolean; big: boolean }>({
     text: '',
     color: '#ffcc00',
