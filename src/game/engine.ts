@@ -89,7 +89,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   let currentDown = 1;
   let yardsToGo = 10;
   let quarter = 1;
-  let gameClockSeconds = 240;
+  let gameClockSeconds = 120;
   let gameClockRemainderMs = 0;
   let lastClockFrameTime: number | null = null;
   let gameClockRunning = true;
@@ -732,7 +732,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       }
       if (quarterBreakRemainingMs === 0) {
         quarter++;
-        gameClockSeconds = 240;
+        gameClockSeconds = 120;
         gameClockRunning = true;
         publishGameClock();
         if (quarter === 3) {
@@ -1225,7 +1225,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       p1Score = 0;
       p2Score = 0;
       quarter = 1;
-      gameClockSeconds = 240;
+      gameClockSeconds = 120;
       gameClockRemainderMs = 0;
       gameClockRunning = true;
       quarterBreakRemainingMs = 0;
