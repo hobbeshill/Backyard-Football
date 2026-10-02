@@ -4,7 +4,7 @@ import { alignDefenderAcrossFromRunningBack, alignDefenders, chooseCpuDefensiveA
 import { evaluateCpuOffensiveAudibles, evaluateCpuBallCarrierMoves, shouldCpuReleasePass, shouldCpuScramble, scoreRunBlockTarget } from './ai';
 import { createFumbleBall } from './fumbles';
 import { distToSegment, GAME_SPEED_SCALE, moveToward, resolveCollisions, updateRouteMovement } from './movement';
-import { resolvePlayResult, calculateBrokenTackleChance, calculateYardsToGo, getPassArcHeight, getPassArcMaxHeight, getPassFlightFrames, findTappedPassReceiver, getPassLeadTarget, canDefenderDeflectPass, canTackleQuarterback, resolveCatchContestOutcome, evaluateQbThrowAccuracy } from './rules';
+import { resolvePlayResult, calculateBrokenTackleChance, calculateYardsToGo, getDriveStartY, getSnapBallPosition, getPassArcHeight, getPassArcMaxHeight, getPassFlightFrames, findTappedPassReceiver, getPassLeadTarget, getRoutePassLeadTarget, canDefenderDeflectPass, canTackleQuarterback, resolveCatchContestOutcome, evaluateQbThrowAccuracy } from './rules';
 import { sounds } from './sound';
 import { evaluateDirtSwipeGesture, drawDirtSwipeGesture } from './chalkMenu';
 import { getTeam, TEAMS, TeamProfile } from './teams';
@@ -92,7 +92,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     return { x: wx, y: wy };
   }
 
-  let lineOfScrimmageY = fieldHeight - endZoneHeight - 350;
+  let lineOfScrimmageY = getDriveStartY(-1, fieldHeight, endZoneHeight);
   let firstDownMarkerY = lineOfScrimmageY - 100;
   let attackDirection = -1; // -1 = upward (-Y), 1 = downward (+Y)
   let currentDown = 1;
@@ -127,6 +127,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   let linemen: Entity[] = [];
   let defenders: Entity[] = [];
   let ball: Ball | null = null;
+  let snapBall: { center: Entity; frame: number } | null = null;
   let ballPressureDefenders: Entity[] = [];
   let fumbleBall: FumbleBall | null = null;
   let brokenTackleEffect: { x: number; y: number; timer: number } | null = null;
@@ -744,7 +745,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           activeDefense = 'P1';
           setActiveOffenseState('P2');
           attackDirection = -1;
-          lineOfScrimmageY = fieldHeight - endZoneHeight - 350;
+          lineOfScrimmageY = getDriveStartY(attackDirection, fieldHeight, endZoneHeight);
           firstDownMarkerY = lineOfScrimmageY + (100 * attackDirection);
           currentDown = 1;
           yardsToGo = 10;
@@ -986,9 +987,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       activeOffense = activeOffense === 'P1' ? 'P2' : 'P1';
       activeDefense = activeDefense === 'P1' ? 'P2' : 'P1';
       setActiveOffenseState(activeOffense);
-      lineOfScrimmageY = attackDirection === -1
-        ? fieldHeight - endZoneHeight - 350
-        : endZoneHeight + 350;
+      lineOfScrimmageY = getDriveStartY(attackDirection, fieldHeight, endZoneHeight);
       currentDown = 1;
       yardsToGo = 10;
       firstDownMarkerY = lineOfScrimmageY + (100 * attackDirection);
@@ -1091,6 +1090,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     isInterceptionReturn = false;
     isAllBlocking = false;
     ball = null;
+    snapBall = null;
     ballPressureDefenders = [];
     fumbleBall = null;
     brokenTackleEffect = null;
@@ -1321,7 +1321,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       callbacks.setP1OffFormationState?.('SPREAD');
       callbacks.setP1DefPlayState('COVER3');
       attackDirection = -1;
-      lineOfScrimmageY = fieldHeight - endZoneHeight - 350;
+      lineOfScrimmageY = getDriveStartY(attackDirection, fieldHeight, endZoneHeight);
       firstDownMarkerY = lineOfScrimmageY + (100 * attackDirection);
       currentDown = 1;
       yardsToGo = 10;
@@ -1385,6 +1385,13 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
   resetDrill();
 
+  function snapToQuarterback(): void {
+    snapBall = linemen[0] ? { center: { ...linemen[0] }, frame: 0 } : null;
+    sounds.playSnap();
+    gameClockRunning = true;
+    qb.hasBall = true;
+  }
+
   function startCpuPlay(): void {
     if (activeOffense === 'P2') {
       triggerCpuOffensiveAudible(true);
@@ -1395,9 +1402,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       cpuPlay = offensivePlaybook.MESH;
       callbacks.setP2OffPlayState(p2OffPlay);
     }
-    sounds.playSnap();
-    gameClockRunning = true;
-    qb.hasBall = true;
+    snapToQuarterback();
     isAiming = false;
     cpuPreSnapTimer = 0;
     if (cpuPlay && cpuPlay.type !== 'PASS' && !(rb?.isBlocker || rb?.routeType === 'BLOCK')) {
@@ -1520,16 +1525,13 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       if (distToQb < 32 && distToQb < distToRb - 10) {
         touchStartX = px;
         touchStartY = py;
-        sounds.playSnap();
-        gameClockRunning = true;
+        snapToQuarterback();
         const play = offensivePlaybook[p1OffPlay];
         if (play.type === 'PASS') {
-          qb.hasBall = true;
           phase = 'QB_DROP';
           isAiming = true;
           qb.dropStepTimer = 28;
         } else {
-          qb.hasBall = true;
           if (rb) rb.hasBall = false;
           activeEntity = rb || qb;
           phase = 'HANDOFF';
@@ -1922,6 +1924,10 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   }
 
   function update() {
+    if (snapBall) {
+      snapBall.frame++;
+      if (snapBall.frame >= 8 || (phase !== 'QB_DROP' && phase !== 'HANDOFF')) snapBall = null;
+    }
     if (qbScrambleReactionTimer > 0) qbScrambleReactionTimer--;
 
     if (formationTransitions.length > 0) {
@@ -2424,11 +2430,9 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         const throwSpeed = (isDeepRoute ? (targetDist > 240 ? 7.8 : 7.0) : (targetDist > 140 ? 7.2 : 6.2)) * 0.8;
         const T = Math.max(18, Math.round(targetDist / throwSpeed));
 
-        // Lead target in stride using velocity vector
-        const targetVx = chosenTarget.vx || 0;
-        const targetVy = chosenTarget.vy || 0;
-        let leadX = Math.max(25, Math.min(fieldWidth - 25, chosenTarget.x + targetVx * T * 0.90));
-        let leadY = chosenTarget.y + targetVy * T * 0.90;
+        const leadTarget = getRoutePassLeadTarget(chosenTarget, T, attackDirection, fieldWidth, defenders);
+        let leadX = Math.max(25, Math.min(fieldWidth - 25, leadTarget.x));
+        let leadY = leadTarget.y;
 
         // Realistic QB accuracy check for CPU (rusher pressure, deep shot)
         const cpuRusherThreat = defenders.some(d => d && (d.passRusher || d.defenseAssignment === 'BLITZ') && Math.hypot(d.x - qb.x, d.y - qb.y) < 55);
@@ -3961,6 +3965,49 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     ctx!.restore();
   }
 
+  function drawFootball(x: number, y: number, rotation: number, size = 8) {
+    ctx!.save();
+    ctx!.translate(x, y);
+    ctx!.rotate(rotation);
+    const leather = ctx!.createLinearGradient(0, -size * 0.6, 0, size * 0.6);
+    leather.addColorStop(0, '#e8ad70');
+    leather.addColorStop(0.4, '#a9582c');
+    leather.addColorStop(1, '#592a19');
+    ctx!.beginPath();
+    ctx!.moveTo(-size, 0);
+    ctx!.bezierCurveTo(-size * 0.45, -size * 0.85, size * 0.45, -size * 0.85, size, 0);
+    ctx!.bezierCurveTo(size * 0.45, size * 0.85, -size * 0.45, size * 0.85, -size, 0);
+    ctx!.closePath();
+    ctx!.fillStyle = leather;
+    ctx!.fill();
+    ctx!.strokeStyle = '#fff4dd';
+    ctx!.lineWidth = 1.4;
+    ctx!.stroke();
+    ctx!.save();
+    ctx!.clip();
+    ctx!.strokeStyle = '#f8edda';
+    ctx!.lineWidth = 2;
+    ctx!.beginPath();
+    for (const side of [-1, 1]) {
+      ctx!.moveTo(side * size * 0.65, -size);
+      ctx!.lineTo(side * size * 0.65, size);
+    }
+    ctx!.stroke();
+    ctx!.restore();
+    ctx!.strokeStyle = '#ffffff';
+    ctx!.lineWidth = 1;
+    ctx!.lineCap = 'round';
+    ctx!.beginPath();
+    ctx!.moveTo(-size * 0.35, -size * 0.12);
+    ctx!.lineTo(size * 0.35, -size * 0.12);
+    for (const lace of [-0.25, 0, 0.25]) {
+      ctx!.moveTo(size * lace, -size * 0.3);
+      ctx!.lineTo(size * lace, size * 0.08);
+    }
+    ctx!.stroke();
+    ctx!.restore();
+  }
+
   function getColorLuminance(color: string) {
     const hex = color.replace('#', '');
     if (hex.length !== 6) return 1;
@@ -4128,13 +4175,6 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       ctx.arc(qb.x, qb.y, qb.radius + 3, 0, Math.PI * 2);
       ctx.stroke();
     }
-    if (qb.hasBall) {
-      ctx.fillStyle = '#d2691e';
-      ctx.beginPath();
-      ctx.arc(qb.x + 10, qb.y + 2, 4, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
     // When user is on defense: "A user on defense starts the play by tapping the QB, no other taps should start the play."
     if (phase === 'PRE_SNAP' && activeDefense === 'P1') {
       const pulse = (Math.sin(Date.now() / 180) + 1) / 2;
@@ -4469,10 +4509,53 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       }
     });
 
+    const carrier = !ball && !fumbleBall && !snapBall
+      ? phase === 'RUNNING' ? activeEntity
+        : phase === 'QB_DROP' || phase === 'HANDOFF' ? qb
+          : phase === 'PRE_SNAP' ? linemen[0] : null
+      : null;
+    if (carrier) {
+      const moving = Math.hypot(carrier.vx || 0, carrier.vy || 0) > 0.5;
+      const facing = moving ? Math.atan2(carrier.vx || 0, -(carrier.vy || 0)) : attackDirection === -1 ? 0 : Math.PI;
+      const carryOffset = carrier.radius + 5;
+      const snapPosition = phase === 'PRE_SNAP' ? getSnapBallPosition(carrier, qb, attackDirection, 0) : null;
+      const carryX = snapPosition?.x ?? carrier.x + Math.cos(facing) * carryOffset;
+      const carryY = snapPosition?.y ?? carrier.y + Math.sin(facing) * carryOffset;
+      ctx.save();
+      ctx.strokeStyle = '#ffd166';
+      ctx.lineWidth = 2 / cameraScale;
+      ctx.beginPath();
+      ctx.arc(carrier.x, carrier.y, carrier.radius + 6, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.strokeStyle = '#e9b98d';
+      ctx.lineWidth = 4;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(carrier.x + Math.cos(facing) * carrier.radius * 0.7, carrier.y + Math.sin(facing) * carrier.radius * 0.7);
+      ctx.lineTo(carryX, carryY);
+      ctx.stroke();
+      drawFootball(carryX, carryY, facing - Math.PI / 2);
+      ctx.restore();
+    }
+
+    if (snapBall && !ball && !fumbleBall) {
+      const snapPosition = getSnapBallPosition(snapBall.center, qb, attackDirection, snapBall.frame / 8);
+      drawFootball(snapPosition.x, snapPosition.y, Math.PI / 2);
+    }
+
     // Football & Realistic Turf Drop Shadow
     if (ball) {
       const bZ = ball.z || 0;
-      const renderRadius = Math.max(5, 11 - (bZ * 0.05));
+      if (ball.intendedTarget) {
+        ctx.save();
+        ctx.strokeStyle = '#ffd166';
+        ctx.lineWidth = 2 / cameraScale;
+        ctx.setLineDash([3, 3]);
+        ctx.beginPath();
+        ctx.arc(ball.intendedTarget.x, ball.intendedTarget.y, ball.intendedTarget.radius + 7, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
 
       // 1. Soft dark turf drop shadow on grass directly underneath the football
       ctx.save();
@@ -4487,28 +4570,16 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       // 2. Football elevated by ball.z above the field
       const ballDrawY = ball.y - bZ;
 
-      // Outer glow / halo
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+      ctx.save();
+      ctx.strokeStyle = 'rgba(255, 244, 221, 0.3)';
+      ctx.lineWidth = 1 / cameraScale;
+      ctx.setLineDash([2, 3]);
       ctx.beginPath();
-      ctx.arc(ball.x, ballDrawY, renderRadius + 2, 0, Math.PI * 2);
-      ctx.fill();
-
-      // Pigskin brown body
-      ctx.fillStyle = '#b35412';
-      ctx.beginPath();
-      ctx.arc(ball.x, ballDrawY, renderRadius, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 1.8;
+      ctx.moveTo(ball.x, ball.y);
+      ctx.lineTo(ball.x, ballDrawY);
       ctx.stroke();
-
-      // White spiral stripe
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(ball.x - renderRadius * 0.5, ballDrawY);
-      ctx.lineTo(ball.x + renderRadius * 0.5, ballDrawY);
-      ctx.stroke();
+      ctx.restore();
+      drawFootball(ball.x, ballDrawY, Math.atan2(ball.vy, ball.vx), 8.5);
     }
 
     // Loose Fumble Football
@@ -4529,14 +4600,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       ctx.ellipse(fumbleBall.x, fumbleBall.y + 4, 10, 5, 0, 0, Math.PI * 2);
       ctx.fill();
 
-      // Loose tumbling football
-      ctx.fillStyle = '#d2691e';
-      ctx.beginPath();
-      ctx.arc(fumbleBall.x, fumbleBall.y - (fumbleBall.z || 0), 8, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 2;
-      ctx.stroke();
+      drawFootball(fumbleBall.x, fumbleBall.y - (fumbleBall.z || 0), fumbleBall.timer * 0.25);
 
       // High visibility FUMBLE marker tag
       ctx.fillStyle = '#ff2222';

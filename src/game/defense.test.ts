@@ -2,8 +2,36 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { scoreRunBlockTarget, shouldCpuReleasePass, shouldCpuScramble } from './ai';
 import { alignDefenderAcrossFromRunningBack, alignDefenders, chooseCpuDefensiveAssignments } from './defense';
-import { calculateYardsToGo, canDefenderDeflectPass, canTackleQuarterback, findTappedPassReceiver, getDefenderPassReachHeight, getPassArcHeight, getPassArcMaxHeight, getPassFlightFrames, getPassLeadTarget, resolvePlayResult } from './rules';
+import { calculateYardsToGo, canDefenderDeflectPass, canTackleQuarterback, findTappedPassReceiver, getDefenderPassReachHeight, getDriveStartY, getSnapBallPosition, getPassArcHeight, getPassArcMaxHeight, getPassFlightFrames, getPassLeadTarget, getRoutePassLeadTarget, resolvePlayResult } from './rules';
+import { updateRouteMovement } from './movement';
 import type { Entity } from './types';
+
+test('snaps travel from the center in front of the QB to the QB carrying position in either direction', () => {
+  const center: Entity = { x: 170, y: 500, radius: 10 };
+  for (const attackDirection of [-1, 1]) {
+    const quarterback: Entity = { x: 170, y: 500 - 48 * attackDirection, radius: 12 };
+    const start = { x: center.x, y: center.y - 15 * attackDirection };
+    const finish = { x: quarterback.x - 17 * attackDirection, y: quarterback.y };
+    assert.deepEqual(getSnapBallPosition(center, quarterback, attackDirection, 0), start);
+    assert.deepEqual(getSnapBallPosition(center, quarterback, attackDirection, 1), finish);
+    assert.deepEqual(getSnapBallPosition(center, quarterback, attackDirection, 0.5), {
+      x: (start.x + finish.x) / 2,
+      y: (start.y + finish.y) / 2
+    });
+    assert.deepEqual(getSnapBallPosition(center, quarterback, attackDirection, -1), start);
+    assert.deepEqual(getSnapBallPosition(center, quarterback, attackDirection, 2), finish);
+  }
+});
+
+test('fresh possessions start at the offense own 20 in either direction', () => {
+  assert.equal(getDriveStartY(-1, 1200, 100), 900);
+  assert.equal(getDriveStartY(1, 1200, 100), 300);
+  for (const attackDirection of [-1, 1]) {
+    const startY = getDriveStartY(attackDirection, 1200, 100);
+    const firstDownY = startY + 100 * attackDirection;
+    assert.equal(calculateYardsToGo(startY, firstDownY, attackDirection), 10);
+  }
+});
 
 test('short passes clear defensive linemen on a safe arc', () => {
   const maxHeight = getPassArcMaxHeight(70, false);
@@ -36,6 +64,31 @@ test('tap-to-throw leads moving receivers by most of the estimated flight', () =
   const receiver: Entity = { x: 100, y: 200, vx: 1, vy: -2, radius: 10 };
 
   assert.deepEqual(getPassLeadTarget(receiver, 30), { x: 127, y: 146 });
+});
+
+test('CPU pass leads follow route cuts without mutating the intended receiver', (context) => {
+  context.mock.method(Date, 'now', () => 1000);
+  for (const attackDirection of [-1, 1]) {
+    for (const routeType of ['SLANT-R', 'FLAG-L', 'COMEBACK', 'CROSS-R', 'POST-L', 'HITCH', 'WHEEL', 'GO']) {
+      const receiver: Entity = { x: 170, y: 500, vx: 0, vy: attackDirection, radius: 10, routeType, timer: 25 };
+      const original = { ...receiver };
+      const expectedReceiver = { ...receiver };
+      const target = getRoutePassLeadTarget(receiver, 40, attackDirection, 340, []);
+      for (let frame = 0; frame < 40; frame++) {
+        updateRouteMovement(expectedReceiver, 'THROWN', attackDirection, [], 340);
+      }
+      assert.deepEqual(target, { x: expectedReceiver.x, y: expectedReceiver.y });
+      assert.deepEqual(receiver, original);
+    }
+  }
+});
+
+test('CPU route predictions keep receivers in bounds and preserve RB lead behavior', () => {
+  const receiver: Entity = { x: 305, y: 500, vx: 1, vy: -1, radius: 10, routeType: 'CROSS-R', timer: 60 };
+  const target = getRoutePassLeadTarget(receiver, 40, -1, 340, []);
+  assert.ok(target.x <= 310 && target.x >= 30);
+  const runningBack = { ...receiver, isRB: true };
+  assert.deepEqual(getRoutePassLeadTarget(runningBack, 40, -1, 340, []), getPassLeadTarget(runningBack, 40));
 });
 
 test('elevated passes clear linemen and blitzers cannot bat them down', () => {

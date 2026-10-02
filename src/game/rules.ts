@@ -1,4 +1,5 @@
 import type { Entity } from './types';
+import { updateRouteMovement } from './movement';
 
 export interface PlayResultInput {
   lineOfScrimmageY: number;
@@ -13,6 +14,23 @@ export interface PlayResult {
   endingY: number;
   yardsGained: number;
   isTouchdown: boolean;
+}
+
+export function getDriveStartY(attackDirection: number, fieldHeight: number, endZoneHeight: number): number {
+  const twentyYards = (fieldHeight - 2 * endZoneHeight) * 0.2;
+  return attackDirection === -1
+    ? fieldHeight - endZoneHeight - twentyYards
+    : endZoneHeight + twentyYards;
+}
+
+export function getSnapBallPosition(center: Entity, quarterback: Entity, attackDirection: number, progress: number): { x: number; y: number } {
+  const clampedProgress = Math.max(0, Math.min(1, progress));
+  const startY = center.y - attackDirection * (center.radius + 5);
+  const catchX = quarterback.x - attackDirection * (quarterback.radius + 5);
+  return {
+    x: center.x + (catchX - center.x) * clampedProgress,
+    y: startY + (quarterback.y - startY) * clampedProgress
+  };
 }
 
 export function calculateYardsToGo(lineOfScrimmageY: number, firstDownMarkerY: number, attackDirection: number): number {
@@ -43,6 +61,17 @@ export function getPassLeadTarget(receiver: Entity, flightFrames: number, leadFa
     x: receiver.x + (receiver.vx || 0) * flightFrames * leadFactor,
     y: receiver.y + (receiver.vy || 0) * flightFrames * leadFactor
   };
+}
+
+export function getRoutePassLeadTarget(receiver: Entity, flightFrames: number, attackDirection: number, fieldWidth: number, defenders: Entity[]): { x: number; y: number } {
+  if (receiver.isRB || !receiver.routeType || receiver.isBlocker || receiver.routeType === 'BLOCK') {
+    return getPassLeadTarget(receiver, flightFrames);
+  }
+  const predictedReceiver = { ...receiver };
+  for (let frame = 0; frame < flightFrames; frame++) {
+    updateRouteMovement(predictedReceiver, 'THROWN', attackDirection, defenders, fieldWidth);
+  }
+  return { x: predictedReceiver.x, y: predictedReceiver.y };
 }
 
 export function getPassArcHeight(maxHeight: number, progress: number): number {
