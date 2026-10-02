@@ -1833,9 +1833,9 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         return;
       }
 
-      // Original calibrated ball speed: Shorter passes travel ~2.6 - 3.2 px/frame, deep passes travel ~3.6 - 3.8 px/frame
-      const throwSpeed = Math.min(3.8, Math.max(2.4, 2.2 + throwDist * 0.006));
-      const totalFlightFrames = Math.max(26, Math.round(throwDist / throwSpeed));
+      // Original calibrated ball speed
+      const throwSpeed = Math.min(6.4, Math.max(3.6, (3.2 + throwDist * 0.028) * 0.8));
+      const totalFlightFrames = Math.max(18, Math.round(throwDist / throwSpeed));
 
       // Realistic QB throw accuracy check (accounting for rush pressure, throw distance, and team pass pro)
       const rusherThreat = defenders.some(d => d && (d.passRusher || d.defenseAssignment === 'BLITZ') && Math.hypot(d.x - qb.x, d.y - qb.y) < 55);
@@ -2400,8 +2400,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         const targetDist = Math.hypot(chosenTarget.x - qb.x, chosenTarget.y - qb.y);
         // Original calibrated ball speed
         const isDeepRoute = chosenTarget.routeType === 'GO' || chosenTarget.routeType === 'FLAG-L' || chosenTarget.routeType === 'FLAG-R' || chosenTarget.routeType === 'POST-L' || chosenTarget.routeType === 'POST-R' || chosenTarget.routeType === 'WHEEL';
-        const throwSpeed = (isDeepRoute ? (targetDist > 240 ? 3.8 : 3.4) : (targetDist > 140 ? 3.4 : 2.8));
-        const T = Math.max(26, Math.round(targetDist / throwSpeed));
+        const throwSpeed = (isDeepRoute ? (targetDist > 240 ? 7.8 : 7.0) : (targetDist > 140 ? 7.2 : 6.2)) * 0.8;
+        const T = Math.max(18, Math.round(targetDist / throwSpeed));
 
         // Lead target in stride using velocity vector
         const targetVx = chosenTarget.vx || 0;
