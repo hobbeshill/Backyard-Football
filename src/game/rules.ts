@@ -18,12 +18,6 @@ export function calculateYardsToGo(lineOfScrimmageY: number, firstDownMarkerY: n
   return Math.max(0, Math.round(remainingDistance / 10));
 }
 
-export function getThrowOffDistance(power: number, maxDistance: number): number {
-  const clampedPower = Math.max(0, Math.min(1, power));
-  const longestThrow = Math.max(100, maxDistance);
-  return 100 + clampedPower * (longestThrow - 100);
-}
-
 export function getPassArcMaxHeight(targetDistance: number, isDeepRoute: boolean, isLob = false): number {
   const calculatedHeight = (isDeepRoute ? 32 + targetDistance * 0.10 : 26 + targetDistance * 0.08) + (isLob ? 10 : 0);
   return Math.min(isDeepRoute ? 50 : 42, Math.max(38, calculatedHeight));
