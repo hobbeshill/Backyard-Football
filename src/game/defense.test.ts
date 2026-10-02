@@ -1,7 +1,131 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { scoreRunBlockTarget, shouldCpuReleasePass, shouldCpuScramble } from './ai';
 import { alignDefenderAcrossFromRunningBack, alignDefenders, chooseCpuDefensiveAssignments } from './defense';
+import { calculateYardsToGo, canDefenderDeflectPass, canTackleQuarterback, getDefenderPassReachHeight, getPassArcHeight, getPassArcMaxHeight, getPassFlightFrames, resolvePlayResult } from './rules';
 import type { Entity } from './types';
+
+test('short passes clear defensive linemen on a safe arc', () => {
+  const maxHeight = getPassArcMaxHeight(70, false);
+  const lineCrossingHeight = getPassArcHeight(maxHeight, 0.18);
+
+  assert.equal(maxHeight, 38);
+  assert.ok(lineCrossingHeight > getDefenderPassReachHeight('DL'));
+  assert.equal(getPassArcHeight(maxHeight, 0.5), maxHeight);
+});
+
+test('blitz lobs have more airtime and a higher arc than standard throws', () => {
+  const standardFrames = getPassFlightFrames(80, 5);
+  const lobFrames = getPassFlightFrames(80, 5, true);
+
+  assert.ok(lobFrames >= standardFrames * 1.4);
+  assert.ok(getPassArcMaxHeight(80, false, true) > getPassArcMaxHeight(80, false));
+});
+
+test('elevated passes clear linemen and blitzers cannot bat them down', () => {
+  const maxHeight = getPassArcMaxHeight(70, false);
+  const lateLineHeight = getPassArcHeight(maxHeight, 0.84);
+
+  assert.ok(lateLineHeight > getDefenderPassReachHeight('DL'));
+  assert.equal(canDefenderDeflectPass({
+    defenderType: 'DL',
+    isPassRusher: false,
+    isEngagedWithBlocker: false,
+    distanceToBall: 5,
+    ballHeight: lateLineHeight
+  }), false);
+  assert.equal(canDefenderDeflectPass({
+    defenderType: 'LB',
+    isPassRusher: true,
+    isEngagedWithBlocker: false,
+    distanceToBall: 5,
+    ballHeight: 0
+  }), false);
+  assert.equal(canDefenderDeflectPass({
+    defenderType: 'DL',
+    isPassRusher: false,
+    isEngagedWithBlocker: true,
+    distanceToBall: 5,
+    ballHeight: 0
+  }), false);
+});
+
+test('yards to go stays tied to the first-down marker in both directions', () => {
+  assert.equal(calculateYardsToGo(455, 400, -1), 6);
+  assert.equal(calculateYardsToGo(530, 400, -1), 13);
+  assert.equal(calculateYardsToGo(545, 600, 1), 6);
+  assert.equal(calculateYardsToGo(470, 600, 1), 13);
+  assert.equal(calculateYardsToGo(444, 400, -1), 4);
+  assert.equal(calculateYardsToGo(556, 600, 1), 4);
+  assert.equal(calculateYardsToGo(390, 400, -1), 0);
+  assert.equal(calculateYardsToGo(610, 600, 1), 0);
+
+  for (const attackDirection of [-1, 1]) {
+    const endingY = 500 + (56 * attackDirection);
+    const result = resolvePlayResult({
+      lineOfScrimmageY: 500,
+      endingY,
+      attackDirection,
+      resultType: 'TACKLE',
+      fieldHeight: 1200,
+      endZoneHeight: 100
+    });
+    const firstDownMarkerY = 500 + (100 * attackDirection);
+    const remaining = calculateYardsToGo(endingY, firstDownMarkerY, attackDirection);
+
+    assert.equal(result.yardsGained, 6);
+    assert.equal(result.yardsGained + remaining, 10);
+  }
+});
+
+test('QB scramble protection prevents an immediate tackle but expires normally', () => {
+  assert.equal(canTackleQuarterback(30), false);
+  assert.equal(canTackleQuarterback(1), false);
+  assert.equal(canTackleQuarterback(0), true);
+});
+
+test('CPU releases open, pressured, and overdue passes before scrambling', () => {
+  const situation = {
+    hasTarget: true,
+    isDeepShotOpportunity: false,
+    hasOpenBreak: false,
+    isUnderHeavyPressure: false,
+    playClock: 0,
+    bestScore: 0
+  };
+
+  assert.equal(shouldCpuReleasePass({ ...situation, hasOpenBreak: true, playClock: 32 }), true);
+  assert.equal(shouldCpuReleasePass({ ...situation, isUnderHeavyPressure: true, playClock: 26 }), true);
+  assert.equal(shouldCpuReleasePass({ ...situation, playClock: 58 }), true);
+  assert.equal(shouldCpuReleasePass({ ...situation, hasTarget: false, playClock: 58 }), false);
+});
+
+test('CPU QB scrambles occasionally when pressured and passing options are poor', () => {
+  const situation = {
+    playClock: 32,
+    bestScore: 20,
+    isUnderHeavyPressure: true,
+    hasOpenBreak: false
+  };
+
+  assert.equal(shouldCpuScramble(situation, () => 0.1), true);
+  assert.equal(shouldCpuScramble(situation, () => 0.4), false);
+  assert.equal(shouldCpuScramble({ ...situation, hasOpenBreak: true }, () => 0), false);
+  assert.equal(shouldCpuScramble({ ...situation, bestScore: 31 }, () => 0), false);
+});
+
+test('QB run blockers prioritize the defender upfield', () => {
+  const runner: Entity = { x: 170, y: 500, radius: 10 };
+  const blocker: Entity = { x: 170, y: 520, radius: 10 };
+  const defenderAhead: Entity = { x: 170, y: 480, radius: 10 };
+  const defenderBehind: Entity = { x: 170, y: 510, radius: 10 };
+
+  const aheadScore = scoreRunBlockTarget(blocker, runner, defenderAhead, -1, true);
+  const behindScore = scoreRunBlockTarget(blocker, runner, defenderBehind, -1, true);
+
+  assert.ok(aheadScore < behindScore);
+  assert.ok(scoreRunBlockTarget(blocker, runner, defenderAhead, -1, true) < scoreRunBlockTarget(blocker, runner, defenderAhead, -1, false));
+});
 
 function createAlignedDefense(playKey: string, formation: 'SPREAD' | 'STACK' | 'TRIPS' = 'SPREAD') {
   const positions = formation === 'STACK'
@@ -571,6 +695,23 @@ test('Backyard Playmaker route line drawing gestures and ball clearance over lin
   const blitzGesture = evaluateDirtSwipeGesture(defender, 'DEFENDER', 0, 30, -1);
   assert.equal(blitzGesture.value, 'BLITZ', 'Rushing towards LOS should assign BLITZ');
 
+  const zoneGesture = evaluateDirtSwipeGesture(defender, 'DEFENDER', 0, -30, -1);
+  assert.equal(zoneGesture.value, 'ZONE', 'Swiping backward from LOS should assign ZONE');
+
+  const manGesture = evaluateDirtSwipeGesture(defender, 'DEFENDER', 40, 0, -1);
+  assert.equal(manGesture.value, 'MAN', 'Horizontal swipe should assign MAN');
+
+  assert.equal(
+    evaluateDirtSwipeGesture(defender, 'DEFENDER', 0, -30, 1).value,
+    'BLITZ',
+    'Blitz swipe should work when the field direction is reversed'
+  );
+  assert.equal(
+    evaluateDirtSwipeGesture(defender, 'DEFENDER', 0, 30, 1).value,
+    'ZONE',
+    'Zone swipe should work when the field direction is reversed'
+  );
+
   // 4. Backyard Buddy Callouts for Run Blocking & Routes:
   const blockQuote = getBackyardBuddyCallout('WR', 'BLOCK', true);
   assert.ok(blockQuote.includes('🛡️'), 'Block callout should have shield icon');
@@ -718,27 +859,10 @@ test('A user on defense starts the play ONLY by tapping the QB, no other taps st
   assert.equal(qbTap.playStarted, true, 'ONLY tapping QB starts the play when on defense');
 });
 
-test('User and AI can move defensive players before the snap', () => {
+test('AI pre-snap shifts defenders toward the RB side', () => {
   const lineOfScrimmageY = 900;
   const attackDirection = -1; // defense is above LOS at y < 900
-  const fieldWidth = 340;
   const defender: Entity = { x: 170, y: 840, startX: 170, startY: 840, radius: 10 };
-
-  // User drags defender to press the line of scrimmage
-  const targetX = 230;
-  const targetY = 880; // Legal pre-snap position (above LOS - 12)
-
-  const boundedX = Math.max(25, Math.min(fieldWidth - 25, targetX));
-  const boundedY = Math.max(45, Math.min(lineOfScrimmageY - 12, targetY));
-
-  defender.x = boundedX;
-  defender.y = boundedY;
-  defender.startX = boundedX;
-  defender.startY = boundedY;
-
-  assert.equal(defender.x, 230, 'Defender X position should be updated');
-  assert.equal(defender.y, 880, 'Defender Y position should be updated');
-  assert.ok(defender.y <= lineOfScrimmageY - 12, 'Defender must remain on legal defensive side of line');
 
   // AI pre-snap shift: LB slides toward RB side
   const rb = { x: 240, y: 948 };

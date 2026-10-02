@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { Volume2, VolumeX, BookOpen, RefreshCw, HelpCircle, X, Shield, Award, ChevronLeft, ChevronRight } from 'lucide-react';
-import { defensiveKeys, defensivePlaybook, offensiveKeys, offensivePlaybook } from './game/playbook';
+import { Volume2, VolumeX, RefreshCw, HelpCircle, X } from 'lucide-react';
+import { offensivePlaybook } from './game/playbook';
 import { sounds } from './game/sound';
 import { mountFootballGame, type GameEngineHandle } from './game/engine';
 
@@ -12,23 +12,18 @@ export default function App() {
   const [cpuScore, setCpuScore] = useState(0);
   const [downDistanceText, setDownDistanceText] = useState('1st & 10 at OWN 20');
   const [p1OffPlayState, setP1OffPlayState] = useState('SHORT_PASS');
-  const [p1OffFormationState, setP1OffFormationState] = useState('SHORT_PASS');
   const [p1DefPlayState, setP1DefPlayState] = useState('COVER3');
   const [p2OffPlayState, setP2OffPlayState] = useState('SHORT_PASS');
   const [p2DefPlayState, setP2DefPlayState] = useState('COVER3');
   const [activeOffenseState, setActiveOffenseState] = useState('P1');
   const [momentumState, setMomentumState] = useState(0);
   const [gameClockState, setGameClockState] = useState({ quarter: 1, seconds: 240 });
-  const [p1TimeoutsLeft, setP1TimeoutsLeft] = useState(3);
-  const [p2TimeoutsLeft, setP2TimeoutsLeft] = useState(3);
-  const [banner, setBanner] = useState<{ text: string; color: string; visible: boolean }>({
+  const [banner, setBanner] = useState<{ text: string; color: string; visible: boolean; big: boolean }>({
     text: '',
     color: '#ffcc00',
-    visible: false
+    visible: false,
+    big: false
   });
-  const [playbookModal, setPlaybookModal] = useState<'OFFENSE' | 'DEFENSE' | null>(null);
-  const formationSwipeStartRef = useRef<{ x: number; y: number } | null>(null);
-  const [formationDirection, setFormationDirection] = useState(1);
   const [showHelp, setShowHelp] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
 
@@ -40,9 +35,9 @@ export default function App() {
 
   // Banner timeout ref
   const bannerTimeoutRef = useRef<any>(null);
-  const showAnnouncement = (text: string, color = '#ffcc00') => {
+  const showAnnouncement = (text: string, color = '#ffcc00', big = false) => {
     if (bannerTimeoutRef.current) clearTimeout(bannerTimeoutRef.current);
-    setBanner({ text, color, visible: true });
+    setBanner({ text, color, visible: true, big });
     bannerTimeoutRef.current = setTimeout(() => {
       setBanner(prev => ({ ...prev, visible: false }));
     }, 2800);
@@ -199,14 +194,10 @@ export default function App() {
       setUserScore,
       setCpuScore,
       setP1DefPlayState,
-      setPlaybookModal,
       setMomentumState,
       setGameClockState: (quarter, seconds) => setGameClockState({ quarter, seconds }),
       showAnnouncement,
-      onEngineReady: engine => { engineRef.current = engine; },
-      onFormationShifted: (direction: number) => {
-        handleShiftFormation(direction);
-      }
+      onEngineReady: engine => { engineRef.current = engine; }
     });
   }, []);
 
@@ -214,7 +205,6 @@ export default function App() {
   const handleSelectOffensePlay = (key: string) => {
     if (activeOffenseState === 'P1') {
       setP1OffPlayState(key);
-      if (offensivePlaybook[key]?.alignment) setP1OffFormationState(key);
       if (engineRef.current) {
         engineRef.current.selectOffense(key);
       }
@@ -230,81 +220,14 @@ export default function App() {
     }
   };
 
-  const handleShiftFormation = (direction: number) => {
-    if (!playbookModal) return;
-    const keys = playbookModal === 'OFFENSE' ? offensiveFormationKeys : defensiveKeys;
-    const activeKey = playbookModal === 'OFFENSE' ? p1OffFormationState : p1DefPlayState;
-    const nextIndex = (keys.indexOf(activeKey) + direction + keys.length) % keys.length;
-    setFormationDirection(direction);
-    if (playbookModal === 'OFFENSE') handleSelectOffensePlay(keys[nextIndex]);
-    else handleSelectDefensePlay(keys[nextIndex]);
-  };
-
-  const handleFormationPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
-    const start = formationSwipeStartRef.current;
-    formationSwipeStartRef.current = null;
-    if (!start) return;
-    const deltaX = event.clientX - start.x;
-    const deltaY = event.clientY - start.y;
-    if (Math.abs(deltaX) > 40 && Math.abs(deltaX) > Math.abs(deltaY)) {
-      handleShiftFormation(deltaX < 0 ? 1 : -1);
-    }
-  };
-
-  const handleOpenPlaybook = () => {
-    if (activeOffenseState === 'P1' && engineRef.current) {
-      engineRef.current.openPlaybook();
-    }
-  };
-
-  const handleOpenDefPlaybook = () => {
-    if (activeOffenseState === 'P2' && engineRef.current) {
-      engineRef.current.openDefPlaybook();
-    }
-  };
-
   const handleResetGame = () => {
     setUserScore(0);
     setCpuScore(0);
-    setP1TimeoutsLeft(3);
-    setP2TimeoutsLeft(3);
     if (engineRef.current) {
       engineRef.current.resetGame();
       showAnnouncement("GAME RESET - P1 BALL 1ST & 10", "#00ffff");
     }
   };
-
-  const handleUseTimeout = () => {
-    if (playbookModal === null) {
-      return;
-    }
-
-    const canUsePlayerTimeout = activeOffenseState === 'P1' ? p1TimeoutsLeft > 0 : p1TimeoutsLeft > 0;
-    if (!canUsePlayerTimeout) {
-      showAnnouncement('NO TIMEOUTS LEFT', '#ff6666');
-      return;
-    }
-
-    setP1TimeoutsLeft(prev => Math.max(0, prev - 1));
-    setP2TimeoutsLeft(prev => Math.max(0, prev - 1));
-    setPlaybookModal(null);
-    setTimeout(() => {
-      setPlaybookModal(activeOffenseState === 'P1' ? 'OFFENSE' : 'DEFENSE');
-    }, 0);
-    showAnnouncement('TIMEOUT CALLED', '#00ffff');
-  };
-
-  const offensiveFormationKeys = offensiveKeys.filter(key => offensivePlaybook[key].alignment);
-  const offensiveRunKeys = offensiveKeys.filter(key => !offensivePlaybook[key].alignment);
-  const formationKeys = playbookModal === 'OFFENSE' ? offensiveFormationKeys : defensiveKeys;
-  const activeFormationKey = playbookModal === 'OFFENSE' ? p1OffFormationState : p1DefPlayState;
-  const activeFormationIndex = Math.max(0, formationKeys.indexOf(activeFormationKey));
-  const activeFormation = playbookModal === 'OFFENSE'
-    ? offensivePlaybook[activeFormationKey]
-    : defensivePlaybook[activeFormationKey];
-  const activeFormationLabel = playbookModal === 'OFFENSE'
-    ? (offensivePlaybook[activeFormationKey]?.alignment || offensivePlaybook[activeFormationKey]?.name || activeFormationKey)
-    : (defensivePlaybook[activeFormationKey]?.name || activeFormationKey);
 
   return (
     <div className="relative w-screen h-screen overflow-hidden flex flex-col items-center justify-center bg-[#030704] text-white font-mono select-none">
@@ -375,8 +298,8 @@ export default function App() {
       {/* Main Game Announcement Banner */}
       {banner.visible && (
         <div
-          className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-black/95 border-3 rounded-lg px-6 py-3 font-extrabold text-center z-50 tracking-wider shadow-[0_5px_30px_rgba(0,0,0,0.9)] animate-pulse"
-          style={{ borderColor: banner.color, color: banner.color, fontSize: '0.95rem' }}
+          className={`absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-black/95 border-3 rounded-lg font-extrabold text-center z-50 tracking-wider shadow-[0_5px_30px_rgba(0,0,0,0.9)] animate-pulse ${banner.big ? 'max-w-[92vw] px-4 py-4 text-2xl leading-tight' : 'max-w-[90vw] px-6 py-3 text-[0.95rem]'}`}
+          style={{ borderColor: banner.color, color: banner.color }}
         >
           {banner.text}
         </div>
@@ -388,91 +311,6 @@ export default function App() {
           ref={canvasRef}
           className="bg-[#176620] shadow-[0_8px_30px_rgba(0,0,0,0.9)] rounded-md border-3 border-white max-w-full touch-none"
         />
-        {playbookModal && (
-          <div
-            onPointerDown={(event) => event.stopPropagation()}
-            onPointerUp={(event) => event.stopPropagation()}
-            onClick={(event) => event.stopPropagation()}
-            className="fixed bottom-2 left-1/2 -translate-x-1/2 z-30 pointer-events-auto"
-          >
-            {/* Minimized sleek formation pill */}
-            <div className="flex items-center gap-1.5 px-2.5 py-1 bg-black/75 backdrop-blur-md border border-white/20 rounded-full shadow-[0_4px_20px_rgba(0,0,0,0.6)]">
-              {/* Prev button */}
-              <button
-                onClick={() => handleShiftFormation(-1)}
-                className="w-6 h-6 flex items-center justify-center text-white/80 hover:text-white rounded-full bg-white/10 active:scale-90 transition cursor-pointer"
-                aria-label="Previous formation"
-                title="Previous formation (or swipe field)"
-              >
-                <ChevronLeft size={16} />
-              </button>
-
-              {/* Swipable compact badge */}
-              <div
-                key={activeFormationKey}
-                onPointerDown={(event) => {
-                  formationSwipeStartRef.current = { x: event.clientX, y: event.clientY };
-                  event.currentTarget.setPointerCapture(event.pointerId);
-                }}
-                onPointerUp={handleFormationPointerUp}
-                onPointerCancel={() => { formationSwipeStartRef.current = null; }}
-                className="flex items-center gap-1.5 px-2 cursor-ew-resize select-none touch-pan-y"
-                title="Swipe horizontally to change formation"
-              >
-                <span className={`text-[0.65rem] font-black ${playbookModal === 'OFFENSE' ? 'text-[#00ffff]' : 'text-[#ff6666]'}`}>
-                  {playbookModal === 'OFFENSE' ? '⚡' : '🛡️'}
-                </span>
-                <span className={`text-xs font-black tracking-wider uppercase ${playbookModal === 'OFFENSE' ? 'text-[#00ffff]' : 'text-[#ff6666]'}`}>
-                  {activeFormationLabel}
-                </span>
-
-                {/* Mini Dots */}
-                <div className="flex items-center gap-1 ml-0.5">
-                  {formationKeys.map((key, index) => (
-                    <button
-                      key={key}
-                      onClick={() => playbookModal === 'OFFENSE' ? handleSelectOffensePlay(key) : handleSelectDefensePlay(key)}
-                      className={`w-1.5 h-1.5 rounded-full transition cursor-pointer ${index === activeFormationIndex ? 'bg-[#ffcc00] scale-125' : 'bg-white/30'}`}
-                      aria-label={`Select ${key}`}
-                    />
-                  ))}
-                </div>
-              </div>
-
-              {/* Next button */}
-              <button
-                onClick={() => handleShiftFormation(1)}
-                className="w-6 h-6 flex items-center justify-center text-white/80 hover:text-white rounded-full bg-white/10 active:scale-90 transition cursor-pointer"
-                aria-label="Next formation"
-                title="Next formation (or swipe field)"
-              >
-                <ChevronRight size={16} />
-              </button>
-
-              {/* Tiny divider */}
-              <div className="w-[1px] h-3.5 bg-white/20 mx-0.5" />
-
-              {/* Timeout button if timeouts remaining */}
-              {p1TimeoutsLeft > 0 && (
-                <button
-                  onClick={handleUseTimeout}
-                  className="text-[0.55rem] font-bold text-neutral-300 hover:text-white px-1.5 py-0.5 rounded bg-white/10 cursor-pointer"
-                >
-                  TO ({p1TimeoutsLeft})
-                </button>
-              )}
-
-              {/* Small ready button */}
-              <button
-                onClick={() => setPlaybookModal(null)}
-                className="bg-[#ffcc00] hover:bg-yellow-400 text-black px-2 py-0.5 rounded-full text-[0.55rem] font-black cursor-pointer shadow active:scale-95"
-                aria-label="Close formation controls"
-              >
-                READY ✓
-              </button>
-            </div>
-          </div>
-        )}
       </div>
 
       {/* Footer Controls & Info */}
@@ -524,7 +362,7 @@ export default function App() {
                   <li><b className="text-white">Slingshot Pass:</b> Touch and drag backwards to aim forward. Release to launch the football cleanly!</li>
                   <li><b className="text-white">Backward Throw / QB Run:</b> Aiming and releasing backwards turns the QB into a runner with all teammates lead-blocking!</li>
                   <li><b className="text-white">Throw to RB:</b> Hit your Running Back streaking deep on a fly or checking down into the flat!</li>
-                  <li><b className="text-white">QB Scramble:</b> Tap the QB during dropback to tuck and scramble!</li>
+                  <li><b className="text-white">QB Scramble:</b> Pull and release backward to tuck the ball and run with the QB.</li>
                 </ul>
               </div>
 

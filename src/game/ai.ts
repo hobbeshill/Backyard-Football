@@ -13,6 +13,51 @@ export interface CpuCarrierMoveResult {
   lateralVx?: number;
 }
 
+export interface CpuPassReleaseSituation {
+  hasTarget: boolean;
+  isDeepShotOpportunity: boolean;
+  hasOpenBreak: boolean;
+  isUnderHeavyPressure: boolean;
+  playClock: number;
+  bestScore: number;
+}
+
+export function shouldCpuReleasePass(situation: CpuPassReleaseSituation): boolean {
+  if (!situation.hasTarget) return false;
+  return situation.isDeepShotOpportunity ||
+    (situation.hasOpenBreak && situation.playClock >= 32) ||
+    (situation.isUnderHeavyPressure && situation.playClock > 25) ||
+    (situation.playClock > 38 && situation.bestScore > 8) ||
+    situation.playClock >= 58;
+}
+
+export interface CpuScrambleSituation {
+  playClock: number;
+  bestScore: number;
+  isUnderHeavyPressure: boolean;
+  hasOpenBreak: boolean;
+}
+
+export function shouldCpuScramble(situation: CpuScrambleSituation, random: () => number = Math.random): boolean {
+  if (situation.playClock < 28 || situation.bestScore > 30 || situation.hasOpenBreak) return false;
+  const chance = situation.isUnderHeavyPressure ? 0.3 : situation.playClock >= 48 ? 0.08 : 0;
+  return random() < chance;
+}
+
+export function scoreRunBlockTarget(
+  blocker: Entity,
+  runner: Entity,
+  defender: Entity,
+  attackDirection: number,
+  isQbRunner: boolean
+): number {
+  const defenderDistance = Math.hypot(defender.x - runner.x, defender.y - runner.y);
+  const blockerDistance = Math.hypot(defender.x - blocker.x, defender.y - blocker.y);
+  const isInFront = (defender.y - runner.y) * attackDirection > 0;
+  const leadBlockBonus = isQbRunner && isInFront ? 45 : 0;
+  return blockerDistance + defenderDistance * 0.7 - leadBlockBonus;
+}
+
 /**
  * Evaluates the opposing defensive look pre-snap and audibles routes,
  * pass protection blockers, and RB alignment for the CPU offense.
