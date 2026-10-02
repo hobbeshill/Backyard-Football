@@ -217,6 +217,27 @@ test('CPU matches more receivers in man coverage against short-pass tendencies',
   assert.ok([...assignments.values()].filter(assignment => assignment === 'ZONE').length >= 3);
 });
 
+test('CPU adapts to repeated hot routes across different plays and formations', () => {
+  const { defenders, eligibleReceivers } = createAlignedDefense('COVER3');
+  const assignments = chooseCpuDefensiveAssignments(
+    defenders,
+    eligibleReceivers,
+    {
+      down: 2,
+      yardsToGo: 8,
+      lineOfScrimmageY: 500,
+      attackDirection: -1,
+      recentPlays: [
+        { play: 'SHORT_PASS', isPass: true, formation: 'SPREAD', routes: { left: 'SLANT-L' } },
+        { play: 'CONTROL_PASS', isPass: true, formation: 'STACK', routes: { left: 'SLANT-L' } }
+      ]
+    },
+    () => 1
+  );
+
+  assert.equal([...assignments.values()].filter(assignment => assignment === 'MAN').length, 3);
+});
+
 test('CPU tightens man coverage against a compact receiver formation', () => {
   const { defenders, eligibleReceivers } = createAlignedDefense('COVER3');
   eligibleReceivers[0].x = 205;
@@ -488,9 +509,9 @@ test('moveToward applies accessible calibrated speed factor', async () => {
   const entity: Entity = { x: 100, y: 100, vx: 0, vy: 0, radius: 10 };
   moveToward(entity, 200, 100, 1.0, 10.0, 0);
 
-  // Speed is tuned to maxSpeed * 0.68 for accessible gameplay pace
+  // Movement is globally scaled to keep the on-field pace manageable.
   assert.ok(entity.vx! < 7.5, 'Adjusted speed should be calibrated under 7.5 for maxSpeed 10');
-  assert.ok(entity.vx! > 6.0, 'Adjusted speed should be around 6.8');
+  assert.ok(entity.vx! > 6.0, 'Adjusted speed should be around 6.46');
 });
 
 test('CPU defense assigns QB_SPY when opponent has scrambled or run with QB', async () => {

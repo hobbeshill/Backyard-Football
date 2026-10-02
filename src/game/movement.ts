@@ -1,5 +1,7 @@
 import type { Entity } from './types';
 
+export const GAME_SPEED_SCALE = 0.95;
+
 export function distToSegment(
   p1: { x: number; y: number },
   p2: { x: number; y: number },
@@ -25,7 +27,7 @@ export function moveToward(
   if (entity.vx === undefined) entity.vx = 0;
   if (entity.vy === undefined) entity.vy = 0;
 
-  const adjustedSpeed = maxSpeed * 0.68;
+  const adjustedSpeed = maxSpeed * 0.68 * GAME_SPEED_SCALE;
   const angle = Math.atan2(targetY - entity.y, targetX - entity.x);
   const targetVx = Math.cos(angle) * adjustedSpeed;
   const targetVy = Math.sin(angle) * adjustedSpeed;

@@ -3,7 +3,7 @@ import { defensiveKeys, defensivePlaybook, middleRoutes, offensiveKeys, offensiv
 import { alignDefenderAcrossFromRunningBack, alignDefenders, chooseCpuDefensiveAssignments } from './defense';
 import { evaluateCpuOffensiveAudibles, evaluateCpuBallCarrierMoves, shouldCpuReleasePass, shouldCpuScramble, scoreRunBlockTarget } from './ai';
 import { createFumbleBall } from './fumbles';
-import { distToSegment, moveToward, resolveCollisions, updateRouteMovement } from './movement';
+import { distToSegment, GAME_SPEED_SCALE, moveToward, resolveCollisions, updateRouteMovement } from './movement';
 import { resolvePlayResult, calculateBrokenTackleChance, calculateYardsToGo, getPassArcHeight, getPassArcMaxHeight, getPassFlightFrames, canDefenderDeflectPass, canTackleQuarterback } from './rules';
 import { sounds } from './sound';
 import { evaluateDirtSwipeGesture, drawDirtSwipeGesture, getBackyardBuddyCallout } from './chalkMenu';
@@ -89,7 +89,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   let currentDown = 1;
   let yardsToGo = 10;
   let quarter = 1;
-  let gameClockSeconds = 240;
+  let gameClockSeconds = 120;
   let gameClockRemainderMs = 0;
   let lastClockFrameTime: number | null = null;
   let gameClockRunning = true;
@@ -732,7 +732,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       }
       if (quarterBreakRemainingMs === 0) {
         quarter++;
-        gameClockSeconds = 240;
+        gameClockSeconds = 120;
         gameClockRunning = true;
         publishGameClock();
         if (quarter === 3) {
@@ -1225,7 +1225,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       p1Score = 0;
       p2Score = 0;
       quarter = 1;
-      gameClockSeconds = 240;
+      gameClockSeconds = 120;
       gameClockRemainderMs = 0;
       gameClockRunning = true;
       quarterBreakRemainingMs = 0;
@@ -2200,9 +2200,9 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     }
 
     if (phase === 'HANDOFF' && rb) {
-      qb.y += (0.24 * attackDirection);
+      qb.y += (0.24 * GAME_SPEED_SCALE * attackDirection);
       const meshTargetX = rb.side === 'right' ? 200 : 140;
-      qb.x += (meshTargetX - qb.x) * 0.2;
+      qb.x += (meshTargetX - qb.x) * 0.2 * GAME_SPEED_SCALE;
 
       const targetX = qb.x;
       const targetY = qb.y + (5 * attackDirection);
@@ -2238,11 +2238,11 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           const progress = 1 - (activeEntity.jukeTimer || 0) / 12;
           const curve = Math.sin(progress * Math.PI);
           const stepSpeed = (activeEntity.jukeVx || 0) * (curve * 1.5 + 0.3);
-          activeEntity.x += stepSpeed;
+          activeEntity.x += stepSpeed * GAME_SPEED_SCALE;
         } else {
           if (activeEntity.vx === undefined) activeEntity.vx = 0;
           activeEntity.vx *= 0.88;
-          activeEntity.x += activeEntity.vx * 0.8;
+          activeEntity.x += activeEntity.vx * 0.8 * GAME_SPEED_SCALE;
         }
         activeEntity.x = Math.max(30, Math.min(fieldWidth - 30, activeEntity.x));
 
@@ -2256,11 +2256,11 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
             // QB takes a crisp 3-step drop backwards away from the line of scrimmage at the beginning of the play
             const progress = (qb.dropStepTimer || 0) / 28;
             const dropSpeed = Math.sin(progress * Math.PI) * 1.35;
-            qb.y -= (dropSpeed * attackDirection);
+            qb.y -= (dropSpeed * GAME_SPEED_SCALE * attackDirection);
           }
         } else if (phase === 'RUNNING') {
           const runSpeed = (((activeEntity.powerBoostTimer || 0) > 0) ? 2.65 : 1.84);
-          activeEntity.y += (runSpeed * attackDirection);
+          activeEntity.y += (runSpeed * GAME_SPEED_SCALE * attackDirection);
 
           // CPU AI ball carrier moves (juke / power truck boost)
           if (activeOffense === 'P2' && activeEntity) {
@@ -2291,17 +2291,17 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
             const blockingDL = defenders.find(d => d && d.type === 'DL' && Math.hypot(d.x - activeEntity.x, d.y - activeEntity.y) < 35);
             if (blockingDL) {
               const dodgeDir = activeEntity.x > blockingDL.x ? 0.5 : -0.5;
-              activeEntity.x += dodgeDir;
+              activeEntity.x += dodgeDir * GAME_SPEED_SCALE;
             }
           }
 
           if (playObj.type === 'SWEEP' && activeEntity === rb) {
             const targetOutsideX = (rb.side === 'right') ? 260 : 80;
-            rb.x += (targetOutsideX - rb.x) * 0.05;
+            rb.x += (targetOutsideX - rb.x) * 0.05 * GAME_SPEED_SCALE;
           }
           if (rb && rb.routeType === 'ANGLE' && activeEntity === rb) {
             const angleTargetX = (rb.side === 'right') ? 220 : 120;
-            rb.x += (angleTargetX - rb.x) * 0.04;
+            rb.x += (angleTargetX - rb.x) * 0.04 * GAME_SPEED_SCALE;
           }
         }
         activeEntity.x = Math.max(25, Math.min(fieldWidth - 25, activeEntity.x));
@@ -2529,7 +2529,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       if (rb !== activeEntity && rb && rb.caught) {
         if ((rb.powerBoostTimer || 0) > 0) rb.powerBoostTimer!--;
         const runSpeed = ((rb.powerBoostTimer || 0) > 0) ? 3.36 : 2.24;
-        rb.y += (runSpeed * attackDirection);
+        rb.y += (runSpeed * GAME_SPEED_SCALE * attackDirection);
         rb.x = Math.max(25, Math.min(fieldWidth - 25, rb.x));
       }
     }

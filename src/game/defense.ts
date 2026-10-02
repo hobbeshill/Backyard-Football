@@ -171,6 +171,19 @@ export function chooseCpuDefensiveAssignments(
   });
 
   const recentPlays = situation.recentPlays.slice(-6);
+  const routeCounts = new Map<string, number>();
+  recentPlays.forEach(play => {
+    if (!play.isPass || !play.routes) return;
+    new Set(Object.values(play.routes).filter((route): route is string => Boolean(route)))
+      .forEach(route => routeCounts.set(route, (routeCounts.get(route) || 0) + 1));
+  });
+  const repeatedRoutes = new Set(
+    [...routeCounts].filter(([, count]) => count >= 2).map(([route]) => route)
+  );
+  const repeatedVerticalRoute = [...repeatedRoutes].some(route => route === 'GO' || route.startsWith('FLAG'));
+  const repeatedShortRoute = [...repeatedRoutes].some(route =>
+    route.startsWith('SLANT') || route.startsWith('CROSS') || route === 'COMEBACK'
+  );
   const recentRuns = recentPlays.filter(play => !play.isPass).length;
   const runRate = recentPlays.length > 0 ? recentRuns / recentPlays.length : 0.45;
   const shortPassCount = recentPlays.filter(play => play.isPass && play.play !== 'DEEP_SHOT').length;
@@ -182,7 +195,7 @@ export function chooseCpuDefensiveAssignments(
   const passSituation =
     ((situation.down === 3 || situation.down === 4) && situation.yardsToGo >= 6) ||
     situation.yardsToGo >= 9;
-  const deepThreat = deepPassCount >= 2 ||
+  const deepThreat = deepPassCount >= 2 || repeatedVerticalRoute ||
     (passSituation && situation.yardsToGo >= 8 && runRate < 0.5);
 
   const targetXs = eligibleReceivers.filter(receiver => !receiver.isRB).map(receiver => receiver.x);
@@ -190,11 +203,11 @@ export function chooseCpuDefensiveAssignments(
     Math.max(...targetXs) - Math.min(...targetXs) <= 140 ||
     targetXs.some((firstX, index) => targetXs.slice(index + 1).some(secondX => Math.abs(firstX - secondX) <= 35))
   );
-  const shortPassThreat = shortPassCount >= 2 || compactFormation ||
+  const shortPassThreat = shortPassCount >= 2 || repeatedShortRoute || compactFormation ||
     ((situation.down === 3 || situation.down === 4) && situation.yardsToGo <= 5 && !runSituation);
 
   if (shortPassThreat) {
-    const desiredManCount = shortPassCount >= 2 ? 3 : 2;
+    const desiredManCount = shortPassCount >= 2 || repeatedShortRoute ? 3 : 2;
     const currentManCount = () => [...assignments.values()].filter(assignment => assignment === 'MAN').length;
     const manCandidates = defenders
       .map((defender, index) => ({ defender, index }))
@@ -299,8 +312,8 @@ export function chooseCpuDefensiveAssignments(
   );
 
   const currentManCount = () => [...assignments.values()].filter(assignment => assignment === 'MAN').length;
-  if (isPlaySpammed && lastPlay?.isPass && currentManCount() < Math.min(3, eligibleReceivers.length)) {
-    // Blanket spammed pass play by matching extra receivers in tight man coverage
+  if ((isPlaySpammed || repeatedRoutes.size > 0) && lastPlay?.isPass && currentManCount() < Math.min(3, eligibleReceivers.length)) {
+    // Match extra receivers when either the play call or route concept repeats.
     const zoneDefenderIdx = [3, 4, 2, 1].find(idx => assignments.get(idx) === 'ZONE');
     if (zoneDefenderIdx !== undefined) {
       assignments.set(zoneDefenderIdx, 'MAN');
