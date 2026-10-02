@@ -87,6 +87,64 @@ export const offensivePlaybook: Record<string, PlayOption> = {
     bestVs: ['BLITZ', 'ROBBER'],
     weakVs: ['COVER2MAN', 'QUARTERS'],
     expectedGain: [4, 10]
+  },
+  MESH: {
+    name: 'CONCEPT: MESH',
+    type: 'PASS',
+    alignment: 'SPREAD',
+    left: 'CROSS-R',
+    right: 'CROSS-L',
+    center: 'HITCH',
+    rbRoute: 'FLAT',
+    desc: 'Dual crossing drags pick man coverage with center hitch',
+    risk: 'SAFE',
+    routeType: 'SHORT',
+    bestVs: ['COVER2MAN', 'ROBBER', 'BLITZ'],
+    weakVs: ['QUARTERS', 'TAMPA2'],
+    expectedGain: [6, 14]
+  },
+  SMASH: {
+    name: 'CONCEPT: SMASH',
+    type: 'PASS',
+    alignment: 'SPREAD',
+    left: 'HITCH',
+    right: 'FLAG-R',
+    center: 'CROSS-L',
+    rbRoute: 'FLAT',
+    desc: 'Hi-Lo corner + hitch combo that shreds Cover 2 / Tampa 2',
+    risk: 'BALANCED',
+    routeType: 'MEDIUM',
+    bestVs: ['TAMPA2', 'COVER3'],
+    weakVs: ['QUARTERS', 'BLITZ'],
+    expectedGain: [10, 22]
+  },
+  POST_WHEEL: {
+    name: 'CONCEPT: POST-WHEEL',
+    type: 'PASS',
+    alignment: 'TRIPS',
+    left: 'POST-R',
+    right: 'FLAG-R',
+    center: 'WHEEL',
+    rbRoute: 'FLAT',
+    desc: 'Deep post & sideline wheel stretch that attacks Cover 3 & single-high',
+    risk: 'EXPLOSIVE',
+    routeType: 'VERTICAL',
+    bestVs: ['COVER3', 'ROBBER', 'QUARTERS'],
+    weakVs: ['BLITZ', 'COVER2MAN'],
+    expectedGain: [18, 38]
+  },
+  PUNT: {
+    name: 'SPECIAL TEAMS: PUNT',
+    type: 'PUNT',
+    alignment: 'SPREAD',
+    left: 'GO',
+    right: 'GO',
+    center: 'BLOCK',
+    rbRoute: 'BLOCK',
+    desc: '4th Down Punt: High soaring spiral punt to flip field position',
+    risk: 'SAFE',
+    routeType: 'VERTICAL',
+    expectedGain: [35, 55]
   }
 };
 
@@ -135,3 +193,5 @@ export const wrRoutes = ['SLANT-L', 'SLANT-R', 'FLAG-L', 'FLAG-R', 'COMEBACK', '
 export const outsideRoutes = wrRoutes;
 export const middleRoutes = wrRoutes;
 export const runningBackRoutes = ['FLAT', 'GO', 'ANGLE', 'BLOCK'];
+export const conceptRoutes = ['POST-L', 'POST-R', 'HITCH', 'WHEEL'];
+export const allRoutes = [...wrRoutes, ...conceptRoutes];

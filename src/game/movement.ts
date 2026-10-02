@@ -1,6 +1,6 @@
 import type { Entity } from './types';
 
-export const GAME_SPEED_SCALE = 0.95;
+export const GAME_SPEED_SCALE = 0.77;
 
 export function distToSegment(
   p1: { x: number; y: number },
@@ -27,7 +27,8 @@ export function moveToward(
   if (entity.vx === undefined) entity.vx = 0;
   if (entity.vy === undefined) entity.vy = 0;
 
-  const adjustedSpeed = maxSpeed * 0.68 * GAME_SPEED_SCALE;
+  const playerSpeedMod = entity.speedMultiplier || 1.0;
+  const adjustedSpeed = maxSpeed * 0.68 * GAME_SPEED_SCALE * playerSpeedMod;
   const angle = Math.atan2(targetY - entity.y, targetX - entity.x);
   const targetVx = Math.cos(angle) * adjustedSpeed;
   const targetVy = Math.sin(angle) * adjustedSpeed;
@@ -102,6 +103,12 @@ export function updateRouteMovement(
     isCutting = receiver.timer >= 60 && receiver.timer <= 80;
   } else if (receiver.routeType === 'CROSS-L' || receiver.routeType === 'CROSS-R') {
     isCutting = receiver.timer >= 50 && receiver.timer <= 72;
+  } else if (receiver.routeType === 'POST-L' || receiver.routeType === 'POST-R') {
+    isCutting = receiver.timer >= 45 && receiver.timer <= 70;
+  } else if (receiver.routeType === 'HITCH') {
+    isCutting = receiver.timer >= 32 && receiver.timer <= 52;
+  } else if (receiver.routeType === 'WHEEL') {
+    isCutting = receiver.timer >= 28 && receiver.timer <= 48;
   }
   receiver.isCutting = isCutting;
 
@@ -115,10 +122,11 @@ export function updateRouteMovement(
     }
   }
 
-  const isDeepRoute = receiver.routeType === 'GO' || receiver.routeType === 'FLAG-L' || receiver.routeType === 'FLAG-R';
-  const speed = isDeepRoute
+  const isDeepRoute = receiver.routeType === 'GO' || receiver.routeType === 'FLAG-L' || receiver.routeType === 'FLAG-R' || receiver.routeType === 'POST-L' || receiver.routeType === 'POST-R' || receiver.routeType === 'WHEEL';
+  const playerSpeedMod = receiver.speedMultiplier || 1.0;
+  const speed = (isDeepRoute
     ? (isChucked ? 1.40 : 1.95)
-    : (isCutting ? (isChucked ? 1.15 : 1.55) : 1.40);
+    : (isCutting ? (isChucked ? 1.15 : 1.55) : 1.40)) * playerSpeedMod;
   let targetX = receiver.x;
   let targetY = receiver.y;
 
@@ -143,6 +151,23 @@ export function updateRouteMovement(
   } else if (receiver.routeType === 'CROSS-R') {
     if (receiver.timer < 45) targetY += speed * direction;
     else { targetY += speed * 0.35 * direction; targetX += speed * 1.4; }
+  } else if (receiver.routeType === 'POST-L') {
+    if (receiver.timer < 42) targetY += speed * 1.15 * direction;
+    else { targetY += speed * 0.85 * direction; targetX -= speed * 1.05; }
+  } else if (receiver.routeType === 'POST-R') {
+    if (receiver.timer < 42) targetY += speed * 1.15 * direction;
+    else { targetY += speed * 0.85 * direction; targetX += speed * 1.05; }
+  } else if (receiver.routeType === 'HITCH') {
+    if (receiver.timer < 36) targetY += speed * 1.1 * direction;
+    else targetY -= speed * 0.55 * direction;
+  } else if (receiver.routeType === 'WHEEL') {
+    if (receiver.timer < 28) {
+      const sideDir = (receiver.startX || receiver.x) < fieldWidth / 2 ? -1 : 1;
+      targetX += sideDir * speed * 1.2;
+      targetY += speed * 0.4 * direction;
+    } else {
+      targetY += speed * 1.35 * direction;
+    }
   } else if (receiver.routeType === 'GO') {
     targetY += speed * 1.25 * direction;
   }

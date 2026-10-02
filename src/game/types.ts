@@ -33,6 +33,8 @@ export interface Entity {
   vx?: number;
   vy?: number;
   speed?: number;
+  speedMultiplier?: number;
+  archetype?: string;
   radius: number;
   color?: string;
   boostUsed?: boolean;
@@ -105,4 +107,9 @@ export interface Ball {
   maxZ: number;
   flightFrames: number;
   currentFrame: number;
+  targetX?: number;
+  targetY?: number;
+  intendedTarget?: Entity | null;
+  isKickoff?: boolean;
+  isPunt?: boolean;
 }

@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { Volume2, VolumeX, RefreshCw, HelpCircle, X } from 'lucide-react';
-import { offensivePlaybook } from './game/playbook';
+import { Volume2, VolumeX, RefreshCw, HelpCircle, X, Users, Shield } from 'lucide-react';
+import { offensivePlaybook, defensivePlaybook } from './game/playbook';
 import { sounds } from './game/sound';
 import { mountFootballGame, type GameEngineHandle } from './game/engine';
+import { TEAMS, getAllTeams, type TeamProfile } from './game/teams';
 
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -12,10 +13,15 @@ export default function App() {
   const [cpuScore, setCpuScore] = useState(0);
   const [downDistanceText, setDownDistanceText] = useState('1st & 10 at OWN 20');
   const [p1OffPlayState, setP1OffPlayState] = useState('SHORT_PASS');
+  const [p1OffFormationState, setP1OffFormationState] = useState<'SPREAD' | 'STACK' | 'TRIPS'>('SPREAD');
   const [p1DefPlayState, setP1DefPlayState] = useState('COVER3');
   const [p2OffPlayState, setP2OffPlayState] = useState('SHORT_PASS');
   const [p2DefPlayState, setP2DefPlayState] = useState('COVER3');
   const [activeOffenseState, setActiveOffenseState] = useState('P1');
+  const [p1TeamState, setP1TeamState] = useState<TeamProfile>(TEAMS.ARROWS);
+  const [p2TeamState, setP2TeamState] = useState<TeamProfile>(TEAMS.ENFORCERS);
+  const [showTeamModal, setShowTeamModal] = useState(true);
+  const [hasKickedOff, setHasKickedOff] = useState(false);
   const [momentumState, setMomentumState] = useState(0);
   const [gameClockState, setGameClockState] = useState({ quarter: 1, seconds: 120 });
   const [banner, setBanner] = useState<{ text: string; color: string; visible: boolean; big: boolean }>({
@@ -194,12 +200,28 @@ export default function App() {
       setUserScore,
       setCpuScore,
       setP1DefPlayState,
+      setP1OffFormationState,
       setMomentumState,
+      setP1TeamState,
+      setP2TeamState,
       setGameClockState: (quarter, seconds) => setGameClockState({ quarter, seconds }),
       showAnnouncement,
       onEngineReady: engine => { engineRef.current = engine; }
     });
   }, []);
+
+  // Handlers for switching teams
+  const handleSelectP1Team = (teamId: string) => {
+    if (engineRef.current) {
+      engineRef.current.selectP1Team(teamId);
+    }
+  };
+
+  const handleSelectP2Team = (teamId: string) => {
+    if (engineRef.current) {
+      engineRef.current.selectP2Team(teamId);
+    }
+  };
 
   // Handlers for user changing offensive/defensive plays (user only controls their own side)
   const handleSelectOffensePlay = (key: string) => {
@@ -232,12 +254,27 @@ export default function App() {
   return (
     <div className="relative w-screen h-screen overflow-hidden flex flex-col items-center justify-center bg-[#030704] text-white font-mono select-none">
       
-      {/* Top Header & Scoreboard - Uncluttered, clean, high-visibility score */}
+      {/* Top Header & Scoreboard */}
       <header className="flex flex-col items-center justify-center z-20 mb-1 w-full max-w-[430px] px-2 pt-1">
+        {/* Team Matchup Selector Button */}
+        <button
+          onClick={() => setShowTeamModal(true)}
+          className="flex items-center gap-1.5 px-2.5 py-0.5 mb-1 bg-black/85 hover:bg-neutral-900 border border-[#ffcc00]/60 rounded text-[0.60rem] font-bold text-neutral-200 transition cursor-pointer active:scale-95 shadow-md"
+          title="Change Teams, Rosters & Strengths/Weaknesses"
+        >
+          <Users size={11} className="text-[#ffcc00]" />
+          <span style={{ color: p1TeamState.primaryColor }}>{p1TeamState.nickname.toUpperCase()}</span>
+          <span className="text-neutral-400 font-normal">VS</span>
+          <span style={{ color: p2TeamState.primaryColor }}>{p2TeamState.nickname.toUpperCase()}</span>
+          <span className="text-[#ffcc00] ml-1">▾ TEAMS</span>
+        </button>
+
         <div className="flex items-center justify-between w-full bg-black/90 border-2 border-[#ffcc00] px-3 py-1.5 rounded-lg shadow-xl">
           {/* P2 CPU Score */}
           <div className="flex items-center gap-1.5">
-            <span className="text-red-400 font-extrabold text-[0.72rem] tracking-wide">P2 (CPU):</span>
+            <span className="font-extrabold text-[0.68rem] tracking-wide" style={{ color: p2TeamState.primaryColor }}>
+              {p2TeamState.nickname.toUpperCase()} (CPU):
+            </span>
             <span className="text-white text-base font-black bg-red-950/80 border border-red-500/50 px-2 py-0.5 rounded leading-none">
               {cpuScore}
             </span>
@@ -266,7 +303,9 @@ export default function App() {
             <span className="text-white text-base font-black bg-emerald-950/80 border border-emerald-500/50 px-2 py-0.5 rounded leading-none">
               {userScore}
             </span>
-            <span className="text-[#00ffaa] font-extrabold text-[0.72rem] tracking-wide">P1 (YOU)</span>
+            <span className="font-extrabold text-[0.68rem] tracking-wide" style={{ color: p1TeamState.primaryColor }}>
+              {p1TeamState.nickname.toUpperCase()} (YOU)
+            </span>
 
             <div className="flex items-center gap-1 ml-1 border-l border-white/20 pl-1">
               <button
@@ -295,6 +334,37 @@ export default function App() {
         </div>
       </header>
 
+      {/* Small UI: Active On-Field Alignment Indicator & Shift Controls */}
+      <div className="flex items-center justify-between w-full max-w-[420px] bg-black/85 border border-[#ffcc00]/50 px-3 py-1 rounded-md mb-1 shadow-lg text-[0.68rem] z-20">
+        <div className="flex items-center gap-2">
+          <span className="text-neutral-400 font-bold uppercase tracking-wider text-[0.60rem]">
+            {activeOffenseState === 'P1' ? 'Offense Alignment:' : 'Defense Alignment:'}
+          </span>
+          <span className={`font-black text-[0.76rem] tracking-wide ${activeOffenseState === 'P1' ? 'text-[#00ffff]' : 'text-[#ff6666]'}`}>
+            {activeOffenseState === 'P1'
+              ? p1OffFormationState
+              : (defensivePlaybook[p1DefPlayState]?.name || p1DefPlayState)}
+          </span>
+        </div>
+        <div className="flex items-center gap-1.5 text-[0.58rem] text-neutral-300">
+          <button
+            onClick={() => engineRef.current?.shiftFormation?.(-1)}
+            className="px-1.5 py-0.5 bg-neutral-800 hover:bg-neutral-700 text-[#ffcc00] border border-neutral-600 rounded font-bold transition cursor-pointer active:scale-95"
+            title="Previous Alignment"
+          >
+            ◀
+          </button>
+          <span className="text-[0.54rem] text-neutral-400 font-semibold uppercase tracking-tight">SWIPE TO SHIFT</span>
+          <button
+            onClick={() => engineRef.current?.shiftFormation?.(1)}
+            className="px-1.5 py-0.5 bg-neutral-800 hover:bg-neutral-700 text-[#ffcc00] border border-neutral-600 rounded font-bold transition cursor-pointer active:scale-95"
+            title="Next Alignment"
+          >
+            ▶
+          </button>
+        </div>
+      </div>
+
       {/* Main Game Announcement Banner */}
       {banner.visible && (
         <div
@@ -319,7 +389,7 @@ export default function App() {
         <span className="text-neutral-300">
           {activeOffenseState === 'P1'
             ? 'Draw Route Lines • Tap for Run Blocking • Tap QB to Snap'
-            : 'Flick / Tap Defenders to Assign • Tap Screen to Start Play'}
+            : 'Tap Defenders to Toggle • Swipe to Shift • Tap QB to Start'}
         </span>
       </footer>
 
@@ -350,7 +420,7 @@ export default function App() {
                     </ul>
                   </li>
                   <li><b className="text-white">Single Tap for Run Blocking:</b> Simply tap any player (WR, Center, or RB) to assign them to <b>RUN BLOCKING</b>! A white block bar appears across them and they lead-block for the runner! Tap again to toggle back to route.</li>
-                  <li><b className="text-white">Snap the Ball:</b> Tap the QB (yellow circle) to snap. On defense, tap anywhere on the field to start the play!</li>
+                  <li><b className="text-white">Snap the Ball:</b> Tap the QB (yellow circle) to snap. On defense, tap the QB to start the play! Tap defenders to toggle blitz, man, RB spy, and zone.</li>
                   <li><b className="text-white">Flip Running Back:</b> Quick double-tap left or right of center to shift the RB side.</li>
                 </ul>
               </div>
@@ -372,7 +442,7 @@ export default function App() {
                   <li><b className="text-white">Broken Tackles for Long Gains:</b> Ball carriers can break and shed tackles! Shedding a defender grants tackle immunity and a turbo boost to break away for massive yardage or touchdowns!</li>
                   <li><b className="text-white">Relentless Pursuit:</b> Defenders in pursuit steadily accelerate with ever-increasing catch-up speed to hunt down breakaway ball carriers!</li>
                   <li><b className="text-white">Fumbles & Live Scrambles:</b> Hard hits can pop the football loose! Both offense and defense dive for the tumbling ball—defense recovery causes a turnover!</li>
-                  <li><b className="text-white">3-Second OL Pocket:</b> Offensive linemen hold blocks for 3 full seconds before breakdown, giving QBs time to scan progressions downfield.</li>
+                  <li><b className="text-white">Clean Pocket Protection:</b> Offensive linemen hold blocks for 5 full seconds before breakdown unless an extra blitzer brings immediate pressure!</li>
                   <li><b className="text-white">Lateral Juke:</b> Quick horizontal swipe left or right to side-step defenders. Jukes do not grant tackle immunity.</li>
                   <li><b className="text-white">Truck / Sprint Boost:</b> Quick forward swipe to activate power turbo boost and increase broken tackle chances!</li>
                 </ul>
@@ -406,6 +476,179 @@ export default function App() {
             >
               GOT IT, LET'S PLAY!
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Franchise & Team Selector Modal */}
+      {showTeamModal && (
+        <div
+          onPointerDown={(e) => e.stopPropagation()}
+          className="absolute inset-0 bg-black/92 flex flex-col items-center justify-center z-100 p-4"
+        >
+          <div className="bg-[#0b170e] border-2 border-[#ffcc00] rounded-lg max-w-[390px] w-full p-4 max-h-[85vh] overflow-y-auto text-left shadow-2xl">
+            <div className="flex items-center justify-between border-b border-neutral-700 pb-2 mb-3">
+              <div>
+                <h2 className="text-[#ffcc00] font-black text-sm tracking-wider flex items-center gap-1.5">
+                  <Users size={16} /> {!hasKickedOff ? 'CHOOSE TEAMS TO KICK OFF' : 'FRANCHISE & TEAM SELECTOR'}
+                </h2>
+                <p className="text-[0.58rem] text-neutral-400">Select teams below — each card highlights key strengths to exploit</p>
+              </div>
+              <button onClick={() => { setShowTeamModal(false); setHasKickedOff(true); }} className="text-neutral-400 hover:text-white p-1" title="Close / Start">
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Current Matchup Summary */}
+            <div className="flex items-center justify-between bg-black/80 border border-[#ffcc00]/50 p-2.5 rounded-lg mb-3 text-[0.66rem] shadow-md">
+              <div className="text-left">
+                <span className="text-[0.54rem] text-emerald-400 block font-black uppercase">P1 (YOU):</span>
+                <span className="font-black text-xs" style={{ color: p1TeamState.primaryColor }}>
+                  {p1TeamState.city} {p1TeamState.nickname}
+                </span>
+                <span className="text-[0.55rem] text-neutral-400 block">{p1TeamState.archetype.replace('_', ' ')}</span>
+              </div>
+              <div className="flex flex-col items-center">
+                <span className="text-[#ffcc00] font-black text-xs">VS</span>
+                <span className="text-[0.50rem] text-neutral-400">MATCHUP</span>
+              </div>
+              <div className="text-right">
+                <span className="text-[0.54rem] text-red-400 block font-black uppercase">P2 (CPU):</span>
+                <span className="font-black text-xs" style={{ color: p2TeamState.primaryColor }}>
+                  {p2TeamState.city} {p2TeamState.nickname}
+                </span>
+                <span className="text-[0.55rem] text-neutral-400 block">{p2TeamState.archetype.replace('_', ' ')}</span>
+              </div>
+            </div>
+
+            {/* Teams List */}
+            <div className="space-y-3">
+              {getAllTeams().map((team) => {
+                const isP1 = p1TeamState.id === team.id;
+                const isP2 = p2TeamState.id === team.id;
+
+                return (
+                  <div
+                    key={team.id}
+                    className={`bg-neutral-950/90 border-2 rounded-xl p-3 transition shadow-md ${
+                      isP1
+                        ? 'border-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.35)] ring-1 ring-emerald-400'
+                        : isP2
+                          ? 'border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.35)] ring-1 ring-red-400'
+                          : 'border-neutral-800 hover:border-neutral-600'
+                    }`}
+                  >
+                    {/* Team Header */}
+                    <div className="flex items-center justify-between mb-1.5">
+                      <div className="flex items-center gap-2">
+                        <div
+                          className="w-4 h-4 rounded-full border-2 border-white/80 shadow"
+                          style={{ backgroundColor: team.primaryColor }}
+                        />
+                        <div>
+                          <span className="font-black text-xs tracking-wider" style={{ color: team.primaryColor }}>
+                            {team.name.toUpperCase()}
+                          </span>
+                          <span className="ml-2 text-[0.52rem] px-1.5 py-0.5 bg-neutral-800 text-neutral-300 rounded font-bold uppercase tracking-wider">
+                            {team.archetype.replace('_', ' ')}
+                          </span>
+                        </div>
+                      </div>
+                      {isP1 && (
+                        <span className="text-[0.52rem] font-black bg-emerald-500 text-black px-1.5 py-0.5 rounded shadow">
+                          YOU (P1)
+                        </span>
+                      )}
+                      {isP2 && (
+                        <span className="text-[0.52rem] font-black bg-red-500 text-white px-1.5 py-0.5 rounded shadow">
+                          CPU (P2)
+                        </span>
+                      )}
+                    </div>
+
+                    <p className="text-[0.58rem] text-neutral-300 mb-2 leading-relaxed">{team.description}</p>
+
+                    {/* Prominent Card Section: Team Strengths */}
+                    <div className="bg-emerald-950/70 border border-emerald-500/50 rounded-lg p-2 mb-1.5 shadow-inner">
+                      <div className="flex items-center gap-1.5 text-emerald-400 font-extrabold text-[0.60rem] mb-0.5">
+                        <span className="bg-emerald-500 text-black text-[0.50rem] font-black px-1 rounded uppercase tracking-wider">
+                          STRENGTHS
+                        </span>
+                        <span>CORE TEAM ADVANTAGE</span>
+                      </div>
+                      <p className="text-[0.60rem] text-emerald-200 font-semibold leading-snug">
+                        {team.strengths}
+                      </p>
+                    </div>
+
+                    {/* Team Weaknesses */}
+                    <div className="bg-red-950/30 border border-red-500/30 rounded p-1.5 mb-2">
+                      <div className="flex items-start gap-1 text-[0.56rem]">
+                        <span className="text-red-400 font-bold uppercase shrink-0">WEAKNESS:</span>
+                        <span className="text-neutral-300 leading-tight">{team.weaknesses}</span>
+                      </div>
+                    </div>
+
+                    {/* Ratings Grid */}
+                    <div className="grid grid-cols-3 gap-1 text-[0.52rem] text-neutral-400 bg-neutral-900/90 p-1.5 rounded-lg mb-2.5 font-mono border border-neutral-800">
+                      <div>WR Speed: <b className="text-white">{Math.round(team.ratings.wrSpeed * 100)}</b></div>
+                      <div>Pass Pro: <b className="text-white">{Math.round(team.ratings.passProtection * 100)}</b></div>
+                      <div>Run Power: <b className="text-white">{Math.round(team.ratings.runPower * 100)}</b></div>
+                      <div>DB Speed: <b className="text-white">{Math.round(team.ratings.dbClosingSpeed * 100)}</b></div>
+                      <div>Pass Rush: <b className="text-white">{Math.round(team.ratings.passRush * 100)}</b></div>
+                      <div>Discipline: <b className="text-white">{Math.round((2 - team.ratings.mistakeChance) * 100)}</b></div>
+                    </div>
+
+                    {/* Action Select Buttons */}
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => handleSelectP1Team(team.id)}
+                        className={`flex-1 py-1.5 px-2 rounded-md text-[0.62rem] font-extrabold transition cursor-pointer active:scale-95 ${
+                          isP1
+                            ? 'bg-emerald-600 text-white border border-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.5)]'
+                            : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-200'
+                        }`}
+                      >
+                        {isP1 ? '✓ ACTIVE AS P1 (YOU)' : 'PLAY AS P1 (YOU)'}
+                      </button>
+                      <button
+                        onClick={() => handleSelectP2Team(team.id)}
+                        className={`flex-1 py-1.5 px-2 rounded-md text-[0.62rem] font-extrabold transition cursor-pointer active:scale-95 ${
+                          isP2
+                            ? 'bg-red-600 text-white border border-red-400 shadow-[0_0_8px_rgba(239,68,68,0.5)]'
+                            : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-200'
+                        }`}
+                      >
+                        {isP2 ? '✓ OPPONENT (CPU)' : 'SET OPPONENT (CPU)'}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Bottom Modal CTA */}
+            {!hasKickedOff ? (
+              <button
+                onClick={() => {
+                  setShowTeamModal(false);
+                  setHasKickedOff(true);
+                  sounds.playWhistle();
+                  showAnnouncement(`${p1TeamState.name.toUpperCase()} VS ${p2TeamState.name.toUpperCase()} - READY FOR KICKOFF! 🏈`, p1TeamState.primaryColor, true);
+                }}
+                className="mt-4 w-full bg-[#ffcc00] hover:bg-yellow-400 text-black font-black py-2.5 rounded-lg text-xs transition cursor-pointer tracking-wider shadow-[0_0_15px_rgba(255,204,0,0.4)] active:scale-98 flex items-center justify-center gap-2"
+              >
+                <span>KICK OFF GAME 🏈</span>
+                <span className="text-[0.62rem] opacity-75 font-bold">({p1TeamState.nickname} vs {p2TeamState.nickname})</span>
+              </button>
+            ) : (
+              <button
+                onClick={() => setShowTeamModal(false)}
+                className="mt-4 w-full bg-[#ffcc00] hover:bg-yellow-400 text-black font-black py-2 rounded-lg text-xs transition cursor-pointer tracking-wider shadow-md active:scale-98"
+              >
+                SAVE & RESUME GAME
+              </button>
+            )}
           </div>
         </div>
       )}

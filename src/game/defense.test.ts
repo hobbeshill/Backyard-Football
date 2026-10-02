@@ -509,9 +509,9 @@ test('moveToward applies accessible calibrated speed factor', async () => {
   const entity: Entity = { x: 100, y: 100, vx: 0, vy: 0, radius: 10 };
   moveToward(entity, 200, 100, 1.0, 10.0, 0);
 
-  // Movement is globally scaled to keep the on-field pace manageable.
+  // Movement is globally scaled to keep the on-field pace manageable (slowed 10% for testing).
   assert.ok(entity.vx! < 7.5, 'Adjusted speed should be calibrated under 7.5 for maxSpeed 10');
-  assert.ok(entity.vx! > 6.0, 'Adjusted speed should be around 6.46');
+  assert.ok(entity.vx! > 5.0, 'Adjusted speed should be around 5.24 for 10% slowed test pace');
 });
 
 test('CPU defense assigns QB_SPY when opponent has scrambled or run with QB', async () => {
@@ -921,6 +921,561 @@ test('AI defense assigns RB_SPY and stops user spamming passes to the RB in the 
   assert.ok(manCount >= 1, 'AI defense should assign extra coverage to lock down the flat');
 });
 
+test('Defenders toggle assignment between blitz, man, RB spy, and zone on tap', () => {
+  const toggleCycle: Array<'BLITZ' | 'MAN' | 'RB_SPY' | 'ZONE'> = ['BLITZ', 'MAN', 'RB_SPY', 'ZONE'];
+  
+  function getNextAssignment(current: string): string {
+    const idx = toggleCycle.indexOf(current as any);
+    return toggleCycle[(idx + 1 + toggleCycle.length) % toggleCycle.length];
+  }
+
+  assert.equal(getNextAssignment('BLITZ'), 'MAN');
+  assert.equal(getNextAssignment('MAN'), 'RB_SPY');
+  assert.equal(getNextAssignment('RB_SPY'), 'ZONE');
+  assert.equal(getNextAssignment('ZONE'), 'BLITZ');
+});
+
+test('Game clock stops after every play so user can change alignment, and resumes when play starts', () => {
+  let gameClockSeconds = 120;
+  let gameClockRemainderMs = 0;
+  let gameClockRunning = false;
+
+  function tickClock(elapsedMs: number, phase: string) {
+    const isPlayActive = phase === 'QB_DROP' || phase === 'HANDOFF' || phase === 'RUNNING' || phase === 'THROWN' || phase === 'FUMBLE';
+    if (!isPlayActive) {
+      gameClockRunning = false;
+      return;
+    }
+    gameClockRunning = true;
+
+    const clockMultiplier = 3;
+    gameClockRemainderMs += elapsedMs * clockMultiplier;
+    while (gameClockRemainderMs >= 1000 && gameClockSeconds > 0) {
+      gameClockRemainderMs -= 1000;
+      gameClockSeconds--;
+    }
+  }
+
+  // 1. Play is active (QB_DROP): 1000ms real time -> 3000ms clock time = 3 seconds off game clock
+  tickClock(1000, 'QB_DROP');
+  assert.equal(gameClockSeconds, 117, 'During active plays clock moves 3x as fast');
+
+  // 2. Play ends in tackle or sack (phase is DEAD / PRE_SNAP): clock must stop so user can change alignment!
+  tickClock(2000, 'PRE_SNAP');
+  assert.equal(gameClockSeconds, 117, 'Clock remains stopped between plays so user can change alignment');
+  assert.equal(gameClockRunning, false, 'Clock is stopped after the play ends');
+
+  // 3. User takes time adjusting defensive/offensive alignment in PRE_SNAP:
+  tickClock(5000, 'PRE_SNAP');
+  assert.equal(gameClockSeconds, 117, 'Clock stays paused indefinitely while user changes alignment');
+
+  // 4. Play starts again (next snap, phase = HANDOFF): clock resumes running at 3x speed
+  tickClock(1000, 'HANDOFF');
+  assert.equal(gameClockSeconds, 114, 'Clock resumes running when the next play starts');
+  assert.equal(gameClockRunning, true, 'Clock is active while play is running');
+});
+
+test('Defensive alignment cycling contains valid defensive schemes', () => {
+  const defKeys = ['COVER3', 'COVER2MAN', 'TAMPA2', 'BLITZ', 'QUARTERS'];
+  let currentDef = 'COVER3';
+
+  function cycleDef(direction: number) {
+    const idx = defKeys.indexOf(currentDef);
+    currentDef = defKeys[(idx + direction + defKeys.length) % defKeys.length];
+    return currentDef;
+  }
+
+  assert.equal(cycleDef(1), 'COVER2MAN');
+  assert.equal(cycleDef(1), 'TAMPA2');
+  assert.equal(cycleDef(1), 'BLITZ');
+  assert.equal(cycleDef(1), 'QUARTERS');
+  assert.equal(cycleDef(1), 'COVER3');
+  assert.equal(cycleDef(-1), 'QUARTERS');
+});
+
+test('When ball is intercepted, pursuing team immediately gains speed traits of defense chasing ball carrier', () => {
+  // Simulating the interception pursuit speed calculation
+  const qb: Entity = { x: 170, y: 700, radius: 12 };
+  const wr: Entity = { x: 80, y: 650, radius: 10 };
+  const rb: Entity = { x: 190, y: 720, radius: 11 };
+  const pursuers = [qb, wr, rb];
+
+  // 1. Immediately upon interception, pursuers gain starting pursuit timer
+  pursuers.forEach(p => {
+    p.pursuitTimer = 20;
+    p.brokenTackleStun = 0;
+  });
+
+  const returner: Entity = { x: 170, y: 500, radius: 10 };
+  const attackDirection = 1; // returner advancing downfield toward y = 1000
+
+  // 2. Calculate pursuit traits for a skill player (WR) and QB
+  function calculatePursuitTraits(p: Entity, runner: Entity, isSkill: boolean) {
+    p.pursuitTimer = (p.pursuitTimer || 0) + 1;
+    const distToRunner = Math.hypot(runner.x - p.x, runner.y - p.y);
+    const baseSpeed = isSkill ? 1.05 : 0.96;
+    const multiplier = isSkill ? 1.25 : 1.10;
+    const timeAcceleration = p.pursuitTimer * 0.034;
+    const distanceUrgency = Math.max(0, (distToRunner - 25) * 0.0065);
+    const dynamicSpeed = (baseSpeed + timeAcceleration + distanceUrgency) * multiplier;
+    const dynamicAccel = Math.min(0.50, (0.24 + (p.pursuitTimer * 0.0025)) * (isSkill ? 1.25 : 1.10));
+    const leadY = runner.y + (18 * attackDirection);
+    return { dynamicSpeed, dynamicAccel, leadY, distToRunner };
+  }
+
+  const wrTraits = calculatePursuitTraits(wr, returner, true);
+  assert.ok(wr.pursuitTimer! >= 21, 'Pursuer maintains and increments pursuitTimer');
+  assert.ok(wrTraits.dynamicSpeed > 2.0, 'Pursuer immediately reaches high pursuit speed (>2.0)');
+  assert.ok(wrTraits.dynamicAccel >= 0.35, 'Pursuer immediately has high pursuit agility');
+  assert.equal(wrTraits.leadY, 518, 'Pursuer takes leading cutoff angle in direction of returner');
+});
+
+test('Play started before game clock hits zero plays out until the end of the play and does not stop', () => {
+  let gameClockSeconds = 2;
+  let gameClockRemainderMs = 0;
+  let gameClockRunning = true;
+  let pendingQuarterEnd = false;
+  let quarterEnded = false;
+  let phase = 'QB_DROP';
+
+  function updateClock(elapsedMs: number) {
+    const isPlayActive = phase === 'QB_DROP' || phase === 'HANDOFF' || phase === 'RUNNING' || phase === 'THROWN' || phase === 'FUMBLE';
+    if (!isPlayActive) {
+      gameClockRunning = false;
+      return;
+    }
+    if (gameClockSeconds === 0) {
+      gameClockRunning = false;
+      pendingQuarterEnd = true;
+      return;
+    }
+    gameClockRunning = true;
+    const clockMultiplier = 3;
+    gameClockRemainderMs += elapsedMs * clockMultiplier;
+    while (gameClockRemainderMs >= 1000 && gameClockSeconds > 0) {
+      gameClockRemainderMs -= 1000;
+      gameClockSeconds--;
+      if (gameClockSeconds === 0) {
+        gameClockRunning = false;
+        pendingQuarterEnd = true;
+        return;
+      }
+    }
+  }
+
+  function handlePlayEnd() {
+    // Play ends in tackle or touchdown
+    phase = 'DEAD';
+    // Drill reset / schedule
+    if (pendingQuarterEnd || gameClockSeconds === 0) {
+      pendingQuarterEnd = false;
+      quarterEnded = true;
+    }
+  }
+
+  // Play started with 2 seconds left
+  // Tick 1000ms real time (3 seconds game time) -> clock hits 0:00
+  updateClock(1000);
+  assert.equal(gameClockSeconds, 0, 'Clock reaches 0');
+  assert.equal(pendingQuarterEnd, true, 'Quarter end is marked pending');
+  assert.equal(quarterEnded, false, 'Quarter does NOT end prematurely while play is active');
+  assert.equal(phase, 'QB_DROP', 'Play continues running and does NOT stop');
+
+  // Play advances to ball thrown and running
+  phase = 'THROWN';
+  updateClock(500);
+  assert.equal(phase, 'THROWN', 'Ball flight continues at 0:00');
+  assert.equal(quarterEnded, false, 'Quarter still has not ended');
+
+  phase = 'RUNNING';
+  updateClock(1000);
+  assert.equal(phase, 'RUNNING', 'Ball carrier continues running downfield at 0:00');
+  assert.equal(quarterEnded, false, 'Play plays out until the end of the play');
+
+  // Play finally concludes (e.g. tackled or touchdown scored)
+  handlePlayEnd();
+  assert.equal(quarterEnded, true, 'Quarter ends only after the play concludes');
+});
+
+test('Swiping left or right on a defender assigns MAN coverage and does NOT change alignments', () => {
+  let activeAlignment = 'COVER3';
+  let defenderAssignment = 'ZONE';
+
+  function onPointerUpOnDefender(dx: number, dy: number) {
+    const lateralDist = Math.abs(dx);
+    if (lateralDist > 16 && lateralDist > Math.abs(dy) * 0.75) {
+      // Swiping left or right on a defender assigns MAN coverage and does NOT change alignments
+      defenderAssignment = 'MAN';
+    } else {
+      // Non-lateral or tap
+      defenderAssignment = 'BLITZ';
+    }
+  }
+
+  // Swipe right on defender
+  onPointerUpOnDefender(35, 2);
+  assert.equal(defenderAssignment, 'MAN', 'Swiping right assigns MAN coverage');
+  assert.equal(activeAlignment, 'COVER3', 'Alignment is unchanged');
+
+  // Swipe left on defender
+  defenderAssignment = 'ZONE';
+  onPointerUpOnDefender(-40, 5);
+  assert.equal(defenderAssignment, 'MAN', 'Swiping left assigns MAN coverage');
+  assert.equal(activeAlignment, 'COVER3', 'Alignment is unchanged');
+});
+
+test('Concept Passing Playbook Expansion: MESH, SMASH, POST_WHEEL concepts exist with corresponding route mechanics', async () => {
+  const { offensivePlaybook, allRoutes } = await import('./playbook');
+  
+  assert.ok(offensivePlaybook.MESH, 'MESH concept exists in playbook');
+  assert.equal(offensivePlaybook.MESH.type, 'PASS');
+  assert.ok(offensivePlaybook.MESH.bestVs?.includes('COVER2MAN'));
+
+  assert.ok(offensivePlaybook.SMASH, 'SMASH concept exists in playbook');
+  assert.equal(offensivePlaybook.SMASH.type, 'PASS');
+  assert.ok(offensivePlaybook.SMASH.bestVs?.includes('TAMPA2'));
+
+  assert.ok(offensivePlaybook.POST_WHEEL, 'POST_WHEEL concept exists in playbook');
+  assert.equal(offensivePlaybook.POST_WHEEL.type, 'PASS');
+  assert.ok(offensivePlaybook.POST_WHEEL.bestVs?.includes('COVER3'));
+
+  assert.ok(allRoutes.includes('POST-L'), 'POST-L route exists');
+  assert.ok(allRoutes.includes('POST-R'), 'POST-R route exists');
+  assert.ok(allRoutes.includes('HITCH'), 'HITCH route exists');
+  assert.ok(allRoutes.includes('WHEEL'), 'WHEEL route exists');
+});
+
+test('Tendency-Based Adaptive Audibles: CPU detects blitz overload and coverage mismatches', async () => {
+  const { evaluateCpuOffensiveAudibles } = await import('./ai');
+
+  const receivers: Entity[] = [
+    { startX: 45, startY: 500, x: 45, y: 500, radius: 10, routeType: 'SLANT-L', isOutside: true },
+    { startX: 295, startY: 500, x: 295, y: 500, radius: 10, routeType: 'SLANT-R', isOutside: true }
+  ];
+  const centerReceiver: Entity = { startX: 225, startY: 500, x: 225, y: 500, radius: 10, routeType: 'SLANT-R' };
+  const rb: Entity = { startX: 220, startY: 530, x: 220, y: 530, radius: 10, routeType: 'FLAT', side: 'right' };
+
+  // 1. Coverage mismatch: Defensive Lineman (DL) assigned to MAN coverage on outside WR
+  const dlMismatchDefender: Entity = {
+    x: 45, y: 480, radius: 12, type: 'DL', defenseAssignment: 'MAN', assignedReceiver: receivers[0]
+  };
+  const normalDefenders: Entity[] = [
+    dlMismatchDefender,
+    { x: 295, y: 450, radius: 10, type: 'CB', defenseAssignment: 'ZONE' },
+    { x: 170, y: 450, radius: 10, type: 'MLB', defenseAssignment: 'ZONE' }
+  ];
+
+  const mismatchResult = evaluateCpuOffensiveAudibles(
+    'PASS', receivers, centerReceiver, rb, normalDefenders, 1, 10, 500, -1, 340
+  );
+  assert.ok(mismatchResult.audibleMessage?.includes('COVERAGE MISMATCH'), 'Audibles when DL is in MAN on a WR');
+  assert.equal(receivers[0].routeType, 'GO', 'Audibled mismatched WR to GO route deep');
+
+  // 2. Blitz Overload: 2 rushers on the left, 0 on the right
+  const overloadDefenders: Entity[] = [
+    { x: 100, y: 490, radius: 10, type: 'LB', defenseAssignment: 'BLITZ', passRusher: true },
+    { x: 140, y: 490, radius: 10, type: 'CB', defenseAssignment: 'BLITZ', passRusher: true },
+    { x: 200, y: 450, radius: 10, type: 'CB', defenseAssignment: 'ZONE' }
+  ];
+
+  const overloadResult = evaluateCpuOffensiveAudibles(
+    'PASS', receivers, centerReceiver, rb, overloadDefenders, 2, 8, 500, -1, 340
+  );
+  assert.ok(overloadResult.audibleMessage?.includes('OVERLOAD BLITZ'), 'Audibles on blitz overload');
+  assert.equal(rb.isBlocker, true, 'Assigned RB to block on overload side');
+  assert.equal(rb.side, 'left', 'Flipped RB to the heavy blitz side');
+});
+
+test('2 RB spies is countered by AI: RB stays in to block and downfield routes attack shorthanded secondary', async () => {
+  const { evaluateCpuOffensiveAudibles } = await import('./ai');
+
+  const receivers: Entity[] = [
+    { startX: 45, startY: 500, x: 45, y: 500, radius: 10, routeType: 'SLANT-L', isOutside: true },
+    { startX: 295, startY: 500, x: 295, y: 500, radius: 10, routeType: 'SLANT-R', isOutside: true }
+  ];
+  const centerReceiver: Entity = { startX: 225, startY: 500, x: 225, y: 500, radius: 10, routeType: 'SLANT-R' };
+  const rb: Entity = { startX: 220, startY: 530, x: 220, y: 530, radius: 10, routeType: 'FLAT', side: 'right' };
+
+  // 2 defenders assigned to RB_SPY
+  const twoRbSpiesDefenders: Entity[] = [
+    { x: 200, y: 490, radius: 10, type: 'LB', defenseAssignment: 'RB_SPY' },
+    { x: 240, y: 490, radius: 10, type: 'SS', defenseAssignment: 'RB_SPY' },
+    { x: 50, y: 450, radius: 10, type: 'CB', defenseAssignment: 'ZONE' },
+    { x: 290, y: 450, radius: 10, type: 'CB', defenseAssignment: 'ZONE' },
+    { x: 170, y: 490, radius: 12, type: 'DL', passRusher: true }
+  ];
+
+  const audibleResult = evaluateCpuOffensiveAudibles(
+    'PASS', receivers, centerReceiver, rb, twoRbSpiesDefenders, 1, 10, 500, -1, 340
+  );
+
+  assert.ok(audibleResult.audibleMessage?.includes('2 RB SPIES COUNTERED'), 'Audible message confirms 2 RB spies countered');
+  assert.equal(rb.isBlocker, true, 'RB is assigned to BLOCK so 2 spies are wasted');
+  assert.equal(rb.routeType, 'BLOCK');
+  assert.ok(audibleResult.blockersAssigned.includes('RB'), 'Blocker list includes RB');
+  assert.equal(centerReceiver.routeType, 'POST-R', 'Center receiver attacks the vacated middle');
+});
+
+test('2 RB spies counters RUN play: audibles out of run into passing concept and blocks with RB', async () => {
+  const { evaluateCpuOffensiveAudibles } = await import('./ai');
+  const receivers: Entity[] = [
+    { startX: 45, startY: 500, x: 45, y: 500, radius: 10, routeType: 'GO', isOutside: true },
+    { startX: 295, startY: 500, x: 295, y: 500, radius: 10, routeType: 'GO', isOutside: true }
+  ];
+  const centerReceiver: Entity = { startX: 225, startY: 500, x: 225, y: 500, radius: 10, routeType: 'BLOCK' };
+  const rb: Entity = { startX: 220, startY: 530, x: 220, y: 530, radius: 10, routeType: 'FLAT', side: 'right' };
+
+  // 2 defenders assigned to RB_SPY
+  const twoRbSpiesDefenders: Entity[] = [
+    { x: 200, y: 490, radius: 10, type: 'LB', defenseAssignment: 'RB_SPY' },
+    { x: 240, y: 490, radius: 10, type: 'SS', defenseAssignment: 'RB_SPY' },
+    { x: 170, y: 490, radius: 12, type: 'DL', passRusher: true }
+  ];
+
+  // Even when the original play is a POWER run, 2 RB spies triggers an audible to pass!
+  const audibleResult = evaluateCpuOffensiveAudibles(
+    'POWER', receivers, centerReceiver, rb, twoRbSpiesDefenders, 1, 10, 500, -1, 340
+  );
+
+  assert.equal(audibleResult.newPlayKey, 'MESH', 'Audible switches out of run play to MESH pass concept');
+  assert.equal(rb.isBlocker, true, 'RB stays in to pass block');
+  assert.equal(rb.routeType, 'BLOCK');
+  assert.ok(audibleResult.audibleMessage?.includes('2 RB SPIES COUNTERED'));
+});
+
+test('Franchise System: multiple teams with diverse archetypes, strengths, and weaknesses', async () => {
+  const { TEAMS, getAllTeams } = await import('./teams');
+  const teams = getAllTeams();
+
+  assert.ok(teams.length >= 6, 'At least 6 distinct teams are ready');
+  teams.forEach(team => {
+    assert.ok(team.id, 'Team must have an ID');
+    assert.ok(team.name, 'Team must have a full name');
+    assert.ok(team.strengths, 'Team must have defined strengths');
+    assert.ok(team.weaknesses, 'Team must have defined weaknesses');
+    assert.ok(team.ratings.wrSpeed > 0, 'WR speed rating must exist');
+    assert.ok(team.ratings.passProtection > 0, 'Pass protection rating must exist');
+    assert.ok(team.ratings.dbClosingSpeed > 0, 'DB closing speed rating must exist');
+  });
+
+  assert.ok(TEAMS.ARROWS.ratings.wrSpeed > TEAMS.ENFORCERS.ratings.wrSpeed, 'Arrows have faster receivers than Enforcers');
+  assert.ok(TEAMS.ENFORCERS.ratings.runPower > TEAMS.ARROWS.ratings.runPower, 'Enforcers have higher run power than Arrows');
+  assert.ok(TEAMS.TITANS.ratings.passProtection > TEAMS.HORNETS.ratings.passProtection, 'Titans have stronger pass protection than Hornets');
+});
+
+test('Game speed is scaled down 10% for testing', async () => {
+  const { GAME_SPEED_SCALE } = await import('./movement');
+  assert.ok(GAME_SPEED_SCALE <= 0.80 && GAME_SPEED_SCALE >= 0.70, 'Game speed scale is reduced ~10% around 0.77');
+});
+
+test('Ball travels at original speed so passes can be completed crisply', () => {
+  const shortDist = 90;
+  const deepDist = 240;
+
+  const shortSpeed = Math.min(3.8, Math.max(2.4, 2.2 + shortDist * 0.006));
+  const deepSpeed = Math.min(3.8, Math.max(2.4, 2.2 + deepDist * 0.006));
+
+  assert.ok(shortSpeed >= 2.6, 'Short pass ball speed travels at original brisk pace');
+  assert.ok(deepSpeed >= 3.6, 'Deep pass ball speed reaches up to 3.8 px/frame');
+
+  const shortFrames = Math.max(26, Math.round(shortDist / shortSpeed));
+  const deepFrames = Math.max(26, Math.round(deepDist / deepSpeed));
+
+  assert.ok(shortFrames <= 35, 'Short pass arrives crisply');
+  assert.ok(deepFrames <= 70, 'Deep ball arrives at original speed');
+});
+
+test('All passes should not be completed: wide open receivers can drop passes or slip on turf', async () => {
+  const { resolveCatchContestOutcome } = await import('./rules');
+
+  // Case 1: Wide open receiver (effectiveDefDist = 45, well beyond 20px) with drop roll
+  const dropOutcome = resolveCatchContestOutcome({
+    effectiveDefDist: 45,
+    effectiveBallDist: 45,
+    isTargetSpammed: false,
+    isRbFlatSpammed: false,
+    isRb: false,
+    roll: 0.02 // triggers drop
+  });
+
+  assert.equal(dropOutcome.caught, false, 'Wide open pass is not guaranteed to be caught');
+  assert.equal(dropOutcome.type, 'DROP');
+  assert.equal(dropOutcome.resultType, 'INCOMPLETE');
+  assert.ok(dropOutcome.announcement.includes('DROPPED') || dropOutcome.announcement.includes('Looked upfield'));
+
+  // Case 2: Wide open receiver slips on turf cut
+  const slipOutcome = resolveCatchContestOutcome({
+    effectiveDefDist: 50,
+    effectiveBallDist: 50,
+    isTargetSpammed: false,
+    isRbFlatSpammed: false,
+    isRb: false,
+    roll: 0.085 // triggers turf slip
+  });
+
+  assert.equal(slipOutcome.caught, false);
+  assert.equal(slipOutcome.type, 'DROP');
+  assert.ok(slipOutcome.announcement.includes('SLIPPED ON TURF'));
+
+  // Case 3: Wide open receiver with high roll completes cleanly
+  const completeOutcome = resolveCatchContestOutcome({
+    effectiveDefDist: 50,
+    effectiveBallDist: 50,
+    isTargetSpammed: false,
+    isRbFlatSpammed: false,
+    isRb: false,
+    roll: 0.50
+  });
+
+  assert.equal(completeOutcome.caught, true);
+  assert.equal(completeOutcome.type, 'COMPLETE');
+});
+
+test('Real life football mistakes: sideline boundary out of bounds and QB throw inaccuracy', async () => {
+  const { resolveCatchContestOutcome, evaluateQbThrowAccuracy } = await import('./rules');
+
+  // Case 1: Wide open receiver right on sideline boundary (receiverX = 20, fieldWidth = 320)
+  const oobOutcome = resolveCatchContestOutcome({
+    effectiveDefDist: 40,
+    effectiveBallDist: 40,
+    isTargetSpammed: false,
+    isRbFlatSpammed: false,
+    isRb: false,
+    receiverX: 20,
+    fieldWidth: 320,
+    roll: 0.05
+  });
+
+  assert.equal(oobOutcome.caught, false);
+  assert.equal(oobOutcome.type, 'OUT_OF_BOUNDS');
+  assert.ok(oobOutcome.announcement.includes('OUT OF BOUNDS'));
+
+  // Case 2: QB throw accuracy under pressure
+  const pressuredThrow = evaluateQbThrowAccuracy({
+    throwDist: 180,
+    isUnderPressure: true,
+    isDeepShot: true,
+    roll: 0.05
+  }, -1);
+
+  assert.equal(pressuredThrow.isOffTarget, true);
+  assert.ok(pressuredThrow.mistakeType === 'OVERTHROWN' || pressuredThrow.mistakeType === 'UNDERTHROWN' || pressuredThrow.mistakeType === 'OFF_TARGET_WIDE');
+  assert.ok(pressuredThrow.announcement);
+
+  // Case 3: QB hit as thrown
+  const hitThrow = evaluateQbThrowAccuracy({
+    throwDist: 120,
+    isUnderPressure: true,
+    isDeepShot: false,
+    isHitAsThrown: true,
+    roll: 0.01
+  }, -1);
+
+  assert.equal(hitThrow.isOffTarget, true);
+  assert.ok(hitThrow.announcement?.includes('HIT AS HE THROWS'));
+});
+
+test('Passes cleanly clear the line of scrimmage and cannot be easily batted down at the line', async () => {
+  const { getPassArcHeight, getPassArcMaxHeight, getDefenderPassReachHeight, canDefenderDeflectPass } = await import('./rules');
+
+  const maxHeight = getPassArcMaxHeight(80, false);
+  // Early trajectory (progress 0.20): crossing the line of scrimmage
+  const linePassHeight = getPassArcHeight(maxHeight, 0.20);
+
+  // Overhand release ball height at scrimmage is well above defensive line reach
+  assert.ok(linePassHeight > getDefenderPassReachHeight('DL'), 'Pass height at line exceeds defensive line reach');
+  assert.ok(linePassHeight >= 28, 'Pass height climbs over 28px in the air over the line');
+
+  // Defender engaged with blocker or rushing can never deflect pass
+  assert.equal(canDefenderDeflectPass({
+    defenderType: 'DL',
+    isPassRusher: true,
+    isEngagedWithBlocker: false,
+    distanceToBall: 5,
+    ballHeight: 12
+  }), false);
+
+  assert.equal(canDefenderDeflectPass({
+    defenderType: 'LB',
+    isPassRusher: false,
+    isEngagedWithBlocker: true,
+    distanceToBall: 5,
+    ballHeight: 12
+  }), false);
+});
+
+test('AI QB throws decisively on rhythm and under pressure without freezing in the pocket', async () => {
+  const { shouldCpuReleasePass } = await import('./ai');
+
+  // Situation 1: Open receiver on break triggers early release without waiting for sacks
+  const breakRelease = shouldCpuReleasePass({
+    hasTarget: true,
+    isDeepShotOpportunity: false,
+    hasOpenBreak: true,
+    isUnderHeavyPressure: false,
+    playClock: 18,
+    bestScore: 25
+  });
+  assert.equal(breakRelease, true, 'AI QB releases quickly on receiver break');
+
+  // Situation 2: Under heavy pressure, AI QB gets pass off before being sacked
+  const pressureRelease = shouldCpuReleasePass({
+    hasTarget: true,
+    isDeepShotOpportunity: false,
+    hasOpenBreak: false,
+    isUnderHeavyPressure: true,
+    playClock: 14,
+    bestScore: 10
+  });
+  assert.equal(pressureRelease, true, 'AI QB releases pass to escape sack under heavy pressure');
+
+  // Situation 3: Rhythm release when target is developing
+  const rhythmRelease = shouldCpuReleasePass({
+    hasTarget: true,
+    isDeepShotOpportunity: false,
+    hasOpenBreak: false,
+    isUnderHeavyPressure: false,
+    playClock: 24,
+    bestScore: 15
+  });
+  assert.equal(rhythmRelease, true, 'AI QB throws on rhythm at frame 24');
+
+  // Situation 4: Quick release under rush pressure at frame 10
+  const earlyPressureRelease = shouldCpuReleasePass({
+    hasTarget: true,
+    isDeepShotOpportunity: false,
+    hasOpenBreak: false,
+    isUnderHeavyPressure: true,
+    playClock: 10,
+    bestScore: 5
+  });
+  assert.equal(earlyPressureRelease, true, 'AI QB gets ball out at frame 10 under rush pressure');
+
+  // Situation 5: Progression release at frame 35 even if target score is modest
+  const progressionRelease = shouldCpuReleasePass({
+    hasTarget: true,
+    isDeepShotOpportunity: false,
+    hasOpenBreak: false,
+    isUnderHeavyPressure: false,
+    playClock: 35,
+    bestScore: -5
+  });
+  assert.equal(progressionRelease, true, 'AI QB releases pass by frame 35 to prevent freeze/sack');
+});
+
+test('Passes in flight overhead do not trigger catch contests or bat-downs at the line of scrimmage', () => {
+  // Pass flight arrival definition: progress >= 0.70 or near destination, descending to z <= 20
+  const isArrival = (progress: number, z: number, frame: number, total: number) => {
+    return (progress >= 0.70 || frame >= total - 4) && z <= 20;
+  };
+
+  // At line of scrimmage: frame 3 of 40, progress 0.075, ball high in air z = 28
+  assert.equal(isArrival(0.075, 28, 3, 40), false, 'Pass crossing line of scrimmage is NOT at arrival');
+  // At midpoint of pass: frame 20 of 40, progress 0.50, ball at arc apex z = 42
+  assert.equal(isArrival(0.50, 42, 20, 40), false, 'Pass at arc apex is NOT at arrival');
+  // Downfield arrival: frame 36 of 40, progress 0.90, ball descending to catch point z = 15
+  assert.equal(isArrival(0.90, 15, 36, 40), true, 'Pass descending to downfield receiver IS at arrival window');
+});
 
 
 

@@ -5,6 +5,8 @@ export interface CpuOffensiveAudibleResult {
   audibleMessage?: string;
   rbFlipped?: boolean;
   blockersAssigned: string[];
+  mismatchReceiver?: Entity;
+  newPlayKey?: string;
 }
 
 export interface CpuCarrierMoveResult {
@@ -25,10 +27,10 @@ export interface CpuPassReleaseSituation {
 export function shouldCpuReleasePass(situation: CpuPassReleaseSituation): boolean {
   if (!situation.hasTarget) return false;
   return situation.isDeepShotOpportunity ||
-    (situation.hasOpenBreak && situation.playClock >= 32) ||
-    (situation.isUnderHeavyPressure && situation.playClock > 25) ||
-    (situation.playClock > 38 && situation.bestScore > 8) ||
-    situation.playClock >= 58;
+    (situation.hasOpenBreak && situation.playClock >= 16) ||
+    (situation.isUnderHeavyPressure && situation.playClock >= 10) ||
+    (situation.playClock >= 22 && situation.bestScore > -10) ||
+    situation.playClock >= 35;
 }
 
 export interface CpuScrambleSituation {
@@ -78,6 +80,56 @@ export function evaluateCpuOffensiveAudibles(
     blockersAssigned: []
   };
 
+  // Count defenders assigned to spy or cover the running back
+  const rbSpies = defenders.filter(d => d && !d.passRusher && d.defenseAssignment !== 'BLITZ' && (
+    d.defenseAssignment === 'RB_SPY' ||
+    d.assignedReceiver === rb
+  ));
+  const rbSpyCount = rbSpies.length;
+
+  // 1. MULTIPLE RB SPIES / RB BRACKET (2+ defenders dedicated to spying/shadowing the RB):
+  // When defense dedicates 2 spies to the RB, running the ball or throwing to the RB is completely shut down.
+  // BUT the secondary is severely shorthanded with 5 defenders trying to cover 3 WRs + QB!
+  // Counter:
+  // - Audible OUT of run plays into passing concepts (MESH or POST_WHEEL)
+  // - Keep RB in max pass protection (BLOCK) so both spies are 100% neutralized
+  // - Hot-route downfield receivers to attack open grass and shred the shorthanded secondary!
+  if (rbSpyCount >= 2) {
+    if (rb) {
+      rb.isBlocker = true;
+      rb.routeType = 'BLOCK';
+      rb.routeIndex = runningBackRoutes.indexOf('BLOCK');
+      result.blockersAssigned.push('RB');
+    }
+    if (receivers[0] && !receivers[0].isBlocker) {
+      receivers[0].routeType = 'POST-R';
+      receivers[0].routeIndex = Math.max(0, outsideRoutes.indexOf('POST-R') >= 0 ? outsideRoutes.indexOf('POST-R') : outsideRoutes.indexOf('GO'));
+    }
+    if (receivers[1] && !receivers[1].isBlocker) {
+      receivers[1].routeType = 'CROSS-L';
+      receivers[1].routeIndex = Math.max(0, middleRoutes.indexOf('CROSS-L'));
+    }
+    if (receivers[2] && !receivers[2].isBlocker) {
+      receivers[2].routeType = 'GO';
+      receivers[2].routeIndex = Math.max(0, outsideRoutes.indexOf('GO'));
+    }
+    if (centerReceiver && !centerReceiver.isBlocker) {
+      centerReceiver.routeType = 'POST-R';
+      centerReceiver.routeIndex = Math.max(0, middleRoutes.indexOf('POST-R'));
+    }
+    result.newPlayKey = 'MESH';
+    result.audibleMessage = 'CPU AUDIBLE: 2 RB SPIES COUNTERED! RB BLOCKS, ATTACKING OPEN DOWNFIELD 🛡️🚀';
+    return result;
+  }
+
+  // 2. SINGLE RB SPY VS RUN PLAY:
+  // If defense is shadowing the RB with a spy and offense called a run play, audible to quick pass
+  if (rbSpyCount === 1 && playType !== 'PASS') {
+    result.newPlayKey = 'SHORT_PASS';
+    result.audibleMessage = 'CPU AUDIBLE: RB SPY DETECTED! AUDIBLE TO QUICK PASS 🎯';
+    return result;
+  }
+
   if (playType !== 'PASS') {
     // Run play pre-snap adjustment: Check for box overload
     if (rb) {
@@ -116,7 +168,7 @@ export function evaluateCpuOffensiveAudibles(
   const leftRushers = rushers.filter(d => d.x < 160).length;
   const rightRushers = rushers.filter(d => d.x > 180).length;
 
-  // 1. ALL-OUT BLITZ / 3+ RUSHERS: Max Pass Protection
+  // 2. ALL-OUT BLITZ / 3+ RUSHERS: Max Pass Protection
   if (rusherCount >= 3) {
     if (rb) {
       rb.isBlocker = true;
@@ -147,7 +199,30 @@ export function evaluateCpuOffensiveAudibles(
     return result;
   }
 
-  // 2. 2 RUSHERS / BOX PRESSURE: Assign RB as Pass Blocker & Deep Shot
+  // 2. BLITZ OVERLOAD: 2+ rushers attacking one side with 0 on the other
+  if ((leftRushers >= 2 && rightRushers === 0) || (rightRushers >= 2 && leftRushers === 0)) {
+    const heavySide = leftRushers > rightRushers ? 'left' : 'right';
+    if (rb) {
+      rb.isBlocker = true;
+      rb.routeType = 'BLOCK';
+      rb.routeIndex = runningBackRoutes.indexOf('BLOCK');
+      rb.side = heavySide;
+      rb.startX = heavySide === 'right' ? 220 : 120;
+      rb.x = rb.startX;
+      result.rbFlipped = true;
+      result.blockersAssigned.push('RB');
+    }
+    // Hot route opposite outside receiver to attack the vacated shallow zone
+    const hotWr = receivers.find(r => r && !r.isBlocker && (heavySide === 'left' ? r.x > fieldWidth / 2 : r.x < fieldWidth / 2));
+    if (hotWr) {
+      hotWr.routeType = heavySide === 'left' ? 'SLANT-R' : 'SLANT-L';
+      hotWr.routeIndex = Math.max(0, outsideRoutes.indexOf(hotWr.routeType));
+    }
+    result.audibleMessage = 'CPU AUDIBLE: OVERLOAD BLITZ DETECTED! SLIDE PROTECTION & HOT SLANT 🛡️⚡';
+    return result;
+  }
+
+  // 3. 2 RUSHERS / BOX PRESSURE: Assign RB as Pass Blocker & Deep Shot
   if (rusherCount === 2) {
     if (rb) {
       rb.isBlocker = true;
@@ -177,7 +252,7 @@ export function evaluateCpuOffensiveAudibles(
     }
   }
 
-  // 3. STANDARD 1-MAN RUSH: Release all receivers and check coverage for route audibles
+  // 4. STANDARD 1-MAN RUSH: Release all receivers and check coverage for route audibles
   if (rb && rb.isBlocker && rusherCount <= 1) {
     // Release RB back into a route when blitz is not present
     rb.isBlocker = false;
@@ -190,6 +265,21 @@ export function evaluateCpuOffensiveAudibles(
     centerReceiver.routeIndex = middleRoutes.indexOf('SLANT-R');
   }
 
+  // 5. COVERAGE MISMATCH EXPLOITATION:
+  // Detect if user assigned a slower lineman (DL) or linebacker (LB) to MAN coverage on a WR
+  for (const d of defenders) {
+    if (d && d.defenseAssignment === 'MAN' && (d.type === 'DL' || d.type === 'LB')) {
+      const mismatchedWr = d.assignedReceiver || receivers.find(r => r && !r.isBlocker && Math.hypot(r.x - d.x, r.y - d.y) < 65);
+      if (mismatchedWr && !mismatchedWr.isBlocker) {
+        mismatchedWr.routeType = 'GO';
+        mismatchedWr.routeIndex = Math.max(0, outsideRoutes.indexOf('GO'));
+        result.mismatchReceiver = mismatchedWr;
+        result.audibleMessage = 'CPU AUDIBLE: COVERAGE MISMATCH EXPLOITED VS LINEMAN/LB! ⚡🚀';
+        return result;
+      }
+    }
+  }
+
   // Evaluate coverage depth for route audibles
   const deepDefenders = defenders.filter(d => {
     if (!d || d.passRusher) return false;
@@ -199,7 +289,36 @@ export function evaluateCpuOffensiveAudibles(
 
   const manDefenders = defenders.filter(d => d && d.defenseAssignment === 'MAN');
 
-  // If defense is sitting in deep soft zone (Cover 3/4) and down is short-to-medium:
+  // 6. DEEP MIDDLE VACATED (2-high safeties with open center of the field):
+  if (deepDefenders.length === 2 && centerReceiver && !centerReceiver.isBlocker) {
+    const hasMiddleSafety = defenders.some(d => d && (d.defenseAssignment === 'ZONE' || d.type === 'FS') && Math.abs(d.x - fieldWidth / 2) < 45 && Math.abs(d.y - lineOfScrimmageY) > 60);
+    if (!hasMiddleSafety) {
+      centerReceiver.routeType = 'POST-R';
+      centerReceiver.routeIndex = Math.max(0, middleRoutes.indexOf('POST-R'));
+      result.audibleMessage = 'CPU AUDIBLE: POST ROUTE ATTACKING OPEN MIDDLE! 🚀🏈';
+      return result;
+    }
+  }
+
+  // 7. HEAVY MAN COVERAGE (3+ MAN DEFENDERS): Audible to MESH / Rub Concept
+  if (manDefenders.length >= 3) {
+    if (receivers[0] && !receivers[0].isBlocker) {
+      receivers[0].routeType = 'CROSS-R';
+      receivers[0].routeIndex = Math.max(0, outsideRoutes.indexOf('CROSS-R'));
+    }
+    if (receivers[1] && !receivers[1].isBlocker) {
+      receivers[1].routeType = 'CROSS-L';
+      receivers[1].routeIndex = Math.max(0, outsideRoutes.indexOf('CROSS-L'));
+    }
+    if (centerReceiver && !centerReceiver.isBlocker) {
+      centerReceiver.routeType = 'HITCH';
+      centerReceiver.routeIndex = Math.max(0, middleRoutes.indexOf('HITCH'));
+    }
+    result.audibleMessage = 'CPU AUDIBLE: MESH CONCEPT TO SHRED MAN COVERAGE! 🎯⚡';
+    return result;
+  }
+
+  // 8. DEEP SOFT ZONE (Cover 3/4) and down is short-to-medium:
   if (deepDefenders.length >= 3 && yardsToGo <= 8) {
     receivers.forEach(r => {
       if (r && !r.isBlocker) {
@@ -210,16 +329,6 @@ export function evaluateCpuOffensiveAudibles(
       }
     });
     result.audibleMessage = 'CPU AUDIBLE: UNDERNEATH TIMING ROUTES CALLED 🎯';
-  } else if (manDefenders.length >= 3) {
-    // Facing tight press man: audible to separation beaters (Comeback or Flag)
-    receivers.forEach((r, idx) => {
-      if (r && !r.isBlocker) {
-        const audibledRoute = idx === 0 ? 'COMEBACK' : 'FLAG-R';
-        r.routeType = audibledRoute;
-        r.routeIndex = Math.max(0, outsideRoutes.indexOf(audibledRoute));
-      }
-    });
-    result.audibleMessage = 'CPU AUDIBLE: MAN-BEATER ROUTES CHECKED ⚡';
   }
 
   return result;
