@@ -373,8 +373,9 @@ export default function App() {
                   <li><b className="text-white">Relentless Pursuit:</b> Defenders in pursuit steadily accelerate with ever-increasing catch-up speed to hunt down breakaway ball carriers!</li>
                   <li><b className="text-white">Fumbles & Live Scrambles:</b> Hard hits can pop the football loose! Both offense and defense dive for the tumbling ball—defense recovery causes a turnover!</li>
                   <li><b className="text-white">3-Second OL Pocket:</b> Offensive linemen hold blocks for 3 full seconds before breakdown, giving QBs time to scan progressions downfield.</li>
-                  <li><b className="text-white">Lateral Juke:</b> Quick horizontal swipe left or right to juke past diving defenders and gain tackle immunity!</li>
+                  <li><b className="text-white">Lateral Juke:</b> Quick horizontal swipe left or right to side-step defenders. Jukes do not grant tackle immunity.</li>
                   <li><b className="text-white">Truck / Sprint Boost:</b> Quick forward swipe to activate power turbo boost and increase broken tackle chances!</li>
+                  <li><b className="text-white">Throw-off Return:</b> Tap the screen when ready to receive. If throwing, tap near the top of the skill meter for a kick to the goal line, or near the bottom for a 10-yard throw. Swipe horizontally to side-step defenders!</li>
                 </ul>
               </div>
 
