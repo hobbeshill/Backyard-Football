@@ -1,3 +1,5 @@
+import type { Entity } from './types';
+
 export interface PlayResultInput {
   lineOfScrimmageY: number;
   endingY: number;
@@ -26,6 +28,14 @@ export function getPassArcMaxHeight(targetDistance: number, isDeepRoute: boolean
 export function getPassFlightFrames(targetDistance: number, throwSpeed: number, isLob = false): number {
   const standardFrames = Math.max(18, Math.round(targetDistance / throwSpeed));
   return isLob ? Math.round(standardFrames * 1.45) : standardFrames;
+}
+
+export function findTappedPassReceiver(receivers: Array<Entity | null | undefined>, x: number, y: number): Entity | null {
+  return receivers
+    .filter((receiver): receiver is Entity => Boolean(receiver && !receiver.isBlocker && receiver.routeType !== 'BLOCK'))
+    .map(receiver => ({ receiver, distance: Math.hypot(receiver.x - x, receiver.y - y) }))
+    .filter(({ receiver, distance }) => distance < receiver.radius + 20)
+    .sort((first, second) => first.distance - second.distance)[0]?.receiver || null;
 }
 
 export function getPassArcHeight(maxHeight: number, progress: number): number {

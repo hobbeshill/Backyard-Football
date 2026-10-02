@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { scoreRunBlockTarget, shouldCpuReleasePass, shouldCpuScramble } from './ai';
 import { alignDefenderAcrossFromRunningBack, alignDefenders, chooseCpuDefensiveAssignments } from './defense';
-import { calculateYardsToGo, canDefenderDeflectPass, canTackleQuarterback, getDefenderPassReachHeight, getPassArcHeight, getPassArcMaxHeight, getPassFlightFrames, resolvePlayResult } from './rules';
+import { calculateYardsToGo, canDefenderDeflectPass, canTackleQuarterback, findTappedPassReceiver, getDefenderPassReachHeight, getPassArcHeight, getPassArcMaxHeight, getPassFlightFrames, resolvePlayResult } from './rules';
 import type { Entity } from './types';
 
 test('short passes clear defensive linemen on a safe arc', () => {
@@ -20,6 +20,16 @@ test('blitz lobs have more airtime and a higher arc than standard throws', () =>
 
   assert.ok(lobFrames >= standardFrames * 1.4);
   assert.ok(getPassArcMaxHeight(80, false, true) > getPassArcMaxHeight(80, false));
+});
+
+test('tap-to-throw selects the nearest eligible receiver and ignores blockers', () => {
+  const nearReceiver: Entity = { x: 100, y: 200, radius: 10 };
+  const overlappingReceiver: Entity = { x: 112, y: 200, radius: 10 };
+  const blocker: Entity = { x: 100, y: 200, radius: 10, isBlocker: true };
+
+  assert.equal(findTappedPassReceiver([nearReceiver, overlappingReceiver, blocker], 101, 200), nearReceiver);
+  assert.equal(findTappedPassReceiver([blocker], 100, 200), null);
+  assert.equal(findTappedPassReceiver([nearReceiver], 131, 200), null);
 });
 
 test('elevated passes clear linemen and blitzers cannot bat them down', () => {

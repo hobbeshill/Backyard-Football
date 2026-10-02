@@ -4,7 +4,7 @@ import { alignDefenderAcrossFromRunningBack, alignDefenders, chooseCpuDefensiveA
 import { evaluateCpuOffensiveAudibles, evaluateCpuBallCarrierMoves, shouldCpuReleasePass, shouldCpuScramble, scoreRunBlockTarget } from './ai';
 import { createFumbleBall } from './fumbles';
 import { distToSegment, GAME_SPEED_SCALE, moveToward, resolveCollisions, updateRouteMovement } from './movement';
-import { resolvePlayResult, calculateBrokenTackleChance, calculateYardsToGo, getPassArcHeight, getPassArcMaxHeight, getPassFlightFrames, canDefenderDeflectPass, canTackleQuarterback, resolveCatchContestOutcome, evaluateQbThrowAccuracy } from './rules';
+import { resolvePlayResult, calculateBrokenTackleChance, calculateYardsToGo, getPassArcHeight, getPassArcMaxHeight, getPassFlightFrames, findTappedPassReceiver, canDefenderDeflectPass, canTackleQuarterback, resolveCatchContestOutcome, evaluateQbThrowAccuracy } from './rules';
 import { sounds } from './sound';
 import { evaluateDirtSwipeGesture, drawDirtSwipeGesture } from './chalkMenu';
 import { getTeam, TEAMS, TeamProfile } from './teams';
@@ -192,6 +192,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   let gestureTouchStartX = 0;
   let gestureTouchStartY = 0;
   let isDirtGestureActive = false;
+  let tapThrowTarget: Entity | null = null;
   let preSnapFieldSwipeStartX = 0;
   let preSnapFieldSwipeStartY = 0;
 
@@ -1421,6 +1422,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       return;
     }
 
+    tapThrowTarget = null;
+
     touchStartX = px;
     touchStartY = py;
     touchScreenStartX = screenPos.x;
@@ -1610,6 +1613,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     }
 
     if (phase === 'QB_DROP' && activeOffense === 'P1') {
+      tapThrowTarget = findTappedPassReceiver([...receivers, centerReceiver, rb], px, py);
       isAiming = true;
       aimCurrentX = px;
       aimCurrentY = py;
@@ -1795,15 +1799,25 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       const pullX = deltaScreenX;
       const pullY = deltaScreenY;
       const pullDist = Math.hypot(pullX, pullY);
+      const releaseWorld = screenToWorld(e.clientX, e.clientY);
+      const receiverAtRelease = findTappedPassReceiver([...receivers, centerReceiver, rb], releaseWorld.x, releaseWorld.y);
+      const tappedReceiver = tapThrowTarget;
+      tapThrowTarget = null;
+      const isTapThrow = Boolean(
+        tappedReceiver &&
+        receiverAtRelease === tappedReceiver &&
+        swipeTime < 450 &&
+        pullDist < 20
+      );
 
       // Releasing without a pull keeps the QB in the pocket after the snap.
-      if (pullDist < 10) {
+      if (pullDist < 10 && !isTapThrow) {
         return;
       }
 
       // Slingshot projected target location in world space
-      const projX = qb.x - pullX;
-      const projY = qb.y - pullY;
+      const projX = isTapThrow ? tappedReceiver!.x : qb.x - pullX;
+      const projY = isTapThrow ? tappedReceiver!.y : qb.y - pullY;
 
       const dx = projX - qb.x;
       const dy = projY - qb.y;
@@ -1819,7 +1833,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       lastTargetWasRb = isTargetingRb;
 
       // Only steep backward throws into the backfield (> 30 degrees backward from lateral) that aren't targeting the RB trigger a QB run
-      const isBackwardScramble = !isTargetingRb && (forwardY < -maxBackwardY);
+      const isBackwardScramble = !isTapThrow && !isTargetingRb && (forwardY < -maxBackwardY);
       if (isBackwardScramble) {
         phase = 'RUNNING';
         activeEntity = qb;
@@ -1864,7 +1878,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       const vx = (targetX - qb.x) / totalFlightFrames;
       const vy = (targetY - qb.y) / totalFlightFrames;
 
-      const intendedReceiver = [...receivers, centerReceiver, rb].filter((r): r is Entity => Boolean(r && !r.isBlocker && r.routeType !== 'BLOCK'))
+      const intendedReceiver = (isTapThrow ? tappedReceiver : null) || [...receivers, centerReceiver, rb].filter((r): r is Entity => Boolean(r && !r.isBlocker && r.routeType !== 'BLOCK'))
         .sort((a, b) => Math.hypot(a.x - targetX, a.y - targetY) - Math.hypot(b.x - targetX, b.y - targetY))[0] || null;
 
       ball = {
