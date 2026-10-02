@@ -3864,7 +3864,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   }
 
   function drawHelmet(entity: Entity, shellColor: string, stripeColor: string, forwardDirection: number) {
-    const radius = entity.radius;
+    const radius = entity.radius * 1.16;
     const velocityX = entity.vx || 0;
     const velocityY = entity.vy || 0;
     const moving = Math.hypot(velocityX, velocityY) > 0.5;
@@ -3873,95 +3873,114 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       : forwardDirection === -1 ? 0 : Math.PI;
     const drawShellPath = () => {
       ctx!.beginPath();
-      ctx!.moveTo(-radius * 0.68, radius * 0.42);
-      ctx!.quadraticCurveTo(-radius * 0.96, radius * 0.08, -radius * 0.82, -radius * 0.48);
-      ctx!.quadraticCurveTo(-radius * 0.68, -radius * 1.04, 0, -radius * 1.08);
-      ctx!.quadraticCurveTo(radius * 0.68, -radius * 1.04, radius * 0.82, -radius * 0.48);
-      ctx!.quadraticCurveTo(radius * 0.96, radius * 0.08, radius * 0.68, radius * 0.42);
-      ctx!.quadraticCurveTo(0, radius * 1.08, -radius * 0.68, radius * 0.42);
+      ctx!.moveTo(-radius * 0.72, -radius * 0.66);
+      ctx!.quadraticCurveTo(0, -radius * 0.92, radius * 0.72, -radius * 0.66);
+      ctx!.bezierCurveTo(radius * 0.93, -radius * 0.43, radius * 0.98, radius * 0.42, radius * 0.64, radius * 0.80);
+      ctx!.quadraticCurveTo(0, radius * 1.11, -radius * 0.64, radius * 0.80);
+      ctx!.bezierCurveTo(-radius * 0.98, radius * 0.42, -radius * 0.93, -radius * 0.43, -radius * 0.72, -radius * 0.66);
       ctx!.closePath();
     };
 
     ctx!.save();
     ctx!.translate(entity.x, entity.y);
     ctx!.rotate(rotation);
+
+    ctx!.save();
+    ctx!.translate(radius * 0.12, radius * 0.18);
+    ctx!.fillStyle = 'rgba(0, 0, 0, 0.28)';
+    drawShellPath();
+    ctx!.fill();
+    ctx!.restore();
+
+    ctx!.lineJoin = 'round';
+    ctx!.lineCap = 'round';
+    ctx!.beginPath();
+    ctx!.moveTo(-radius * 0.72, -radius * 0.48);
+    ctx!.lineTo(-radius * 0.66, -radius * 0.99);
+    ctx!.quadraticCurveTo(0, -radius * 1.43, radius * 0.66, -radius * 0.99);
+    ctx!.lineTo(radius * 0.72, -radius * 0.48);
+    ctx!.moveTo(-radius * 0.64, -radius * 0.89);
+    ctx!.quadraticCurveTo(0, -radius * 1.18, radius * 0.64, -radius * 0.89);
+    for (const side of [-1, 1]) {
+      ctx!.moveTo(side * radius * 0.37, -radius * 0.65);
+      ctx!.lineTo(side * radius * 0.43, -radius * 1.10);
+    }
+    ctx!.strokeStyle = '#172127';
+    ctx!.lineWidth = Math.max(2.2, radius * 0.19);
+    ctx!.stroke();
+    ctx!.strokeStyle = '#c9d1d2';
+    ctx!.lineWidth = Math.max(0.9, radius * 0.075);
+    ctx!.stroke();
+
     ctx!.fillStyle = shellColor;
     drawShellPath();
     ctx!.fill();
-    ctx!.strokeStyle = '#111820';
-    ctx!.lineWidth = Math.max(1.3, radius * 0.16);
+    ctx!.strokeStyle = '#151d20';
+    ctx!.lineWidth = Math.max(1.2, radius * 0.11);
     ctx!.stroke();
 
     ctx!.save();
     drawShellPath();
     ctx!.clip();
-    const shellShade = ctx!.createLinearGradient(-radius, 0, radius, 0);
-    shellShade.addColorStop(0, 'rgba(255, 255, 255, 0.3)');
-    shellShade.addColorStop(0.48, 'rgba(255, 255, 255, 0.02)');
-    shellShade.addColorStop(1, 'rgba(0, 0, 0, 0.32)');
+    const shellShade = ctx!.createRadialGradient(-radius * 0.28, -radius * 0.24, radius * 0.08, 0, radius * 0.12, radius * 1.06);
+    shellShade.addColorStop(0, 'rgba(255, 255, 255, 0.40)');
+    shellShade.addColorStop(0.38, 'rgba(255, 255, 255, 0.12)');
+    shellShade.addColorStop(0.72, 'rgba(0, 0, 0, 0.04)');
+    shellShade.addColorStop(1, 'rgba(0, 0, 0, 0.40)');
     ctx!.fillStyle = shellShade;
-    ctx!.fillRect(-radius, -radius * 1.1, radius * 2, radius * 2.2);
-    ctx!.restore();
+    ctx!.fillRect(-radius, -radius, radius * 2, radius * 2.2);
 
-    ctx!.save();
-    ctx!.scale(0.86, 0.86);
-    drawShellPath();
-    ctx!.strokeStyle = 'rgba(255, 255, 255, 0.34)';
-    ctx!.lineWidth = Math.max(0.8, radius * 0.07);
-    ctx!.stroke();
-    ctx!.restore();
-
-    for (const side of [-1, 1]) {
-      ctx!.fillStyle = '#111820';
-      ctx!.beginPath();
-      ctx!.ellipse(side * radius * 0.72, radius * 0.03, radius * 0.13, radius * 0.18, side * 0.12, 0, Math.PI * 2);
-      ctx!.fill();
-      ctx!.fillStyle = 'rgba(255, 255, 255, 0.3)';
-      ctx!.beginPath();
-      ctx!.ellipse(side * radius * 0.72, radius * 0.03, radius * 0.055, radius * 0.085, side * 0.12, 0, Math.PI * 2);
-      ctx!.fill();
-    }
-
-    ctx!.fillStyle = '#202a32';
     ctx!.beginPath();
-    ctx!.moveTo(-radius * 0.43, radius * 0.73);
-    ctx!.quadraticCurveTo(0, radius * 0.99, radius * 0.43, radius * 0.73);
-    ctx!.lineTo(radius * 0.34, radius * 0.59);
-    ctx!.quadraticCurveTo(0, radius * 0.78, -radius * 0.34, radius * 0.59);
-    ctx!.closePath();
-    ctx!.fill();
-    ctx!.strokeStyle = 'rgba(255, 255, 255, 0.26)';
-    ctx!.lineWidth = Math.max(0.7, radius * 0.06);
+    ctx!.moveTo(0, -radius * 0.83);
+    ctx!.lineTo(0, radius * 1.02);
+    ctx!.strokeStyle = 'rgba(0, 0, 0, 0.55)';
+    ctx!.lineWidth = radius * 0.34;
     ctx!.stroke();
-
-    ctx!.strokeStyle = 'rgba(0, 0, 0, 0.42)';
-    ctx!.lineWidth = Math.max(2.4, radius * 0.3);
-    ctx!.lineCap = 'round';
-    ctx!.beginPath();
-    ctx!.moveTo(0, -radius * 0.84);
-    ctx!.lineTo(0, radius * 0.68);
+    ctx!.strokeStyle = '#f5f2e9';
+    ctx!.lineWidth = radius * 0.27;
     ctx!.stroke();
     ctx!.strokeStyle = stripeColor;
-    ctx!.lineWidth = Math.max(1.5, radius * 0.2);
+    ctx!.lineWidth = radius * 0.17;
     ctx!.stroke();
 
-    ctx!.strokeStyle = '#111820';
-    ctx!.lineWidth = Math.max(2.4, radius * 0.26);
+    for (const side of [-1, 1]) {
+      for (const ventY of [-0.14, 0.18]) {
+        ctx!.beginPath();
+        ctx!.moveTo(side * radius * 0.39, radius * ventY);
+        ctx!.lineTo(side * radius * 0.43, radius * (ventY + 0.14));
+        ctx!.strokeStyle = 'rgba(0, 0, 0, 0.60)';
+        ctx!.lineWidth = Math.max(1.2, radius * 0.10);
+        ctx!.stroke();
+        ctx!.strokeStyle = 'rgba(255, 255, 255, 0.20)';
+        ctx!.lineWidth = 0.5;
+        ctx!.stroke();
+      }
+    }
+
+    ctx!.strokeStyle = 'rgba(255, 255, 255, 0.36)';
+    ctx!.lineWidth = Math.max(0.7, radius * 0.055);
     ctx!.beginPath();
-    ctx!.moveTo(-radius * 0.64, -radius * 0.49);
-    ctx!.quadraticCurveTo(0, -radius * 1.04, radius * 0.64, -radius * 0.49);
-    ctx!.moveTo(-radius * 0.52, -radius * 0.39);
-    ctx!.lineTo(radius * 0.52, -radius * 0.39);
-    ctx!.moveTo(-radius * 0.35, -radius * 0.57);
-    ctx!.lineTo(-radius * 0.35, -radius * 0.25);
-    ctx!.moveTo(0, -radius * 0.72);
-    ctx!.lineTo(0, -radius * 0.22);
-    ctx!.moveTo(radius * 0.35, -radius * 0.57);
-    ctx!.lineTo(radius * 0.35, -radius * 0.25);
+    ctx!.moveTo(-radius * 0.68, radius * 0.31);
+    ctx!.bezierCurveTo(-radius * 0.78, -radius * 0.04, -radius * 0.69, -radius * 0.48, -radius * 0.35, -radius * 0.58);
     ctx!.stroke();
-    ctx!.strokeStyle = '#f4f1e8';
-    ctx!.lineWidth = Math.max(1, radius * 0.1);
+    ctx!.restore();
+
+    ctx!.strokeStyle = '#263036';
+    ctx!.lineWidth = Math.max(1.6, radius * 0.14);
+    ctx!.beginPath();
+    ctx!.moveTo(-radius * 0.65, -radius * 0.63);
+    ctx!.quadraticCurveTo(0, -radius * 0.87, radius * 0.65, -radius * 0.63);
     ctx!.stroke();
+
+    for (const side of [-1, 1]) {
+      ctx!.fillStyle = '#d6dcdb';
+      ctx!.strokeStyle = '#273139';
+      ctx!.lineWidth = 0.7;
+      ctx!.beginPath();
+      ctx!.ellipse(side * radius * 0.78, -radius * 0.43, radius * 0.065, radius * 0.095, side * 0.2, 0, Math.PI * 2);
+      ctx!.fill();
+      ctx!.stroke();
+    }
     ctx!.restore();
   }
 
