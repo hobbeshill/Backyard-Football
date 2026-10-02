@@ -4,7 +4,7 @@ import { alignDefenderAcrossFromRunningBack, alignDefenders, chooseCpuDefensiveA
 import { evaluateCpuOffensiveAudibles, evaluateCpuBallCarrierMoves, shouldCpuReleasePass, shouldCpuScramble, scoreRunBlockTarget } from './ai';
 import { createFumbleBall } from './fumbles';
 import { distToSegment, GAME_SPEED_SCALE, moveToward, resolveCollisions, updateRouteMovement } from './movement';
-import { resolvePlayResult, calculateBrokenTackleChance, calculateYardsToGo, getPassArcHeight, getPassArcMaxHeight, getPassFlightFrames, findTappedPassReceiver, canDefenderDeflectPass, canTackleQuarterback, resolveCatchContestOutcome, evaluateQbThrowAccuracy } from './rules';
+import { resolvePlayResult, calculateBrokenTackleChance, calculateYardsToGo, getPassArcHeight, getPassArcMaxHeight, getPassFlightFrames, findTappedPassReceiver, getPassLeadTarget, canDefenderDeflectPass, canTackleQuarterback, resolveCatchContestOutcome, evaluateQbThrowAccuracy } from './rules';
 import { sounds } from './sound';
 import { evaluateDirtSwipeGesture, drawDirtSwipeGesture } from './chalkMenu';
 import { getTeam, TEAMS, TeamProfile } from './teams';
@@ -1816,8 +1816,19 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       }
 
       // Slingshot projected target location in world space
-      const projX = isTapThrow ? tappedReceiver!.x : qb.x - pullX;
-      const projY = isTapThrow ? tappedReceiver!.y : qb.y - pullY;
+      let projX = isTapThrow ? tappedReceiver!.x : qb.x - pullX;
+      let projY = isTapThrow ? tappedReceiver!.y : qb.y - pullY;
+
+      if (isTapThrow && tappedReceiver) {
+        for (let leadPass = 0; leadPass < 2; leadPass++) {
+          const estimatedDistance = Math.hypot(projX - qb.x, projY - qb.y);
+          const estimatedSpeed = Math.min(6.4, Math.max(3.6, (3.2 + estimatedDistance * 0.028) * 0.8));
+          const estimatedFlightFrames = getPassFlightFrames(estimatedDistance, estimatedSpeed);
+          const leadTarget = getPassLeadTarget(tappedReceiver, estimatedFlightFrames);
+          projX = Math.max(25, Math.min(fieldWidth - 25, leadTarget.x));
+          projY = leadTarget.y;
+        }
+      }
 
       const dx = projX - qb.x;
       const dy = projY - qb.y;
@@ -1829,7 +1840,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       // Allow throwing backwards in up to a 30 degree angle on both sides so the QB can throw to the RB in the backfield
       // tan(30 degrees) = 0.57735
       const maxBackwardY = lateralDist * Math.tan((30 * Math.PI) / 180);
-      const isTargetingRb = Boolean(rb && Math.hypot(projX - rb.x, projY - rb.y) < 65);
+      const isTargetingRb = Boolean(rb && (tappedReceiver === rb || Math.hypot(projX - rb.x, projY - rb.y) < 65));
       lastTargetWasRb = isTargetingRb;
 
       // Only steep backward throws into the backfield (> 30 degrees backward from lateral) that aren't targeting the RB trigger a QB run

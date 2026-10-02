@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { scoreRunBlockTarget, shouldCpuReleasePass, shouldCpuScramble } from './ai';
 import { alignDefenderAcrossFromRunningBack, alignDefenders, chooseCpuDefensiveAssignments } from './defense';
-import { calculateYardsToGo, canDefenderDeflectPass, canTackleQuarterback, findTappedPassReceiver, getDefenderPassReachHeight, getPassArcHeight, getPassArcMaxHeight, getPassFlightFrames, resolvePlayResult } from './rules';
+import { calculateYardsToGo, canDefenderDeflectPass, canTackleQuarterback, findTappedPassReceiver, getDefenderPassReachHeight, getPassArcHeight, getPassArcMaxHeight, getPassFlightFrames, getPassLeadTarget, resolvePlayResult } from './rules';
 import type { Entity } from './types';
 
 test('short passes clear defensive linemen on a safe arc', () => {
@@ -30,6 +30,12 @@ test('tap-to-throw selects the nearest eligible receiver and ignores blockers', 
   assert.equal(findTappedPassReceiver([nearReceiver, overlappingReceiver, blocker], 101, 200), nearReceiver);
   assert.equal(findTappedPassReceiver([blocker], 100, 200), null);
   assert.equal(findTappedPassReceiver([nearReceiver], 131, 200), null);
+});
+
+test('tap-to-throw leads moving receivers by most of the estimated flight', () => {
+  const receiver: Entity = { x: 100, y: 200, vx: 1, vy: -2, radius: 10 };
+
+  assert.deepEqual(getPassLeadTarget(receiver, 30), { x: 127, y: 146 });
 });
 
 test('elevated passes clear linemen and blitzers cannot bat them down', () => {

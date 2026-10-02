@@ -38,6 +38,13 @@ export function findTappedPassReceiver(receivers: Array<Entity | null | undefine
     .sort((first, second) => first.distance - second.distance)[0]?.receiver || null;
 }
 
+export function getPassLeadTarget(receiver: Entity, flightFrames: number, leadFactor = 0.9): { x: number; y: number } {
+  return {
+    x: receiver.x + (receiver.vx || 0) * flightFrames * leadFactor,
+    y: receiver.y + (receiver.vy || 0) * flightFrames * leadFactor
+  };
+}
+
 export function getPassArcHeight(maxHeight: number, progress: number): number {
   const clampedProgress = Math.max(0, Math.min(1, progress));
   const releaseZ = 20; // High overhand release above helmet (clears the line of scrimmage)
