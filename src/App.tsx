@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Volume2, VolumeX, RefreshCw, HelpCircle, X, Users, Shield } from 'lucide-react';
+import { Volume2, VolumeX, RefreshCw, HelpCircle, X, Users, Shield, ArrowRight, Search } from 'lucide-react';
 import { offensivePlaybook, defensivePlaybook } from './game/playbook';
 import { sounds } from './game/sound';
 import { mountFootballGame, type GameEngineHandle } from './game/engine';
@@ -18,8 +18,10 @@ export default function App() {
   const [p2OffPlayState, setP2OffPlayState] = useState('SHORT_PASS');
   const [p2DefPlayState, setP2DefPlayState] = useState('COVER3');
   const [activeOffenseState, setActiveOffenseState] = useState('P1');
-  const [p1TeamState, setP1TeamState] = useState<TeamProfile>(TEAMS.ARROWS);
-  const [p2TeamState, setP2TeamState] = useState<TeamProfile>(TEAMS.ENFORCERS);
+  const [p1TeamState, setP1TeamState] = useState<TeamProfile>(TEAMS.ALABAMA);
+  const [p2TeamState, setP2TeamState] = useState<TeamProfile>(TEAMS.GEORGIA);
+  const [teamSelectionSide, setTeamSelectionSide] = useState<'P1' | 'P2'>('P1');
+  const [teamSearch, setTeamSearch] = useState('');
   const [showTeamModal, setShowTeamModal] = useState(true);
   const [hasKickedOff, setHasKickedOff] = useState(false);
   const [momentumState, setMomentumState] = useState(0);
@@ -250,6 +252,19 @@ export default function App() {
       showAnnouncement("GAME RESET - P1 BALL 1ST & 10", "#00ffff");
     }
   };
+
+  const selectedTeamProfile = teamSelectionSide === 'P1' ? p1TeamState : p2TeamState;
+  const visibleTeams = getAllTeams().filter(team =>
+    `${team.city} ${team.name} ${team.nickname}`.toLowerCase().includes(teamSearch.trim().toLowerCase())
+  );
+  const selectedTeamRatings = [
+    { label: 'Receiver speed', value: Math.round(selectedTeamProfile.ratings.wrSpeed * 100) },
+    { label: 'Pass protection', value: Math.round(selectedTeamProfile.ratings.passProtection * 100) },
+    { label: 'Run power', value: Math.round(selectedTeamProfile.ratings.runPower * 100) },
+    { label: 'DB speed', value: Math.round(selectedTeamProfile.ratings.dbClosingSpeed * 100) },
+    { label: 'Pass rush', value: Math.round(selectedTeamProfile.ratings.passRush * 100) },
+    { label: 'Discipline', value: Math.round((2 - selectedTeamProfile.ratings.mistakeChance) * 100) }
+  ];
 
   return (
     <div className="relative w-screen h-screen overflow-hidden flex flex-col items-center justify-center bg-[#030704] text-white font-mono select-none">
@@ -484,171 +499,187 @@ export default function App() {
       {showTeamModal && (
         <div
           onPointerDown={(e) => e.stopPropagation()}
-          className="absolute inset-0 bg-black/92 flex flex-col items-center justify-center z-100 p-4"
+          className="absolute inset-0 z-[100] flex flex-col items-center justify-center bg-[#101713]/75 p-3 backdrop-blur-sm"
         >
-          <div className="bg-[#0b170e] border-2 border-[#ffcc00] rounded-lg max-w-[390px] w-full p-4 max-h-[85vh] overflow-y-auto text-left shadow-2xl">
-            <div className="flex items-center justify-between border-b border-neutral-700 pb-2 mb-3">
-              <div>
-                <h2 className="text-[#ffcc00] font-black text-sm tracking-wider flex items-center gap-1.5">
-                  <Users size={16} /> {!hasKickedOff ? 'CHOOSE TEAMS TO KICK OFF' : 'FRANCHISE & TEAM SELECTOR'}
-                </h2>
-                <p className="text-[0.58rem] text-neutral-400">Select teams below — each card highlights key strengths to exploit</p>
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="team-selector-title"
+            className="team-selector-panel flex max-h-[90dvh] w-full max-w-5xl flex-col overflow-hidden rounded-lg border border-[#d5ded7] bg-[#f2f5f2] text-left text-[#1b3026] shadow-2xl"
+          >
+            <div className="flex shrink-0 items-center justify-between border-b border-[#dce3dd] bg-white px-4 py-3 sm:px-6">
+              <div className="flex items-center gap-3">
+                <span className="flex h-10 w-10 items-center justify-center rounded-md bg-[#e8f0ea] text-[#246344]">
+                  <Users size={20} />
+                </span>
+                <div>
+                  <h2 id="team-selector-title" className="text-xl font-extrabold leading-tight sm:text-2xl">
+                    {!hasKickedOff ? 'Choose teams' : 'Team matchup'}
+                  </h2>
+                  <p className="mt-0.5 text-xs text-[#66756b]">Backyard Football</p>
+                </div>
               </div>
-              <button onClick={() => { setShowTeamModal(false); setHasKickedOff(true); }} className="text-neutral-400 hover:text-white p-1" title="Close / Start">
+              <button
+                onClick={() => { setShowTeamModal(false); setHasKickedOff(true); }}
+                className="rounded-md p-2 text-[#66756b] transition hover:bg-[#edf1ed] hover:text-[#1b3026]"
+                title="Close / Start"
+                aria-label="Close team selector"
+              >
                 <X size={18} />
               </button>
             </div>
 
-            {/* Current Matchup Summary */}
-            <div className="flex items-center justify-between bg-black/80 border border-[#ffcc00]/50 p-2.5 rounded-lg mb-3 text-[0.66rem] shadow-md">
-              <div className="text-left">
-                <span className="text-[0.54rem] text-emerald-400 block font-black uppercase">P1 (YOU):</span>
-                <span className="font-black text-xs" style={{ color: p1TeamState.primaryColor }}>
+            <div className="grid shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-3 border-b border-[#dce3dd] bg-[#e9efea] px-4 py-3 sm:px-6">
+              <div className="min-w-0">
+                <span className="mb-1 block text-[11px] font-bold uppercase text-[#246344]">You</span>
+                <span className="flex items-center gap-2 truncate text-sm font-bold sm:text-base">
+                  <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ backgroundColor: p1TeamState.primaryColor }} />
                   {p1TeamState.city} {p1TeamState.nickname}
                 </span>
-                <span className="text-[0.55rem] text-neutral-400 block">{p1TeamState.archetype.replace('_', ' ')}</span>
               </div>
-              <div className="flex flex-col items-center">
-                <span className="text-[#ffcc00] font-black text-xs">VS</span>
-                <span className="text-[0.50rem] text-neutral-400">MATCHUP</span>
-              </div>
-              <div className="text-right">
-                <span className="text-[0.54rem] text-red-400 block font-black uppercase">P2 (CPU):</span>
-                <span className="font-black text-xs" style={{ color: p2TeamState.primaryColor }}>
+              <span className="rounded bg-white px-2 py-1 text-[11px] font-bold text-[#6b786f]">VS</span>
+              <div className="min-w-0 text-right">
+                <span className="mb-1 block text-[11px] font-bold uppercase text-[#b45435]">CPU</span>
+                <span className="flex items-center justify-end gap-2 truncate text-sm font-bold sm:text-base">
                   {p2TeamState.city} {p2TeamState.nickname}
+                  <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ backgroundColor: p2TeamState.primaryColor }} />
                 </span>
-                <span className="text-[0.55rem] text-neutral-400 block">{p2TeamState.archetype.replace('_', ' ')}</span>
               </div>
             </div>
 
-            {/* Teams List */}
-            <div className="space-y-3">
-              {getAllTeams().map((team) => {
-                const isP1 = p1TeamState.id === team.id;
-                const isP2 = p2TeamState.id === team.id;
+            <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-[#dce3dd] bg-white px-4 py-3 sm:px-6">
+              <div className="flex gap-2" role="group" aria-label="Choose which side to assign">
+                <button
+                  type="button"
+                  aria-pressed={teamSelectionSide === 'P1'}
+                  onClick={() => setTeamSelectionSide('P1')}
+                  className={`min-w-28 rounded-md border px-3 py-2 text-left transition ${teamSelectionSide === 'P1' ? 'border-[#246344] bg-[#e8f0ea] text-[#1e573b]' : 'border-[#dce3dd] bg-white text-[#59685f] hover:bg-[#f5f7f5]'}`}
+                >
+                  <span className="block text-xs font-bold">You</span>
+                  <span className="block truncate text-[11px]">{p1TeamState.nickname}</span>
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={teamSelectionSide === 'P2'}
+                  onClick={() => setTeamSelectionSide('P2')}
+                  className={`min-w-28 rounded-md border px-3 py-2 text-left transition ${teamSelectionSide === 'P2' ? 'border-[#b45435] bg-[#f7ece7] text-[#93442c]' : 'border-[#dce3dd] bg-white text-[#59685f] hover:bg-[#f5f7f5]'}`}
+                >
+                  <span className="block text-xs font-bold">CPU</span>
+                  <span className="block truncate text-[11px]">{p2TeamState.nickname}</span>
+                </button>
+              </div>
+              <span className="text-xs text-[#758178]">Assigning to {teamSelectionSide === 'P1' ? 'You' : 'CPU'}</span>
+            </div>
 
-                return (
-                  <div
-                    key={team.id}
-                    className={`bg-neutral-950/90 border-2 rounded-xl p-3 transition shadow-md ${
-                      isP1
-                        ? 'border-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.35)] ring-1 ring-emerald-400'
-                        : isP2
-                          ? 'border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.35)] ring-1 ring-red-400'
-                          : 'border-neutral-800 hover:border-neutral-600'
-                    }`}
-                  >
-                    {/* Team Header */}
-                    <div className="flex items-center justify-between mb-1.5">
-                      <div className="flex items-center gap-2">
-                        <div
-                          className="w-4 h-4 rounded-full border-2 border-white/80 shadow"
-                          style={{ backgroundColor: team.primaryColor }}
-                        />
-                        <div>
-                          <span className="font-black text-xs tracking-wider" style={{ color: team.primaryColor }}>
-                            {team.name.toUpperCase()}
+            <div className="min-h-0 flex-1 overflow-y-auto md:grid md:grid-cols-[minmax(0,1fr)_280px] md:overflow-hidden">
+              <div className="p-3 sm:p-5 md:min-h-0 md:overflow-y-auto">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <h3 className="text-sm font-bold text-[#253a2d]">SEC teams <span className="ml-1 text-xs font-normal text-[#718077]">{getAllTeams().length}</span></h3>
+                  <label className="flex w-44 items-center gap-2 rounded-md border border-[#dce3dd] bg-white px-2.5 py-2 text-[#718077] focus-within:border-[#7da78a] sm:w-56">
+                    <Search size={15} aria-hidden="true" />
+                    <input
+                      type="search"
+                      aria-label="Search SEC teams"
+                      placeholder="Search teams"
+                      value={teamSearch}
+                      onChange={event => setTeamSearch(event.target.value)}
+                      className="min-w-0 flex-1 bg-transparent text-xs text-[#253a2d] outline-none placeholder:text-[#87928a]"
+                    />
+                  </label>
+                </div>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  {visibleTeams.map((team) => {
+                    const isP1 = p1TeamState.id === team.id;
+                    const isP2 = p2TeamState.id === team.id;
+                    const isActiveSide = teamSelectionSide === 'P1' ? isP1 : isP2;
+
+                    return (
+                      <button
+                        key={team.id}
+                        type="button"
+                        aria-pressed={isActiveSide}
+                        onClick={() => teamSelectionSide === 'P1' ? handleSelectP1Team(team.id) : handleSelectP2Team(team.id)}
+                        style={{ borderLeftColor: team.primaryColor }}
+                        className={`min-h-[100px] rounded-md border border-l-4 px-3 py-2.5 text-left transition-colors ${isActiveSide ? 'border-[#246344] bg-[#e8f0ea]' : 'border-[#dce3dd] bg-white hover:bg-[#f8faf8]'} focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#246344]`}
+                      >
+                        <span className="flex items-start justify-between gap-2">
+                          <span className="min-w-0">
+                            <span className="block truncate text-[11px] font-semibold text-[#718077]">{team.city}</span>
+                            <span className="block truncate text-base font-bold text-[#1b3026]">{team.nickname}</span>
                           </span>
-                          <span className="ml-2 text-[0.52rem] px-1.5 py-0.5 bg-neutral-800 text-neutral-300 rounded font-bold uppercase tracking-wider">
-                            {team.archetype.replace('_', ' ')}
+                          <span className="flex shrink-0 flex-wrap justify-end gap-1">
+                            {isP1 && <span className="rounded bg-[#e4efe7] px-1.5 py-0.5 text-[10px] font-bold text-[#246344]">You</span>}
+                            {isP2 && <span className="rounded bg-[#f7ece7] px-1.5 py-0.5 text-[10px] font-bold text-[#a34d32]">CPU</span>}
                           </span>
+                        </span>
+                        <span className="mt-1 block truncate text-[11px] text-[#64736a]">{team.archetype.replace('_', ' ')}</span>
+                        <span className="mt-1 line-clamp-2 block text-xs leading-4 text-[#425349]">{team.strengths}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                {visibleTeams.length === 0 && (
+                  <p className="rounded-md border border-dashed border-[#cbd6cd] px-4 py-8 text-center text-sm text-[#68776d]">No SEC teams match that search.</p>
+                )}
+              </div>
+
+              <aside className="border-t border-[#dce3dd] bg-[#eaf0eb] p-4 sm:p-5 md:min-h-0 md:overflow-y-auto md:border-l md:border-t-0">
+                <div className="flex items-center gap-2">
+                  <span className="h-3 w-3 rounded-sm" style={{ backgroundColor: selectedTeamProfile.primaryColor }} />
+                  <span className="text-xs font-bold uppercase text-[#68776d]">Selected for {teamSelectionSide === 'P1' ? 'you' : 'CPU'}</span>
+                </div>
+                <h3 className="mt-2 text-2xl font-extrabold leading-tight">{selectedTeamProfile.city} {selectedTeamProfile.nickname}</h3>
+                <p className="mt-1 text-xs font-semibold text-[#617168]">{selectedTeamProfile.archetype.replace('_', ' ')}</p>
+                <p className="mt-3 text-sm leading-5 text-[#405047]">{selectedTeamProfile.description}</p>
+
+                <div className="mt-4 border-t border-[#d1dbd3] pt-3">
+                  <p className="text-xs font-bold uppercase text-[#246344]">Strength</p>
+                  <p className="mt-1 text-xs leading-4 text-[#405047]">{selectedTeamProfile.strengths}</p>
+                  <p className="mt-3 text-xs font-bold uppercase text-[#a34d32]">Watch out for</p>
+                  <p className="mt-1 text-xs leading-4 text-[#405047]">{selectedTeamProfile.weaknesses}</p>
+                </div>
+
+                <div className="mt-4 border-t border-[#d1dbd3] pt-3">
+                  <p className="mb-2 text-xs font-bold uppercase text-[#68776d]">Team ratings <span className="font-normal">(100 = average)</span></p>
+                  <div className="space-y-2">
+                    {selectedTeamRatings.map(({ label, value }) => (
+                      <div key={label}>
+                        <div className="mb-1 flex items-center justify-between text-[11px]">
+                          <span className="text-[#59695f]">{label}</span>
+                          <span className="font-bold text-[#273b30]">{value}</span>
+                        </div>
+                        <div className="h-1.5 overflow-hidden rounded-full bg-[#d4ded6]">
+                          <div className="h-full rounded-full bg-[#43815e]" style={{ width: `${Math.max(0, Math.min(100, value / 1.4))}%` }} />
                         </div>
                       </div>
-                      {isP1 && (
-                        <span className="text-[0.52rem] font-black bg-emerald-500 text-black px-1.5 py-0.5 rounded shadow">
-                          YOU (P1)
-                        </span>
-                      )}
-                      {isP2 && (
-                        <span className="text-[0.52rem] font-black bg-red-500 text-white px-1.5 py-0.5 rounded shadow">
-                          CPU (P2)
-                        </span>
-                      )}
-                    </div>
-
-                    <p className="text-[0.58rem] text-neutral-300 mb-2 leading-relaxed">{team.description}</p>
-
-                    {/* Prominent Card Section: Team Strengths */}
-                    <div className="bg-emerald-950/70 border border-emerald-500/50 rounded-lg p-2 mb-1.5 shadow-inner">
-                      <div className="flex items-center gap-1.5 text-emerald-400 font-extrabold text-[0.60rem] mb-0.5">
-                        <span className="bg-emerald-500 text-black text-[0.50rem] font-black px-1 rounded uppercase tracking-wider">
-                          STRENGTHS
-                        </span>
-                        <span>CORE TEAM ADVANTAGE</span>
-                      </div>
-                      <p className="text-[0.60rem] text-emerald-200 font-semibold leading-snug">
-                        {team.strengths}
-                      </p>
-                    </div>
-
-                    {/* Team Weaknesses */}
-                    <div className="bg-red-950/30 border border-red-500/30 rounded p-1.5 mb-2">
-                      <div className="flex items-start gap-1 text-[0.56rem]">
-                        <span className="text-red-400 font-bold uppercase shrink-0">WEAKNESS:</span>
-                        <span className="text-neutral-300 leading-tight">{team.weaknesses}</span>
-                      </div>
-                    </div>
-
-                    {/* Ratings Grid */}
-                    <div className="grid grid-cols-3 gap-1 text-[0.52rem] text-neutral-400 bg-neutral-900/90 p-1.5 rounded-lg mb-2.5 font-mono border border-neutral-800">
-                      <div>WR Speed: <b className="text-white">{Math.round(team.ratings.wrSpeed * 100)}</b></div>
-                      <div>Pass Pro: <b className="text-white">{Math.round(team.ratings.passProtection * 100)}</b></div>
-                      <div>Run Power: <b className="text-white">{Math.round(team.ratings.runPower * 100)}</b></div>
-                      <div>DB Speed: <b className="text-white">{Math.round(team.ratings.dbClosingSpeed * 100)}</b></div>
-                      <div>Pass Rush: <b className="text-white">{Math.round(team.ratings.passRush * 100)}</b></div>
-                      <div>Discipline: <b className="text-white">{Math.round((2 - team.ratings.mistakeChance) * 100)}</b></div>
-                    </div>
-
-                    {/* Action Select Buttons */}
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => handleSelectP1Team(team.id)}
-                        className={`flex-1 py-1.5 px-2 rounded-md text-[0.62rem] font-extrabold transition cursor-pointer active:scale-95 ${
-                          isP1
-                            ? 'bg-emerald-600 text-white border border-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.5)]'
-                            : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-200'
-                        }`}
-                      >
-                        {isP1 ? '✓ ACTIVE AS P1 (YOU)' : 'PLAY AS P1 (YOU)'}
-                      </button>
-                      <button
-                        onClick={() => handleSelectP2Team(team.id)}
-                        className={`flex-1 py-1.5 px-2 rounded-md text-[0.62rem] font-extrabold transition cursor-pointer active:scale-95 ${
-                          isP2
-                            ? 'bg-red-600 text-white border border-red-400 shadow-[0_0_8px_rgba(239,68,68,0.5)]'
-                            : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-200'
-                        }`}
-                      >
-                        {isP2 ? '✓ OPPONENT (CPU)' : 'SET OPPONENT (CPU)'}
-                      </button>
-                    </div>
+                    ))}
                   </div>
-                );
-              })}
+                </div>
+              </aside>
             </div>
 
-            {/* Bottom Modal CTA */}
-            {!hasKickedOff ? (
-              <button
-                onClick={() => {
-                  setShowTeamModal(false);
-                  setHasKickedOff(true);
-                  sounds.playWhistle();
-                  showAnnouncement(`${p1TeamState.name.toUpperCase()} VS ${p2TeamState.name.toUpperCase()} - READY FOR KICKOFF! 🏈`, p1TeamState.primaryColor, true);
-                }}
-                className="mt-4 w-full bg-[#ffcc00] hover:bg-yellow-400 text-black font-black py-2.5 rounded-lg text-xs transition cursor-pointer tracking-wider shadow-[0_0_15px_rgba(255,204,0,0.4)] active:scale-98 flex items-center justify-center gap-2"
-              >
-                <span>KICK OFF GAME 🏈</span>
-                <span className="text-[0.62rem] opacity-75 font-bold">({p1TeamState.nickname} vs {p2TeamState.nickname})</span>
-              </button>
-            ) : (
-              <button
-                onClick={() => setShowTeamModal(false)}
-                className="mt-4 w-full bg-[#ffcc00] hover:bg-yellow-400 text-black font-black py-2 rounded-lg text-xs transition cursor-pointer tracking-wider shadow-md active:scale-98"
-              >
-                SAVE & RESUME GAME
-              </button>
-            )}
+            <div className="shrink-0 border-t border-[#dce3dd] bg-white px-4 py-3 sm:px-6">
+              {!hasKickedOff ? (
+                <button
+                  onClick={() => {
+                    setShowTeamModal(false);
+                    setHasKickedOff(true);
+                    sounds.playWhistle();
+                    showAnnouncement(`${p1TeamState.name.toUpperCase()} VS ${p2TeamState.name.toUpperCase()} - READY FOR KICKOFF! 🏈`, p1TeamState.primaryColor, true);
+                  }}
+                  className="flex w-full items-center justify-center gap-2 rounded-md bg-[#bd5635] px-4 py-3 text-sm font-bold text-white transition hover:bg-[#a9492d] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#bd5635]"
+                >
+                  Kick off game <ArrowRight size={17} />
+                </button>
+              ) : (
+                <button
+                  onClick={() => setShowTeamModal(false)}
+                  className="flex w-full items-center justify-center gap-2 rounded-md bg-[#bd5635] px-4 py-3 text-sm font-bold text-white transition hover:bg-[#a9492d] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#bd5635]"
+                >
+                  Save and resume <ArrowRight size={17} />
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}

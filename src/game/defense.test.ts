@@ -1259,11 +1259,15 @@ test('2 RB spies counters RUN play: audibles out of run into passing concept and
   assert.ok(audibleResult.audibleMessage?.includes('2 RB SPIES COUNTERED'));
 });
 
-test('Franchise System: multiple teams with diverse archetypes, strengths, and weaknesses', async () => {
+test('SEC team profiles include every member with varied game strengths and weaknesses', async () => {
   const { TEAMS, getAllTeams } = await import('./teams');
   const teams = getAllTeams();
+  const expectedIds = [
+    'ALABAMA', 'ARKANSAS', 'AUBURN', 'FLORIDA', 'GEORGIA', 'KENTUCKY', 'LSU', 'MISSISSIPPI_STATE',
+    'MISSOURI', 'OKLAHOMA', 'OLE_MISS', 'SOUTH_CAROLINA', 'TENNESSEE', 'TEXAS', 'TEXAS_AM', 'VANDERBILT'
+  ];
 
-  assert.ok(teams.length >= 6, 'At least 6 distinct teams are ready');
+  assert.deepEqual(teams.map(team => team.id).sort(), expectedIds.sort(), 'Every SEC member has a team profile');
   teams.forEach(team => {
     assert.ok(team.id, 'Team must have an ID');
     assert.ok(team.name, 'Team must have a full name');
@@ -1274,9 +1278,9 @@ test('Franchise System: multiple teams with diverse archetypes, strengths, and w
     assert.ok(team.ratings.dbClosingSpeed > 0, 'DB closing speed rating must exist');
   });
 
-  assert.ok(TEAMS.ARROWS.ratings.wrSpeed > TEAMS.ENFORCERS.ratings.wrSpeed, 'Arrows have faster receivers than Enforcers');
-  assert.ok(TEAMS.ENFORCERS.ratings.runPower > TEAMS.ARROWS.ratings.runPower, 'Enforcers have higher run power than Arrows');
-  assert.ok(TEAMS.TITANS.ratings.passProtection > TEAMS.HORNETS.ratings.passProtection, 'Titans have stronger pass protection than Hornets');
+  assert.ok(TEAMS.TENNESSEE.ratings.wrSpeed > TEAMS.KENTUCKY.ratings.wrSpeed, 'Passing profiles have varied receiver speed');
+  assert.ok(TEAMS.GEORGIA.ratings.passRush > TEAMS.VANDERBILT.ratings.passRush, 'Defensive profiles have varied pass rush');
+  assert.ok(TEAMS.ARKANSAS.ratings.runPower > TEAMS.FLORIDA.ratings.runPower, 'Run-focused profiles have varied run power');
 });
 
 test('Game speed is scaled down 10% for testing', async () => {

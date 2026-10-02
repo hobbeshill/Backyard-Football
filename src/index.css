@@ -1,5 +1,20 @@
 @import "tailwindcss";
 
+@keyframes team-selector-enter {
+	from { opacity: 0; transform: translateY(10px); }
+	to { opacity: 1; transform: translateY(0); }
+}
+
+.team-selector-panel {
+	animation: team-selector-enter 180ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.team-selector-panel {
+		animation: none;
+	}
+}
+
 @keyframes formation-slide-next {
 	from { opacity: 0.35; transform: translateX(24px); }
 	to { opacity: 1; transform: translateX(0); }

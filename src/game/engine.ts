@@ -136,8 +136,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   let activeOffense = 'P1';
   let activeDefense = 'P2';
 
-  let p1Team: TeamProfile = getTeam('ARROWS');
-  let p2Team: TeamProfile = getTeam('ENFORCERS');
+  let p1Team: TeamProfile = getTeam('ALABAMA');
+  let p2Team: TeamProfile = getTeam('GEORGIA');
 
   let p1OffPlay = 'SHORT_PASS';
   let p1OffFormation: 'SPREAD' | 'STACK' | 'TRIPS' = 'SPREAD';
