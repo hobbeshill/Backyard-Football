@@ -2249,7 +2249,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           executePunt('P1', attackDirection, kickMeterPower);
         } else if (play.type === 'PASS') {
           phase = 'QB_DROP';
-          isAiming = true;
+          isAiming = false;
           qb.dropStepTimer = 28;
         } else {
           if (rb) rb.hasBall = false;

@@ -80,11 +80,19 @@ test('fourth-down Go For It waits for a deliberate pass after the snap', (contex
     };
     send('pointerdown', 170, 273);
     assert.equal(game.phase, 'QB_DROP');
-    send('pointerup', 170, 284);
-    assert.equal(game.phase, 'QB_DROP', 'Snap jitter must not throw the ball');
+    send('pointermove', 170, 333);
+    send('pointerup', 170, 333);
+    assert.equal(game.phase, 'QB_DROP', 'Releasing the snap gesture must never throw the ball');
     send('pointerdown', 170, 273);
     send('pointerup', 170, 333);
     assert.equal(game.phase, 'THROWN', 'A deliberate pull should still throw');
+    game.resetDrill();
+    send('pointerdown', 170, 273);
+    send('pointerup', 170, 333);
+    assert.equal(game.phase, 'QB_DROP');
+    send('pointerdown', 50, 225);
+    send('pointerup', 50, 225);
+    assert.equal(game.phase, 'THROWN', 'A fresh receiver tap should throw after the snap');
   } finally {
     cleanup?.();
     globalThis.requestAnimationFrame = originalRequest;
