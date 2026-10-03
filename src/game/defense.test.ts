@@ -3,8 +3,20 @@ import test from 'node:test';
 import { scoreRunBlockTarget, shouldCpuReleasePass, shouldCpuScramble } from './ai';
 import { alignDefenderAcrossFromRunningBack, alignDefenders, chooseCpuDefensiveAssignments, getBracketCoverageTarget, matchCpuDefendersToReceivers } from './defense';
 import { calculateYardsToGo, canDefenderDeflectPass, canTackleQuarterback, findTappedPassReceiver, getDefenderPassReachHeight, getDriveStartY, getSnapBallPosition, getPassArcHeight, getPassArcMaxHeight, getPassFlightFrames, getPassLeadTarget, getRoutePassLeadTarget, resolvePlayResult } from './rules';
-import { canEngagePassBlock, moveToward, updateRouteMovement } from './movement';
+import { canEngagePassBlock, getQbDecisionTimeScale, moveToward, updateRouteMovement } from './movement';
 import type { Entity } from './types';
+
+test('relaxed QB timing slows only user passing decisions and preserves other gameplay speeds', () => {
+  const situation = { enabled: true, phase: 'QB_DROP', activeOffense: 'P1', isPassingPlay: true };
+  assert.equal(getQbDecisionTimeScale(situation), 0.65);
+  assert.equal(getQbDecisionTimeScale({ ...situation, enabled: false }), 1);
+  assert.equal(getQbDecisionTimeScale({ ...situation, activeOffense: 'P2' }), 1);
+  assert.equal(getQbDecisionTimeScale({ ...situation, isPassingPlay: false }), 1);
+  assert.equal(getQbDecisionTimeScale({ ...situation, tutorial: true }), 1);
+  for (const phase of ['PRE_SNAP', 'HANDOFF', 'THROWN', 'RUNNING', 'KICKOFF', 'PUNT', 'FUMBLE', 'DEAD']) {
+    assert.equal(getQbDecisionTimeScale({ ...situation, phase }), 1);
+  }
+});
 
 test('deep blitzers must run to a blocker before pass protection can engage them', () => {
   for (const attackDirection of [-1, 1]) {
@@ -198,6 +210,63 @@ test('CPU releases open, pressured, and overdue passes before scrambling', () =>
   assert.equal(shouldCpuReleasePass({ ...situation, isUnderHeavyPressure: true, playClock: 26 }), true);
   assert.equal(shouldCpuReleasePass({ ...situation, playClock: 58 }), true);
   assert.equal(shouldCpuReleasePass({ ...situation, hasTarget: false, playClock: 58 }), false);
+});
+
+test('CPU vertical calls wait for downfield windows but escape pressure and eventually release', () => {
+  const situation = {
+    hasTarget: true,
+    isDeepShotOpportunity: false,
+    hasOpenBreak: true,
+    isUnderHeavyPressure: false,
+    isVerticalPlay: true,
+    playClock: 35,
+    bestScore: 90,
+    targetDepthYards: 4,
+    targetSeparation: 25
+  };
+  assert.equal(shouldCpuReleasePass(situation), false);
+  assert.equal(shouldCpuReleasePass({ ...situation, playClock: 60 }), false);
+  assert.equal(shouldCpuReleasePass({ ...situation, playClock: 48, targetDepthYards: 18 }), true);
+  assert.equal(shouldCpuReleasePass({ ...situation, playClock: 48, targetDepthYards: 18, targetSeparation: 8 }), false);
+  assert.equal(shouldCpuReleasePass({ ...situation, isUnderHeavyPressure: true, playClock: 10 }), true);
+  assert.equal(shouldCpuReleasePass({ ...situation, playClock: 100 }), false);
+  assert.equal(shouldCpuReleasePass({ ...situation, playClock: 240 }), true);
+  assert.equal(shouldCpuReleasePass({ ...situation, hasTarget: false, playClock: 240 }), false);
+});
+
+test('protected CPU vertical passes reach deep catch windows with real route speeds', (context) => {
+  context.mock.method(Date, 'now', () => 1000);
+  for (const attackDirection of [-1, 1]) {
+    for (const routeType of ['GO', 'POST-L', 'WHEEL']) {
+      const receiver: Entity = { x: 170, y: 500, radius: 10, routeType, timer: 0 };
+      const quarterback = { x: 170, y: 500 - 48 * attackDirection };
+      let releasedAt = 0;
+      let catchDepth = 0;
+      for (let frame = 1; frame <= 240; frame++) {
+        updateRouteMovement(receiver, 'QB_DROP', attackDirection, [], 340);
+        const distance = Math.hypot(receiver.x - quarterback.x, receiver.y - quarterback.y);
+        const arrivalFrames = Math.max(16, Math.round(distance / ((distance > 240 ? 9.5 : 8.6) * 0.8)));
+        const target = getRoutePassLeadTarget(receiver, arrivalFrames, attackDirection, 340, []);
+        catchDepth = (target.y - 500) * attackDirection / 10;
+        if (shouldCpuReleasePass({
+          hasTarget: true,
+          isDeepShotOpportunity: false,
+          hasOpenBreak: true,
+          isUnderHeavyPressure: false,
+          isVerticalPlay: true,
+          playClock: frame,
+          bestScore: 90,
+          targetDepthYards: catchDepth,
+          targetSeparation: 25
+        })) {
+          releasedAt = frame;
+          break;
+        }
+      }
+      assert.ok(releasedAt > 35 && releasedAt < 240, `${routeType}: release at ${releasedAt}`);
+      assert.ok(catchDepth >= 15, `${routeType}: catch depth ${catchDepth}`);
+    }
+  }
 });
 
 test('CPU QB scrambles occasionally when pressured and passing options are poor', () => {
@@ -1483,6 +1552,25 @@ test('2 RB spies counters RUN play: audibles out of run into passing concept and
   assert.equal(rb.isBlocker, true, 'RB stays in to pass block');
   assert.equal(rb.routeType, 'BLOCK');
   assert.ok(audibleResult.audibleMessage?.includes('2 RB SPIES COUNTERED'));
+});
+
+test('team identities amplify both strengths and weaknesses while preserving neutral ratings', async () => {
+  const { TEAMS } = await import('./teams');
+  assert.equal(TEAMS.FLORIDA.ratings.wrSpeed, 1.3);
+  assert.equal(TEAMS.FLORIDA.ratings.passProtection, 0.875);
+  assert.equal(TEAMS.FLORIDA.ratings.runPower, 0.85);
+  assert.equal(TEAMS.ARKANSAS.ratings.runPower, 1.375);
+  assert.equal(TEAMS.KENTUCKY.ratings.wrSpeed, 0.875);
+  assert.equal(TEAMS.GEORGIA.ratings.passRush, 1.375);
+  assert.equal(TEAMS.GEORGIA.ratings.mistakeChance, 0.65);
+  assert.equal(TEAMS.AUBURN.ratings.mistakeChance, 1.225);
+  assert.equal(TEAMS.VANDERBILT.ratings.passRush, 0.85);
+  assert.equal(TEAMS.LSU.ratings.passProtection, 1);
+  for (const team of Object.values(TEAMS)) {
+    for (const rating of Object.values(team.ratings)) {
+      assert.ok(rating >= 0.6 && rating <= 1.6);
+    }
+  }
 });
 
 test('SEC team profiles include every member with varied game strengths and weaknesses', async () => {

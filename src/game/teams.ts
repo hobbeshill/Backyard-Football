@@ -12,13 +12,13 @@ export interface TeamProfile {
   strengths: string;
   weaknesses: string;
   ratings: {
-    wrSpeed: number;         // Modulates WR sprint speed (0.90 - 1.15)
-    passProtection: number;  // Modulates OL block hold time (0.85 - 1.25)
-    runPower: number;        // Modulates RB broken tackle chance (0.85 - 1.20)
-    dbClosingSpeed: number;  // Modulates DB closing & pursuit speed (0.90 - 1.15)
-    passRush: number;        // Modulates pass rush pressure speed (0.85 - 1.25)
-    mistakeChance: number;   // Defensive coverage bust tendency (0.80 - 1.30)
-    kicking?: number;        // Special teams leg power & kicking accuracy (0.90 - 1.15)
+    wrSpeed: number;         // Modulates WR sprint speed
+    passProtection: number;  // Modulates OL block hold time
+    runPower: number;        // Modulates RB broken tackle chance
+    dbClosingSpeed: number;  // Modulates DB closing & pursuit speed
+    passRush: number;        // Modulates pass rush pressure speed
+    mistakeChance: number;   // Defensive coverage bust tendency
+    kicking?: number;        // Special teams leg power & kicking accuracy
   };
 }
 
@@ -35,6 +35,13 @@ function createTeamProfile(
   weaknesses: string,
   ratings: TeamProfile['ratings']
 ): TeamProfile {
+  const amplifiedRatings = { ...ratings };
+  for (const ratingKey of Object.keys(ratings) as (keyof TeamProfile['ratings'])[]) {
+    const rating = ratings[ratingKey];
+    if (rating !== undefined) {
+      amplifiedRatings[ratingKey] = Math.max(0.6, Math.min(1.6, Number((1 + (rating - 1) * 2.5).toFixed(3))));
+    }
+  }
   return {
     id,
     name,
@@ -48,7 +55,7 @@ function createTeamProfile(
     description,
     strengths,
     weaknesses,
-    ratings
+    ratings: amplifiedRatings
   };
 }
 

@@ -3,7 +3,7 @@ import { defensiveKeys, defensivePlaybook, middleRoutes, offensiveKeys, offensiv
 import { alignDefenderAcrossFromRunningBack, alignDefenders, chooseCpuDefensiveAssignments, getBracketCoverageTarget, matchCpuDefendersToReceivers } from './defense';
 import { evaluateCpuOffensiveAudibles, evaluateCpuBallCarrierMoves, shouldCpuReleasePass, shouldCpuScramble, scoreRunBlockTarget } from './ai';
 import { createFumbleBall } from './fumbles';
-import { canEngagePassBlock, distToSegment, GAME_SPEED_SCALE, getBallCarrierRunSpeed, moveToward, resolveCollisions, shouldApplyRunBlockStun, updateRouteMovement } from './movement';
+import { canEngagePassBlock, distToSegment, GAME_SPEED_SCALE, getBallCarrierRunSpeed, getQbDecisionTimeScale, moveToward, resolveCollisions, shouldApplyRunBlockStun, updateRouteMovement } from './movement';
 import { resolvePlayResult, calculateBrokenTackleChance, calculateYardsToGo, getDriveStartY, getSnapBallPosition, getPassArcHeight, getPassArcMaxHeight, getPassFlightFrames, findTappedPassReceiver, shouldReleaseUserPass, getPassLeadTarget, getRoutePassLeadTarget, canDefenderDeflectPass, canTackleQuarterback, resolveCatchContestOutcome, evaluateQbThrowAccuracy, calculateKickoffFlight, calculatePuntFlight, getTouchbackYardLineY, getKickoffLineY, isPlayerOutOfBounds } from './rules';
 import { sounds } from './sound';
 import { evaluateDirtSwipeGesture, drawDirtSwipeGesture } from './chalkMenu';
@@ -28,6 +28,7 @@ export interface GameEngineHandle {
   resetDrill: () => void;
   resetGame: (announcementText?: string) => void;
   setPaused: (paused: boolean) => void;
+  setRelaxedQbTiming: (enabled: boolean) => void;
   endGame: () => void;
   applyDefensiveAlignment: () => void;
   selectOffense: (key: string) => void;
@@ -86,7 +87,7 @@ export function hasSavedGameSession(): boolean {
   }
 }
 
-export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngineCallbacks, options: { tutorial?: boolean } = {}): (() => void) | undefined {
+export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngineCallbacks, options: { tutorial?: boolean; relaxedQbTiming?: boolean } = {}): (() => void) | undefined {
   const {
     setP2OffPlayState,
     setP2DefPlayState,
@@ -119,6 +120,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   let cameraOffsetX = 0;
   let screenShakeTimer = 0;
   let playClock = 0;
+  let relaxedQbTiming = options.relaxedQbTiming ?? true;
+  let simulationFrameRemainder = 0;
   let cpuScrambleDecisionMade = false;
   let qbScrambleReactionTimer = 0;
   let p1Score = 0;
@@ -969,6 +972,16 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     publishGameClock();
   }
 
+  function getDecisionTimeScale(): number {
+    return getQbDecisionTimeScale({
+      enabled: relaxedQbTiming,
+      phase,
+      activeOffense,
+      isPassingPlay: offensivePlaybook[p1OffPlay]?.type === 'PASS',
+      tutorial: options.tutorial
+    });
+  }
+
   function updateGameClock(timestamp: number): void {
     if (lastClockFrameTime === null) {
       lastClockFrameTime = timestamp;
@@ -1030,7 +1043,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
     gameClockRunning = true;
     const clockMultiplier = 3;
-    gameClockRemainderMs += elapsedMs * clockMultiplier;
+    gameClockRemainderMs += elapsedMs * clockMultiplier * getDecisionTimeScale();
     while (gameClockRemainderMs >= 1000 && gameClockSeconds > 0) {
       gameClockRemainderMs -= 1000;
       gameClockSeconds--;
@@ -1928,6 +1941,10 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       lastClockFrameTime = null;
       if (paused) saveGameSession();
       else if (phase === 'DEAD' && playEnding && !drillResetTimer) scheduleDrillReset();
+    },
+    setRelaxedQbTiming: (enabled: boolean) => {
+      relaxedQbTiming = enabled;
+      simulationFrameRemainder = 0;
     },
     endGame: () => {
       if (drillResetTimer) clearTimeout(drillResetTimer);
@@ -2917,6 +2934,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       let bestTarget: Entity | null = null;
       let bestScore = -9999;
       let bestIsDownfieldWR = false;
+      const isVerticalPlay = offensivePlaybook[p2OffPlay]?.routeType === 'VERTICAL';
 
       // Helper to evaluate a receiver's openness, route-break timing, and window
       const evaluateTarget = (t: Entity | null, isCheckdown: boolean) => {
@@ -3066,8 +3084,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         }
 
         // 6. Playbook specific bonus
-        if (p2OffPlay === 'DEEP_SHOT' && depthYards > 12) {
-          score += 40;
+        if (isVerticalPlay && isDeepRoute && depthYards >= 15 && nearestDefDist >= 14) {
+          score += 90;
         }
 
         // 7. Passing lane obstruction deduction
@@ -3197,7 +3215,10 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         hasOpenBreak: openBreakWR !== null,
         isUnderHeavyPressure,
         playClock,
-        bestScore
+        bestScore,
+        isVerticalPlay,
+        targetDepthYards: bestTarget ? evaluateTarget(bestTarget, !bestIsDownfieldWR).depthYards : 0,
+        targetSeparation: bestTarget ? evaluateTarget(bestTarget, !bestIsDownfieldWR).nearestDefDist : 0
       });
 
       if (shouldThrowNow && bestTarget !== null) {
@@ -3216,7 +3237,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           showAnnouncement("CPU SEES RB SPIES! HITTING OPEN MAN DOWNFIELD! 🏈🎯💥", "#00ffff");
         } else if (openBreakWR && bestTarget === checkdownTarget) {
           chosenTarget = openBreakWR;
-        } else if (isDeepShotOpportunity && bestTarget) {
+        } else if ((isDeepShotOpportunity || isVerticalPlay) && bestTarget) {
           chosenTarget = bestTarget;
         } else {
           chosenTarget = openBreakWR || bestTarget;
@@ -5740,7 +5761,19 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     if (!isPaused) {
       if (!options.tutorial) updateGameClock(timestamp);
       const tutorialSnapAnimating = options.tutorial && tutorialStep === 5 && tutorialAimFrames++ < 24;
-      if (!options.tutorial || tutorialSnapAnimating || tutorialStep === 6 || tutorialStep === 10 || phase === 'PRE_SNAP') update();
+      if (!options.tutorial || tutorialSnapAnimating || tutorialStep === 6 || tutorialStep === 10 || phase === 'PRE_SNAP') {
+        const timeScale = getDecisionTimeScale();
+        if (timeScale === 1) {
+          simulationFrameRemainder = 0;
+          update();
+        } else {
+          simulationFrameRemainder += timeScale;
+          if (simulationFrameRemainder >= 1) {
+            simulationFrameRemainder -= 1;
+            update();
+          }
+        }
+      }
     }
     draw();
     if (options.tutorial) {

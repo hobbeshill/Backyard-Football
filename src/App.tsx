@@ -6,7 +6,7 @@ import { hasSavedGameSession, mountFootballGame, type GameEngineHandle } from '.
 import { HelmetSpritePreview } from './game/HelmetSpritePreview';
 import { RealPlayTutorial } from './game/RealPlayTutorial';
 import { TEAM_KEYS, TEAMS, getAllTeams, getTeam, type TeamProfile } from './game/teams';
-import { createSeason, getSeasonRecord, loadGameMode, loadSeasonProgress, recordSeasonGame, saveGameMode, saveSeasonProgress, type GameMode, type SeasonProgress } from './game/season';
+import { createSeason, loadGameMode, loadSeasonProgress, recordSeasonGame, saveGameMode, saveSeasonProgress, type GameMode, type SeasonProgress } from './game/season';
 
 function getTeamTextStyle(color: string) {
   const hex = color.replace('#', '');
@@ -22,6 +22,7 @@ function getTeamTextStyle(color: string) {
 }
 
 const CONTROLS_TUTORIAL_KEY = 'backyard-football-controls-tutorial-complete-v1';
+const RELAXED_QB_TIMING_KEY = 'backyard-football-relaxed-qb-timing-v1';
 
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -44,6 +45,13 @@ export default function App() {
   const [showTeamModal, setShowTeamModal] = useState(() => !hasSavedGameSession());
   const [hasKickedOff, setHasKickedOff] = useState(hasSavedGameSession);
   const [showPauseMenu, setShowPauseMenu] = useState(hasSavedGameSession);
+  const [relaxedQbTiming, setRelaxedQbTiming] = useState(() => {
+    try {
+      return window.localStorage.getItem(RELAXED_QB_TIMING_KEY) !== 'false';
+    } catch {
+      return true;
+    }
+  });
   const [gameMode, setGameMode] = useState<GameMode>(() => loadGameMode());
   const [seasonProgress, setSeasonProgress] = useState<SeasonProgress | null>(() => loadSeasonProgress());
   const [finishedGame, setFinishedGame] = useState<{ p1Score: number; p2Score: number; restored: boolean } | null>(null);
@@ -351,7 +359,7 @@ export default function App() {
       setIs4thDownState: (val) => setIs4thDown(val),
       setKickMeterPowerState: (power) => setKickMeterPower(power),
       setP1OffPlayState
-    });
+    }, { relaxedQbTiming });
   }, []);
 
   useEffect(() => {
@@ -540,7 +548,6 @@ export default function App() {
   const seasonForDisplay = seasonProgress?.teamId === p1TeamState.id
     ? seasonProgress
     : createSeason(p1TeamState.id, TEAM_KEYS);
-  const seasonRecord = getSeasonRecord(seasonForDisplay);
   const seasonComplete = seasonForDisplay.results.length >= seasonForDisplay.opponentIds.length;
 
   return (
@@ -1101,34 +1108,6 @@ export default function App() {
               </div>
             </div>
 
-            {gameMode === 'SEASON' && !hasKickedOff && (
-              <section className="shrink-0 border-b border-[#dce3dd] bg-white px-4 py-3 sm:px-6" aria-label="Season schedule">
-                <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
-                  <h3 className="text-sm font-bold text-[#253a2d]">Four-game season</h3>
-                  <span className="text-xs font-semibold text-[#246344]">
-                    {seasonRecord.wins}-{seasonRecord.losses}-{seasonRecord.ties}
-                    <span className="ml-1 font-normal text-[#718077]">W-L-T</span>
-                  </span>
-                </div>
-                <div className="grid gap-1 sm:grid-cols-2">
-                  {seasonForDisplay.opponentIds.map((opponentId, index) => {
-                    const result = seasonForDisplay.results[index];
-                    const upcoming = index === seasonForDisplay.results.length && !seasonComplete;
-                    return (
-                      <div key={`${index}-${opponentId}`} className={`flex items-center justify-between gap-2 rounded border px-2.5 py-1.5 text-xs ${upcoming ? 'border-[#bd5635]/50 bg-[#fbf2ee]' : 'border-[#e2e8e3] bg-[#fafbfa]'}`}>
-                        <span className="font-bold text-[#526157]">WEEK {index + 1}</span>
-                        <span className="min-w-0 flex-1 truncate font-semibold text-[#253a2d]">{getTeam(opponentId).name}</span>
-                        <span className={`shrink-0 font-bold ${result ? 'text-[#246344]' : upcoming ? 'text-[#a34d32]' : 'text-[#87928a]'}`}>
-                          {result ? `${result.p1Score}-${result.p2Score}` : upcoming ? 'UP NEXT' : 'SCHEDULED'}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-                {seasonComplete && <p className="mt-2 text-xs font-semibold text-[#246344]">Season complete. Start a new season to play again.</p>}
-              </section>
-            )}
-
             <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-[#dce3dd] bg-white px-4 py-3 sm:px-6">
               <div className="flex gap-2" role="group" aria-label="Choose which side to assign">
                 <button
@@ -1284,6 +1263,22 @@ export default function App() {
             className="w-full max-w-sm rounded-lg border-2 border-[#ffcc00] bg-[#07110a] p-5 text-center shadow-2xl"
           >
             <h2 id="pause-menu-title" className="text-xl font-black uppercase text-[#ffcc00]">Game Paused</h2>
+            <label className="mt-5 flex items-center justify-between gap-3 text-sm font-bold text-white">
+              Relaxed QB timing
+              <input
+                type="checkbox"
+                checked={relaxedQbTiming}
+                onChange={event => {
+                  const enabled = event.target.checked;
+                  setRelaxedQbTiming(enabled);
+                  engineRef.current?.setRelaxedQbTiming(enabled);
+                  try {
+                    window.localStorage.setItem(RELAXED_QB_TIMING_KEY, String(enabled));
+                  } catch {}
+                }}
+                className="h-5 w-5 accent-[#ffcc00]"
+              />
+            </label>
             <div className="mt-5 grid gap-3">
               <button
                 onClick={() => {

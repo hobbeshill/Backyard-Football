@@ -1,6 +1,17 @@
 import type { Entity } from './types';
 
 export const GAME_SPEED_SCALE = 0.77;
+export function getQbDecisionTimeScale(situation: {
+  enabled: boolean;
+  phase: string;
+  activeOffense: string;
+  isPassingPlay: boolean;
+  tutorial?: boolean;
+}): number {
+  return situation.enabled && !situation.tutorial && situation.phase === 'QB_DROP' &&
+    situation.activeOffense === 'P1' && situation.isPassingPlay ? 0.65 : 1;
+}
+
 export function getBallCarrierRunSpeed(isReturner: boolean, isBoosted: boolean): number {
   if (isReturner) return 1.4 * 1.18 * 0.68;
   return isBoosted ? 2.65 : 1.84;

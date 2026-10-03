@@ -22,10 +22,19 @@ export interface CpuPassReleaseSituation {
   isUnderHeavyPressure: boolean;
   playClock: number;
   bestScore: number;
+  isVerticalPlay?: boolean;
+  targetDepthYards?: number;
+  targetSeparation?: number;
 }
 
 export function shouldCpuReleasePass(situation: CpuPassReleaseSituation): boolean {
   if (!situation.hasTarget) return false;
+  if (situation.isVerticalPlay) {
+    if (situation.isUnderHeavyPressure && situation.playClock >= 10) return true;
+    const hasDevelopedTarget = (situation.targetDepthYards ?? 0) >= 15 &&
+      (situation.targetSeparation ?? 0) >= 14 && situation.bestScore > 35;
+    return (situation.playClock >= 48 && hasDevelopedTarget) || situation.playClock >= 240;
+  }
   return situation.isDeepShotOpportunity ||
     (situation.hasOpenBreak && situation.playClock >= 16) ||
     (situation.isUnderHeavyPressure && situation.playClock >= 10) ||
