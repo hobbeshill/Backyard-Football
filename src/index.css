@@ -33,11 +33,6 @@
 	animation: formation-slide-prev 220ms ease-out;
 }
 
-@keyframes announcement-shrink {
-	from { width: 100%; }
-	to { width: 0%; }
-}
-
 @keyframes turnover-pulse-glow {
 	0%, 100% {
 		box-shadow: 0 0 25px rgba(239, 68, 68, 0.8), 0 10px 30px rgba(0, 0, 0, 0.95);
@@ -68,6 +63,3 @@
 	animation: touchdown-pulse-glow 1.3s ease-in-out infinite;
 }
 
-.announcement-progress-bar {
-	animation: announcement-shrink linear forwards;
-}

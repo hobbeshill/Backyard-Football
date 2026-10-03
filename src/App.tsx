@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { Volume2, VolumeX, RefreshCw, HelpCircle, X, Users, Shield, ArrowRight, Search } from 'lucide-react';
+import { Volume2, VolumeX, RefreshCw, HelpCircle, X, Users, Shield, ArrowRight, Search, Pause, Play, Home } from 'lucide-react';
 import { offensivePlaybook, defensivePlaybook } from './game/playbook';
 import { sounds } from './game/sound';
-import { mountFootballGame, type GameEngineHandle } from './game/engine';
+import { hasSavedGameSession, mountFootballGame, type GameEngineHandle } from './game/engine';
 import { HelmetSpritePreview } from './game/HelmetSpritePreview';
-import { TEAMS, getAllTeams, type TeamProfile } from './game/teams';
+import { TEAM_KEYS, TEAMS, getAllTeams, getTeam, type TeamProfile } from './game/teams';
+import { createSeason, getSeasonRecord, loadGameMode, loadSeasonProgress, recordSeasonGame, saveGameMode, saveSeasonProgress, type GameMode, type SeasonGameResult, type SeasonProgress } from './game/season';
 
 function getTeamTextStyle(color: string) {
   const hex = color.replace('#', '');
@@ -37,8 +38,14 @@ export default function App() {
   const [teamSelectionSide, setTeamSelectionSide] = useState<'P1' | 'P2'>('P1');
   const [pendingTeam, setPendingTeam] = useState<TeamProfile | null>(null);
   const [teamSearch, setTeamSearch] = useState('');
-  const [showTeamModal, setShowTeamModal] = useState(true);
-  const [hasKickedOff, setHasKickedOff] = useState(false);
+  const [showTeamModal, setShowTeamModal] = useState(() => !hasSavedGameSession());
+  const [hasKickedOff, setHasKickedOff] = useState(hasSavedGameSession);
+  const [showPauseMenu, setShowPauseMenu] = useState(hasSavedGameSession);
+  const [gameMode, setGameMode] = useState<GameMode>(() => loadGameMode());
+  const [seasonProgress, setSeasonProgress] = useState<SeasonProgress | null>(() => loadSeasonProgress());
+  const [seasonGameResult, setSeasonGameResult] = useState<SeasonGameResult | null>(null);
+  const gameModeRef = useRef(gameMode);
+  const seasonProgressRef = useRef(seasonProgress);
   const [isKickoffActive, setIsKickoffActive] = useState(true);
   const [kickoffSide, setKickoffSide] = useState<{ kicking: 'P1' | 'P2'; receiving: 'P1' | 'P2' }>({ kicking: 'P2', receiving: 'P1' });
   const [is4thDown, setIs4thDown] = useState(false);
@@ -329,6 +336,24 @@ export default function App() {
       setGameClockState: (quarter, seconds) => setGameClockState({ quarter, seconds }),
       showAnnouncement,
       onEngineReady: engine => { engineRef.current = engine; },
+      onGameOver: (p1FinalScore, p2FinalScore, restored) => {
+        if (gameModeRef.current !== 'SEASON') return;
+        const currentSeason = seasonProgressRef.current;
+        if (!currentSeason) return;
+        if (restored) {
+          const savedResult = currentSeason.results[currentSeason.results.length - 1];
+          if (savedResult && savedResult.p1Score === p1FinalScore && savedResult.p2Score === p2FinalScore) {
+            setSeasonGameResult(savedResult);
+          }
+          return;
+        }
+        const updatedSeason = recordSeasonGame(currentSeason, p1FinalScore, p2FinalScore);
+        if (updatedSeason === currentSeason) return;
+        seasonProgressRef.current = updatedSeason;
+        setSeasonProgress(updatedSeason);
+        saveSeasonProgress(updatedSeason);
+        setSeasonGameResult(updatedSeason.results[updatedSeason.results.length - 1] || null);
+      },
       setIsKickoffState: (isKickoff, kicking, receiving) => {
         setIsKickoffActive(isKickoff);
         setKickoffSide({ kicking, receiving });
@@ -339,10 +364,39 @@ export default function App() {
     });
   }, []);
 
+  useEffect(() => {
+    if (showPauseMenu) engineRef.current?.setPaused(true);
+  }, [showPauseMenu]);
+
+  useEffect(() => {
+    const pauseWhenHidden = () => {
+      if (document.visibilityState === 'hidden' && hasKickedOff) {
+        engineRef.current?.setPaused(true);
+        setShowPauseMenu(true);
+      }
+    };
+    document.addEventListener('visibilitychange', pauseWhenHidden);
+    return () => document.removeEventListener('visibilitychange', pauseWhenHidden);
+  }, [hasKickedOff]);
+
   // Handlers for switching teams
   const handleSelectP1Team = (teamId: string) => {
     if (engineRef.current) {
       engineRef.current.selectP1Team(teamId);
+    }
+    if (gameModeRef.current === 'SEASON') {
+      const currentSeason = seasonProgressRef.current;
+      const nextSeason = currentSeason?.teamId === teamId
+        ? currentSeason
+        : createSeason(teamId, TEAM_KEYS);
+      seasonProgressRef.current = nextSeason;
+      setSeasonProgress(nextSeason);
+      const nextOpponentId = nextSeason.opponentIds[nextSeason.results.length] || nextSeason.opponentIds[0];
+      if (nextOpponentId) {
+        const opponent = getTeam(nextOpponentId);
+        setP2TeamState(opponent);
+        engineRef.current?.selectP2Team(nextOpponentId);
+      }
     }
   };
 
@@ -380,9 +434,76 @@ export default function App() {
     }
   };
 
+  const handleStartGame = () => {
+    saveGameMode(gameMode);
+    gameModeRef.current = gameMode;
+    if (gameMode === 'SEASON') {
+      let currentSeason = seasonProgressRef.current;
+      if (!currentSeason || currentSeason.teamId !== p1TeamState.id || currentSeason.results.length >= currentSeason.opponentIds.length) {
+        currentSeason = createSeason(p1TeamState.id, TEAM_KEYS);
+      }
+      const nextOpponentId = currentSeason.opponentIds[currentSeason.results.length];
+      if (!nextOpponentId) return;
+      const opponent = getTeam(nextOpponentId);
+      currentSeason = { ...currentSeason };
+      seasonProgressRef.current = currentSeason;
+      setSeasonProgress(currentSeason);
+      saveSeasonProgress(currentSeason);
+      setP2TeamState(opponent);
+      engineRef.current?.selectP1Team(currentSeason.teamId);
+      engineRef.current?.selectP2Team(nextOpponentId);
+    }
+    setUserScore(0);
+    setCpuScore(0);
+    setSeasonGameResult(null);
+    engineRef.current?.resetGame();
+    setHasKickedOff(true);
+    setShowPauseMenu(false);
+    setShowTeamModal(false);
+    sounds.playWhistle();
+  };
+
+  const handleReturnToMainMenu = () => {
+    engineRef.current?.endGame();
+    setUserScore(0);
+    setCpuScore(0);
+    setHasKickedOff(false);
+    setShowPauseMenu(false);
+    setShowTeamModal(true);
+  };
+
+  const handleGameModeChange = (mode: GameMode) => {
+    gameModeRef.current = mode;
+    setGameMode(mode);
+    saveGameMode(mode);
+    if (mode === 'SEASON') {
+      setTeamSelectionSide('P1');
+      const currentSeason = seasonProgressRef.current;
+      const nextSeason = currentSeason?.teamId === p1TeamState.id
+        ? currentSeason
+        : createSeason(p1TeamState.id, TEAM_KEYS);
+      seasonProgressRef.current = nextSeason;
+      setSeasonProgress(nextSeason);
+      const nextOpponentId = nextSeason.opponentIds[nextSeason.results.length] || nextSeason.opponentIds[0];
+      if (nextOpponentId) {
+        const opponent = getTeam(nextOpponentId);
+        setP2TeamState(opponent);
+        engineRef.current?.selectP2Team(nextOpponentId);
+      }
+    }
+  };
+
   const visibleTeams = getAllTeams().filter(team =>
     team.name.toLowerCase().includes(teamSearch.trim().toLowerCase())
   );
+  const seasonForDisplay = seasonProgress?.teamId === p1TeamState.id
+    ? seasonProgress
+    : createSeason(p1TeamState.id, TEAM_KEYS);
+  const seasonRecord = getSeasonRecord(seasonForDisplay);
+  const seasonComplete = seasonForDisplay.results.length >= seasonForDisplay.opponentIds.length;
+  const nextSeasonOpponentId = seasonComplete
+    ? null
+    : seasonForDisplay.opponentIds[seasonForDisplay.results.length];
 
   return (
     <div className="relative w-screen h-screen overflow-hidden flex flex-col items-center justify-center bg-[#030704] text-white font-mono select-none">
@@ -462,6 +583,19 @@ export default function App() {
               >
                 <RefreshCw size={13} />
               </button>
+              {hasKickedOff && (
+                <button
+                  onClick={() => {
+                    engineRef.current?.setPaused(true);
+                    setShowPauseMenu(true);
+                  }}
+                  className="p-1 text-white hover:text-[#ffcc00] transition cursor-pointer"
+                  title="Pause game"
+                  aria-label="Pause game"
+                >
+                  <Pause size={13} />
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -620,7 +754,7 @@ export default function App() {
             /* Major Event: TURNOVER (Interceptions, Fumbles, Turnover on Downs) */
             <div className="relative overflow-hidden rounded-xl border-2 border-red-500 bg-gradient-to-b from-[#240606]/98 via-[#180303]/98 to-[#0b0101]/98 backdrop-blur-md shadow-2xl">
               {/* Header Badge */}
-              <div className="flex items-center justify-between bg-gradient-to-r from-red-600 via-amber-500 to-red-600 px-3 py-1 text-black font-black uppercase text-[0.66rem] sm:text-xs tracking-widest shadow-md">
+              <div className="flex items-center justify-between border-b-2 border-red-500 bg-white px-3 py-1 text-[#1b3026] font-black uppercase text-[0.66rem] sm:text-xs tracking-widest shadow-md">
                 <span className="flex items-center gap-1.5">
                   <span className="animate-ping inline-block h-2 w-2 rounded-full bg-black/80" />
                   🚨 TURNOVER ALERT 🚨
@@ -649,19 +783,11 @@ export default function App() {
                 )}
               </div>
 
-              {/* Progress Timer Line */}
-              <div className="h-1.5 bg-neutral-900 w-full overflow-hidden">
-                <div
-                  key={banner.key}
-                  className="h-full bg-gradient-to-r from-red-500 via-amber-400 to-red-500 announcement-progress-bar w-full"
-                  style={{ animationDuration: `${banner.durationMs}ms` }}
-                />
-              </div>
             </div>
           ) : banner.category === 'TOUCHDOWN' ? (
             /* Major Event: TOUCHDOWN */
             <div className="relative overflow-hidden rounded-xl border-2 border-amber-400 bg-gradient-to-b from-[#261d04]/98 via-[#1c1502]/98 to-[#0d0901]/98 backdrop-blur-md shadow-2xl">
-              <div className="flex items-center justify-between bg-gradient-to-r from-yellow-400 via-amber-300 to-yellow-500 px-3 py-1 text-black font-black uppercase text-[0.66rem] sm:text-xs tracking-widest shadow-md">
+              <div className="flex items-center justify-between border-b-2 border-amber-400 bg-white px-3 py-1 text-[#1b3026] font-black uppercase text-[0.66rem] sm:text-xs tracking-widest shadow-md">
                 <span className="flex items-center gap-1.5">
                   🏆 TOUCHDOWN! 🏆
                 </span>
@@ -688,13 +814,6 @@ export default function App() {
                 )}
               </div>
 
-              <div className="h-1.5 bg-neutral-900 w-full overflow-hidden">
-                <div
-                  key={banner.key}
-                  className="h-full bg-gradient-to-r from-yellow-400 via-amber-300 to-emerald-400 announcement-progress-bar w-full"
-                  style={{ animationDuration: `${banner.durationMs}ms` }}
-                />
-              </div>
             </div>
           ) : banner.big || banner.category === 'FIRST_DOWN' || banner.category === 'FUMBLE' ? (
             /* Medium Event: First Down, Fumble Alert, Sacks */
@@ -725,26 +844,15 @@ export default function App() {
                 </button>
               </div>
 
-              <div className="p-3 text-center flex flex-col items-center gap-1.5">
-                <div
-                  className="text-lg sm:text-xl font-black tracking-wide uppercase drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)]"
-                  style={{ color: banner.color }}
-                >
+              <div className="mx-3 my-3 rounded-md border border-neutral-200 bg-white p-3 text-center flex flex-col items-center gap-1.5">
+                <div className="text-lg sm:text-xl font-black tracking-wide uppercase text-[#1b3026]">
                   {banner.text}
                 </div>
                 {banner.subtext && (
-                  <div className="text-[0.66rem] sm:text-xs font-semibold text-neutral-300">
+                  <div className="text-[0.66rem] sm:text-xs font-semibold text-[#405047]">
                     {banner.subtext}
                   </div>
                 )}
-              </div>
-
-              <div className="h-1 bg-neutral-900 w-full overflow-hidden">
-                <div
-                  key={banner.key}
-                  className="h-full announcement-progress-bar w-full"
-                  style={{ backgroundColor: banner.color, animationDuration: `${banner.durationMs}ms` }}
-                />
               </div>
             </div>
           ) : (
@@ -883,13 +991,16 @@ export default function App() {
                 </span>
                 <div>
                   <h2 id="team-selector-title" className="text-xl font-extrabold leading-tight sm:text-2xl">
-                    {!hasKickedOff ? 'Choose teams' : 'Team matchup'}
+                    {!hasKickedOff ? (gameMode === 'SEASON' ? 'Season setup' : 'Choose teams') : 'Team matchup'}
                   </h2>
-                  <p className="mt-0.5 text-xs text-[#66756b]">Backyard Football</p>
+                  <p className="mt-0.5 text-xs text-[#66756b]">{gameMode === 'SEASON' ? 'Four-game schedule' : 'Single matchup'}</p>
                 </div>
               </div>
               <button
-                onClick={() => { setShowTeamModal(false); setHasKickedOff(true); }}
+                onClick={() => {
+                  if (hasKickedOff) setShowTeamModal(false);
+                  else handleStartGame();
+                }}
                 className="rounded-md p-2 text-[#66756b] transition hover:bg-[#edf1ed] hover:text-[#1b3026]"
                 title="Close / Start"
                 aria-label="Close team selector"
@@ -897,6 +1008,27 @@ export default function App() {
                 <X size={18} />
               </button>
             </div>
+
+            {!hasKickedOff && (
+              <div className="grid shrink-0 grid-cols-2 gap-1 border-b border-[#dce3dd] bg-[#f7f9f7] p-2" role="group" aria-label="Game mode">
+                <button
+                  type="button"
+                  aria-pressed={gameMode === 'ONE_GAME'}
+                  onClick={() => handleGameModeChange('ONE_GAME')}
+                  className={`rounded-md px-3 py-2 text-sm font-bold transition ${gameMode === 'ONE_GAME' ? 'bg-[#246344] text-white' : 'text-[#59685f] hover:bg-[#e9efea]'}`}
+                >
+                  One Game
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={gameMode === 'SEASON'}
+                  onClick={() => handleGameModeChange('SEASON')}
+                  className={`rounded-md px-3 py-2 text-sm font-bold transition ${gameMode === 'SEASON' ? 'bg-[#bd5635] text-white' : 'text-[#59685f] hover:bg-[#f4e9e4]'}`}
+                >
+                  Season
+                </button>
+              </div>
+            )}
 
             <div className="grid shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-3 border-b border-[#dce3dd] bg-[#e9efea] px-4 py-3 sm:px-6">
               <div className="min-w-0">
@@ -916,6 +1048,34 @@ export default function App() {
               </div>
             </div>
 
+            {gameMode === 'SEASON' && !hasKickedOff && (
+              <section className="shrink-0 border-b border-[#dce3dd] bg-white px-4 py-3 sm:px-6" aria-label="Season schedule">
+                <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+                  <h3 className="text-sm font-bold text-[#253a2d]">Four-game season</h3>
+                  <span className="text-xs font-semibold text-[#246344]">
+                    {seasonRecord.wins}-{seasonRecord.losses}-{seasonRecord.ties}
+                    <span className="ml-1 font-normal text-[#718077]">W-L-T</span>
+                  </span>
+                </div>
+                <div className="grid gap-1 sm:grid-cols-2">
+                  {seasonForDisplay.opponentIds.map((opponentId, index) => {
+                    const result = seasonForDisplay.results[index];
+                    const upcoming = index === seasonForDisplay.results.length && !seasonComplete;
+                    return (
+                      <div key={`${index}-${opponentId}`} className={`flex items-center justify-between gap-2 rounded border px-2.5 py-1.5 text-xs ${upcoming ? 'border-[#bd5635]/50 bg-[#fbf2ee]' : 'border-[#e2e8e3] bg-[#fafbfa]'}`}>
+                        <span className="font-bold text-[#526157]">WEEK {index + 1}</span>
+                        <span className="min-w-0 flex-1 truncate font-semibold text-[#253a2d]">{getTeam(opponentId).name}</span>
+                        <span className={`shrink-0 font-bold ${result ? 'text-[#246344]' : upcoming ? 'text-[#a34d32]' : 'text-[#87928a]'}`}>
+                          {result ? `${result.p1Score}-${result.p2Score}` : upcoming ? 'UP NEXT' : 'SCHEDULED'}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+                {seasonComplete && <p className="mt-2 text-xs font-semibold text-[#246344]">Season complete. Start a new season to play again.</p>}
+              </section>
+            )}
+
             <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-[#dce3dd] bg-white px-4 py-3 sm:px-6">
               <div className="flex gap-2" role="group" aria-label="Choose which side to assign">
                 <button
@@ -927,17 +1087,21 @@ export default function App() {
                   <span className="block text-xs font-bold">You</span>
                   <span className="block text-[11px]">{p1TeamState.name}</span>
                 </button>
-                <button
-                  type="button"
-                  aria-pressed={teamSelectionSide === 'P2'}
-                  onClick={() => setTeamSelectionSide('P2')}
-                  className={`min-w-28 rounded-md border px-3 py-2 text-left transition ${teamSelectionSide === 'P2' ? 'border-[#b45435] bg-[#f7ece7] text-[#93442c]' : 'border-[#dce3dd] bg-white text-[#59685f] hover:bg-[#f5f7f5]'}`}
-                >
-                  <span className="block text-xs font-bold">CPU</span>
-                  <span className="block text-[11px]">{p2TeamState.name}</span>
-                </button>
+                {gameMode === 'ONE_GAME' && (
+                  <button
+                    type="button"
+                    aria-pressed={teamSelectionSide === 'P2'}
+                    onClick={() => setTeamSelectionSide('P2')}
+                    className={`min-w-28 rounded-md border px-3 py-2 text-left transition ${teamSelectionSide === 'P2' ? 'border-[#b45435] bg-[#f7ece7] text-[#93442c]' : 'border-[#dce3dd] bg-white text-[#59685f] hover:bg-[#f5f7f5]'}`}
+                  >
+                    <span className="block text-xs font-bold">CPU</span>
+                    <span className="block text-[11px]">{p2TeamState.name}</span>
+                  </button>
+                )}
               </div>
-              <span className="text-xs text-[#758178]">Assigning to {teamSelectionSide === 'P1' ? 'You' : 'CPU'}</span>
+              <span className="text-xs text-[#758178]">
+                {gameMode === 'SEASON' ? `Next opponent: ${p2TeamState.name}` : `Assigning to ${teamSelectionSide === 'P1' ? 'You' : 'CPU'}`}
+              </span>
             </div>
 
             <div className="min-h-0 flex-1 overflow-y-auto">
@@ -986,14 +1150,20 @@ export default function App() {
               {!hasKickedOff ? (
                 <button
                   onClick={() => {
-                    setShowTeamModal(false);
-                    setHasKickedOff(true);
-                    sounds.playWhistle();
-                    showAnnouncement(`${p1TeamState.name.toUpperCase()} VS ${p2TeamState.name.toUpperCase()} - READY FOR KICKOFF! 🏈`, p1TeamState.primaryColor, true);
+                    handleStartGame();
+                    showAnnouncement(
+                      gameMode === 'SEASON'
+                        ? `${p1TeamState.name.toUpperCase()} SEASON • WEEK ${seasonComplete ? 1 : seasonForDisplay.results.length + 1} VS ${p2TeamState.name.toUpperCase()}`
+                        : `${p1TeamState.name.toUpperCase()} VS ${p2TeamState.name.toUpperCase()} - READY FOR KICKOFF! 🏈`,
+                      p1TeamState.primaryColor,
+                      true
+                    );
                   }}
                   className="flex w-full items-center justify-center gap-2 rounded-md bg-[#bd5635] px-4 py-3 text-sm font-bold text-white transition hover:bg-[#a9492d] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#bd5635]"
                 >
-                  Kick off game <ArrowRight size={17} />
+                  {gameMode === 'SEASON'
+                    ? (seasonComplete ? 'Start new season' : seasonForDisplay.results.length ? `Continue season · Week ${seasonForDisplay.results.length + 1}` : 'Start season')
+                    : 'Kick off game'} <ArrowRight size={17} />
                 </button>
               ) : (
                 <button
@@ -1049,6 +1219,67 @@ export default function App() {
               </section>
             </div>
           )}
+        </div>
+      )}
+
+      {showPauseMenu && hasKickedOff && (
+        <div className="absolute inset-0 z-[120] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm">
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="pause-menu-title"
+            className="w-full max-w-sm rounded-lg border-2 border-[#ffcc00] bg-[#07110a] p-5 text-center shadow-2xl"
+          >
+            <h2 id="pause-menu-title" className="text-xl font-black uppercase text-[#ffcc00]">Game Paused</h2>
+            <div className="mt-5 grid gap-3">
+              <button
+                onClick={() => {
+                  engineRef.current?.setPaused(false);
+                  setShowPauseMenu(false);
+                }}
+                className="flex w-full items-center justify-center gap-2 rounded-md bg-[#246344] px-4 py-3 text-sm font-bold text-white transition hover:bg-[#2c7751]"
+              >
+                <Play size={17} /> Continue game
+              </button>
+              <button
+                onClick={handleReturnToMainMenu}
+                className="flex w-full items-center justify-center gap-2 rounded-md border border-[#bd5635] bg-[#32170f] px-4 py-3 text-sm font-bold text-[#ffd8ca] transition hover:bg-[#512116]"
+              >
+                <Home size={17} /> Return to main menu
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {seasonGameResult && gameMode === 'SEASON' && (
+        <div className="absolute inset-0 z-[115] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
+          <section role="dialog" aria-modal="true" aria-labelledby="season-result-title" className="w-full max-w-md rounded-lg border-2 border-[#ffcc00] bg-[#07110a] p-5 text-center shadow-2xl">
+            <p className="text-xs font-bold uppercase tracking-wide text-[#b8c7bc]">Season · Week {seasonGameResult.week} Final</p>
+            <h2 id="season-result-title" className="mt-1 text-xl font-black uppercase text-[#ffcc00]">{p1TeamState.name} {seasonGameResult.p1Score} · {seasonGameResult.p2Score} {getTeam(seasonGameResult.opponentId).name}</h2>
+            <p className="mt-2 text-sm font-semibold text-[#d5ded7]">Record: {seasonRecord.wins}-{seasonRecord.losses}-{seasonRecord.ties}</p>
+            {nextSeasonOpponentId ? (
+              <button
+                onClick={() => {
+                  setSeasonGameResult(null);
+                  handleStartGame();
+                }}
+                className="mt-5 flex w-full items-center justify-center gap-2 rounded-md bg-[#246344] px-4 py-3 text-sm font-bold text-white transition hover:bg-[#2c7751]"
+              >
+                Next week · {getTeam(nextSeasonOpponentId).name} <ArrowRight size={17} />
+              </button>
+            ) : (
+              <button
+                onClick={() => {
+                  setSeasonGameResult(null);
+                  handleReturnToMainMenu();
+                }}
+                className="mt-5 flex w-full items-center justify-center gap-2 rounded-md bg-[#bd5635] px-4 py-3 text-sm font-bold text-white transition hover:bg-[#a9492d]"
+              >
+                View season <ArrowRight size={17} />
+              </button>
+            )}
+          </section>
         </div>
       )}
 

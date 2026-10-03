@@ -122,6 +122,7 @@ export interface TackleChanceInput {
   brokenCount: number;
   isBlitzer: boolean;
   isQB?: boolean;
+  isReturner?: boolean;
 }
 
 export function canTackleQuarterback(tackleImmunity: number): boolean {
@@ -129,6 +130,7 @@ export function canTackleQuarterback(tackleImmunity: number): boolean {
 }
 
 export function calculateBrokenTackleChance(input: TackleChanceInput): number {
+  if (input.isReturner) return 0;
   if (input.isQB) {
     // Quarterbacks do not experience broken tackles against charging defenders
     return input.isBlitzer ? 0.01 : 0.04;

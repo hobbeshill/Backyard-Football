@@ -3,7 +3,7 @@ import { defensiveKeys, defensivePlaybook, middleRoutes, offensiveKeys, offensiv
 import { alignDefenderAcrossFromRunningBack, alignDefenders, chooseCpuDefensiveAssignments, getBracketCoverageTarget, matchCpuDefendersToReceivers } from './defense';
 import { evaluateCpuOffensiveAudibles, evaluateCpuBallCarrierMoves, shouldCpuReleasePass, shouldCpuScramble, scoreRunBlockTarget } from './ai';
 import { createFumbleBall } from './fumbles';
-import { canEngagePassBlock, distToSegment, GAME_SPEED_SCALE, moveToward, resolveCollisions, updateRouteMovement } from './movement';
+import { canEngagePassBlock, distToSegment, GAME_SPEED_SCALE, getBallCarrierRunSpeed, moveToward, resolveCollisions, shouldApplyRunBlockStun, updateRouteMovement } from './movement';
 import { resolvePlayResult, calculateBrokenTackleChance, calculateYardsToGo, getDriveStartY, getSnapBallPosition, getPassArcHeight, getPassArcMaxHeight, getPassFlightFrames, findTappedPassReceiver, getPassLeadTarget, getRoutePassLeadTarget, canDefenderDeflectPass, canTackleQuarterback, resolveCatchContestOutcome, evaluateQbThrowAccuracy, calculateKickoffFlight, calculatePuntFlight, getTouchbackYardLineY, getKickoffLineY } from './rules';
 import { sounds } from './sound';
 import { evaluateDirtSwipeGesture, drawDirtSwipeGesture } from './chalkMenu';
@@ -27,6 +27,8 @@ export interface GameEngineHandle {
   selectP2Team: (teamId: string) => void;
   resetDrill: () => void;
   resetGame: (announcementText?: string) => void;
+  setPaused: (paused: boolean) => void;
+  endGame: () => void;
   applyDefensiveAlignment: () => void;
   selectOffense: (key: string) => void;
   selectDefense: (key: string) => void;
@@ -66,9 +68,21 @@ export interface GameEngineCallbacks {
     }
   ) => void;
   onEngineReady: (engine: GameEngineHandle | null) => void;
+  onGameOver?: (p1Score: number, p2Score: number, restored?: boolean) => void;
   setIsKickoffState?: (isKickoff: boolean, kickingTeam: 'P1' | 'P2', receivingTeam: 'P1' | 'P2') => void;
   setIs4thDownState?: (is4thDown: boolean) => void;
   setKickMeterPowerState?: (power: number) => void;
+}
+
+const GAME_SESSION_STORAGE_KEY = 'backyard-football-game-session-v1';
+
+export function hasSavedGameSession(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return Boolean(window.localStorage.getItem(GAME_SESSION_STORAGE_KEY));
+  } catch {
+    return false;
+  }
 }
 
 export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngineCallbacks): (() => void) | undefined {
@@ -132,6 +146,10 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   let quarterBreakRemainingMs = 0;
   let halftimeAnnouncementPending = false;
   let gameOver = false;
+  let isPaused = false;
+  let isSessionActive = false;
+  let lastSessionSaveTime = 0;
+  let drillResetTimer: ReturnType<typeof setTimeout> | null = null;
 
   let qb: Entity = {
     x: 170,
@@ -220,6 +238,159 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     toX: number;
     toY: number;
   }> = [];
+
+  function getSessionEntities(): Array<[string, Entity]> {
+    return [
+      ['qb', qb],
+      ...receivers.map((entity, index) => [`receiver-${index}`, entity] as [string, Entity]),
+      ...(centerReceiver ? [['centerReceiver', centerReceiver] as [string, Entity]] : []),
+      ...(rb ? [['rb', rb] as [string, Entity]] : []),
+      ...linemen.map((entity, index) => [`lineman-${index}`, entity] as [string, Entity]),
+      ...defenders.map((entity, index) => [`defender-${index}`, entity] as [string, Entity])
+    ];
+  }
+
+  function saveGameSession(): void {
+    if (!isSessionActive || typeof window === 'undefined') return;
+    try {
+      const entries = getSessionEntities();
+      const entityIds = new Map(entries.map(([id, entity]) => [entity, id]));
+      const entities = Object.fromEntries(entries.map(([id, entity]) => {
+        const { assignedReceiver, assignedCenter, blockingDefender, ...data } = entity;
+        const idFor = (target: Entity | null | undefined) => target ? entityIds.get(target) ?? null : null;
+        return [id, {
+          data,
+          assignedReceiver: idFor(assignedReceiver),
+          assignedCenter: idFor(assignedCenter),
+          blockingDefender: idFor(blockingDefender)
+        }];
+      }));
+      const idFor = (entity: Entity | null | undefined) => entity ? entityIds.get(entity) ?? null : null;
+      const snapshot = {
+        version: 1,
+        entities,
+        activeEntityId: idFor(activeEntity),
+        receiverIds: receivers.map(idFor),
+        centerReceiverId: idFor(centerReceiver),
+        rbId: idFor(rb),
+        linemanIds: linemen.map(idFor),
+        defenderIds: defenders.map(idFor),
+        p1Score, p2Score, lineOfScrimmageY, firstDownMarkerY, attackDirection,
+        currentDown, yardsToGo, quarter, gameClockSeconds, gameClockRemainderMs,
+        gameClockRunning, pendingQuarterEnd, quarterBreakRemainingMs,
+        halftimeAnnouncementPending, gameOver, phase, activeOffense, activeDefense,
+        p1TeamId: p1Team.id, p2TeamId: p2Team.id,
+        p1OffPlay, p1OffFormation, p1DefPlay, p2OffPlay, p2DefPlay,
+        cpuPreSnapTimer, isAllBlocking, openingReceivingTeam, isKickoffPhase,
+        kickoffKickingTeam, kickoffReceivingTeam, kickMeterPower, kickMeterDirection,
+        cpuKickoffDelayTimer, isSpecialTeamsReturn, specialTeamsReturnType, returnCatchY,
+        ball: ball ? { ...ball, intendedTarget: undefined, intendedTargetId: idFor(ball.intendedTarget) } : null,
+        snapBall: snapBall ? { centerId: idFor(snapBall.center), frame: snapBall.frame } : null,
+        ballPressureDefenderIds: ballPressureDefenders.map(idFor), fumbleBall, brokenTackleEffect,
+        momentum, defenseOverrides: [...defenseOverrides.entries()], coverageMistakeEvaluated,
+        playEnding, isInterceptionReturn, formationTransitionFrame, lastTargetWasRb,
+        aiPreSnapShiftTimer,
+        formationTransitions: formationTransitions.map(transition => ({
+          entityId: idFor(transition.entity),
+          fromX: transition.fromX, fromY: transition.fromY,
+          toX: transition.toX, toY: transition.toY
+        })),
+        userPlayHistory, userDefenseHistory, playClock, cpuScrambleDecisionMade,
+        qbScrambleReactionTimer, cameraY
+      };
+      window.localStorage.setItem(GAME_SESSION_STORAGE_KEY, JSON.stringify(snapshot));
+    } catch {
+      // Keep gameplay available if browser storage is disabled or full.
+    }
+  }
+
+  function restoreGameSession(): boolean {
+    if (!hasSavedGameSession()) return false;
+    try {
+      const raw = window.localStorage.getItem(GAME_SESSION_STORAGE_KEY);
+      if (!raw) return false;
+      const state = JSON.parse(raw) as Record<string, any>;
+      if (state.version !== 1 || !state.entities || !Array.isArray(state.receiverIds)) return false;
+
+      const restoredEntities = new Map<string, Entity>();
+      Object.entries(state.entities as Record<string, any>).forEach(([id, record]) => {
+        restoredEntities.set(id, { ...record.data } as Entity);
+      });
+      const entityFor = (id: string | null | undefined): Entity | null => id ? restoredEntities.get(id) ?? null : null;
+      Object.entries(state.entities as Record<string, any>).forEach(([id, record]) => {
+        const entity = restoredEntities.get(id);
+        if (!entity) return;
+        entity.assignedReceiver = entityFor(record.assignedReceiver);
+        entity.assignedCenter = entityFor(record.assignedCenter) ?? undefined;
+        entity.blockingDefender = entityFor(record.blockingDefender);
+      });
+
+      qb = entityFor('qb') ?? qb;
+      receivers = state.receiverIds.map((id: string) => entityFor(id)).filter((entity: Entity | null): entity is Entity => Boolean(entity));
+      centerReceiver = entityFor(state.centerReceiverId);
+      rb = entityFor(state.rbId);
+      linemen = state.linemanIds.map((id: string) => entityFor(id)).filter((entity: Entity | null): entity is Entity => Boolean(entity));
+      defenders = state.defenderIds.map((id: string) => entityFor(id)).filter((entity: Entity | null): entity is Entity => Boolean(entity));
+      activeEntity = entityFor(state.activeEntityId) ?? qb;
+
+      p1Score = state.p1Score; p2Score = state.p2Score;
+      lineOfScrimmageY = state.lineOfScrimmageY; firstDownMarkerY = state.firstDownMarkerY;
+      attackDirection = state.attackDirection; currentDown = state.currentDown; yardsToGo = state.yardsToGo;
+      quarter = state.quarter; gameClockSeconds = state.gameClockSeconds;
+      gameClockRemainderMs = state.gameClockRemainderMs; gameClockRunning = state.gameClockRunning;
+      pendingQuarterEnd = state.pendingQuarterEnd; quarterBreakRemainingMs = state.quarterBreakRemainingMs;
+      halftimeAnnouncementPending = state.halftimeAnnouncementPending; gameOver = state.gameOver;
+      phase = state.phase; activeOffense = state.activeOffense; activeDefense = state.activeDefense;
+      p1Team = getTeam(state.p1TeamId); p2Team = getTeam(state.p2TeamId);
+      p1OffPlay = state.p1OffPlay; p1OffFormation = state.p1OffFormation;
+      p1DefPlay = state.p1DefPlay; p2OffPlay = state.p2OffPlay; p2DefPlay = state.p2DefPlay;
+      cpuPreSnapTimer = state.cpuPreSnapTimer; isAllBlocking = state.isAllBlocking;
+      openingReceivingTeam = state.openingReceivingTeam; isKickoffPhase = state.isKickoffPhase;
+      kickoffKickingTeam = state.kickoffKickingTeam; kickoffReceivingTeam = state.kickoffReceivingTeam;
+      kickMeterPower = state.kickMeterPower; kickMeterDirection = state.kickMeterDirection;
+      cpuKickoffDelayTimer = state.cpuKickoffDelayTimer; isSpecialTeamsReturn = state.isSpecialTeamsReturn;
+      specialTeamsReturnType = state.specialTeamsReturnType; returnCatchY = state.returnCatchY;
+      if (state.ball) {
+        const { intendedTargetId, ...savedBall } = state.ball;
+        ball = { ...savedBall, intendedTarget: entityFor(intendedTargetId) };
+      } else {
+        ball = null;
+      }
+      snapBall = state.snapBall ? { center: entityFor(state.snapBall.centerId) ?? qb, frame: state.snapBall.frame } : null;
+      ballPressureDefenders = state.ballPressureDefenderIds.map((id: string) => entityFor(id)).filter((entity: Entity | null): entity is Entity => Boolean(entity));
+      fumbleBall = state.fumbleBall; brokenTackleEffect = state.brokenTackleEffect;
+      momentum = state.momentum; defenseOverrides = new Map(state.defenseOverrides);
+      coverageMistakeEvaluated = state.coverageMistakeEvaluated; playEnding = state.playEnding;
+      isInterceptionReturn = state.isInterceptionReturn; formationTransitionFrame = state.formationTransitionFrame;
+      lastTargetWasRb = state.lastTargetWasRb; aiPreSnapShiftTimer = state.aiPreSnapShiftTimer;
+      formationTransitions = state.formationTransitions.map((transition: any) => ({
+        entity: entityFor(transition.entityId) ?? qb,
+        fromX: transition.fromX, fromY: transition.fromY, toX: transition.toX, toY: transition.toY
+      }));
+      userPlayHistory.splice(0, userPlayHistory.length, ...state.userPlayHistory);
+      userDefenseHistory.splice(0, userDefenseHistory.length, ...state.userDefenseHistory);
+      playClock = state.playClock; cpuScrambleDecisionMade = state.cpuScrambleDecisionMade;
+      qbScrambleReactionTimer = state.qbScrambleReactionTimer; cameraY = state.cameraY;
+      lastClockFrameTime = null;
+      isSessionActive = true;
+
+      callbacks.setUserScore(p1Score); callbacks.setCpuScore(p2Score);
+      callbacks.setP1TeamState?.(p1Team); callbacks.setP2TeamState?.(p2Team);
+      callbacks.setActiveOffenseState(activeOffense);
+      callbacks.setP1OffPlayState?.(p1OffPlay); callbacks.setP1DefPlayState(p1DefPlay);
+      callbacks.setP2OffPlayState(p2OffPlay); callbacks.setP2DefPlayState(p2DefPlay);
+      callbacks.setP1OffFormationState?.(p1OffFormation);
+      setMomentumState(momentum); publishGameClock(); updateDownDisplay();
+      setIsKickoffState?.(isKickoffPhase, kickoffKickingTeam, kickoffReceivingTeam);
+      setIs4thDownState?.(currentDown === 4 && phase === 'PRE_SNAP');
+      setKickMeterPowerState?.(kickMeterPower);
+      if (gameOver) callbacks.onGameOver?.(p1Score, p2Score, true);
+      return true;
+    } catch {
+      window.localStorage.removeItem(GAME_SESSION_STORAGE_KEY);
+      return false;
+    }
+  }
 
   // Backyard Route Line Drawing, Single-Tap Run Blocking & Formation Swiping
   let gestureEntity: Entity | null = null;
@@ -776,6 +947,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     if (quarter === 4) {
       gameOver = true;
       showAnnouncement('END OF 4TH QUARTER - FINAL', '#ffcc00');
+      callbacks.onGameOver?.(p1Score, p2Score);
     } else {
       quarterBreakRemainingMs = quarter === 2 ? 5600 : 2800;
       halftimeAnnouncementPending = quarter === 2;
@@ -1041,7 +1213,10 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   }
 
   function scheduleDrillReset() {
-    setTimeout(() => {
+    if (drillResetTimer) clearTimeout(drillResetTimer);
+    drillResetTimer = setTimeout(() => {
+      drillResetTimer = null;
+      if (isPaused) return;
       if (pendingQuarterEnd || gameClockSeconds === 0) {
         pendingQuarterEnd = false;
         endQuarter();
@@ -1688,6 +1863,10 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       resetDrill();
     },
     resetGame: () => {
+      if (drillResetTimer) clearTimeout(drillResetTimer);
+      drillResetTimer = null;
+      isPaused = false;
+      isSessionActive = true;
       p1Score = 0;
       p2Score = 0;
       quarter = 1;
@@ -1706,6 +1885,26 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       callbacks.setP1OffFormationState?.('SPREAD');
       callbacks.setP1DefPlayState('COVER3');
       setupKickoff('P2', 'P1', 'GAME RESET - OPENING KICKOFF 🏈');
+      saveGameSession();
+    },
+    setPaused: (paused: boolean) => {
+      isPaused = paused;
+      lastClockFrameTime = null;
+      if (paused) saveGameSession();
+      else if (phase === 'DEAD' && playEnding && !drillResetTimer) scheduleDrillReset();
+    },
+    endGame: () => {
+      if (drillResetTimer) clearTimeout(drillResetTimer);
+      drillResetTimer = null;
+      isPaused = true;
+      isSessionActive = false;
+      if (typeof window !== 'undefined') {
+        try {
+          window.localStorage.removeItem(GAME_SESSION_STORAGE_KEY);
+        } catch {
+          // Ignore unavailable browser storage.
+        }
+      }
     },
     applyDefensiveAlignment: () => {
       applyDefensiveAlignment();
@@ -1798,7 +1997,9 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     }
   }
 
-  setupKickoff('P2', 'P1', 'OPENING KICKOFF - Q1 🏈');
+  if (!restoreGameSession()) {
+    setupKickoff('P2', 'P1', 'OPENING KICKOFF - Q1 🏈');
+  }
 
   function snapToQuarterback(): void {
     setIs4thDownState?.(false);
@@ -2016,7 +2217,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
     if (phase === 'RUNNING' && activeDefense === 'P1' && activeEntity) {
       // User is on defense during a run! Allow user to tap/dive-tackle with nearest defender
-      const validDefenders = isInterceptionReturn
+      const validDefenders = isInterceptionReturn || isSpecialTeamsReturn
         ? [qb, rb, centerReceiver, ...receivers, ...linemen].filter((player): player is Entity => Boolean(player))
         : defenders;
       if (validDefenders.length > 0) {
@@ -2073,7 +2274,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       const targetX = Math.max(30, Math.min(fieldWidth - 30, curX));
       const steerDiff = targetX - activeEntity.x;
       const isReturn = Boolean(isSpecialTeamsReturn || activeEntity.isReturner);
-      const maxSteerSpeed = isReturn ? 2.2 : 4.5;
+      const maxSteerSpeed = isReturn ? 0.5 : 4.5;
       const steerFactor = isReturn ? 0.08 : 0.18;
       activeEntity.vx = Math.max(-maxSteerSpeed, Math.min(maxSteerSpeed, steerDiff * steerFactor));
     }
@@ -2183,7 +2384,9 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     if (activeDefense === 'P1' && phase === 'RUNNING' && activeEntity) {
       const swipeTime = Date.now() - touchStartTime;
       if (swipeTime < 450) {
-        const validDefenders = defenders;
+        const validDefenders = isInterceptionReturn || isSpecialTeamsReturn
+          ? [qb, rb, centerReceiver, ...receivers, ...linemen].filter((player): player is Entity => Boolean(player))
+          : defenders;
         if (validDefenders.length > 0) {
           let bestDef = validDefenders[0];
           let minDist = Infinity;
@@ -2232,7 +2435,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         sounds.playJuke();
         showAnnouncement(jukeSign > 0 ? "JUKE RIGHT! 💨" : "JUKE LEFT! 💨", "#00ffff");
       } else if (swipeTime < 400 && ((attackDirection === -1 && deltaScreenY < -35) || (attackDirection === 1 && deltaScreenY > 35)) && Math.abs(deltaScreenX) < 45) {
-        if (!activeEntity.boostUsed) {
+        if (!activeEntity.isReturner && !isSpecialTeamsReturn && !activeEntity.boostUsed) {
           activeEntity.boostUsed = true;
           activeEntity.powerBoostTimer = 60;
           screenShakeTimer = 20;
@@ -3068,9 +3271,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           }
         } else if (phase === 'RUNNING') {
           const isReturn = Boolean(isSpecialTeamsReturn || activeEntity.isReturner);
-          const baseRunSpeed = isReturn ? 1.48 : 1.84;
-          const boostedRunSpeed = isReturn ? 2.05 : 2.65;
-          const runSpeed = (((activeEntity.powerBoostTimer || 0) > 0) ? boostedRunSpeed : baseRunSpeed);
+          const runSpeed = getBallCarrierRunSpeed(isReturn, (activeEntity.powerBoostTimer || 0) > 0);
           activeEntity.y += (runSpeed * GAME_SPEED_SCALE * attackDirection);
 
           // CPU AI ball carrier moves (juke / power truck boost)
@@ -3091,7 +3292,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
                 targetX = Math.max(45, Math.min(fieldWidth - 45, activeEntity.x + (avoidDirection * 40)));
               }
               const steerDiff = targetX - activeEntity.x;
-              const maxSteerSpeed = 2.2;
+              const maxSteerSpeed = 0.5;
               const steerFactor = 0.08;
               activeEntity.vx = Math.max(-maxSteerSpeed, Math.min(maxSteerSpeed, steerDiff * steerFactor));
             }
@@ -3112,7 +3313,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
               activeEntity.jukeVx = (cpuMove.lateralVx || 0) > 0 ? 1.6 : -1.6;
               sounds.playJuke();
               showAnnouncement(cpuMove.announcement || 'CPU JUKE MOVE! 💨', '#00ffff');
-            } else if (cpuMove.moveType === 'TRUCK') {
+            } else if (cpuMove.moveType === 'TRUCK' && !isReturn) {
               activeEntity.powerBoostTimer = 40;
               sounds.playPowerBoost();
               showAnnouncement(cpuMove.announcement || 'CPU POWER TRUCK BOOST! ⚡💪', '#ffcc00');
@@ -3209,6 +3410,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           ...receivers,
           ...linemen
         ].filter((p): p is Entity => Boolean(p));
+        const assignedTacklers = new Set<Entity>();
 
         returnBlockers.forEach(blocker => {
           blocker.isBlocker = true;
@@ -3216,6 +3418,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           let minThreatDist = Infinity;
 
           oncomingTacklers.forEach(tackler => {
+            if (assignedTacklers.has(tackler)) return;
             const tacklerToRunner = Math.hypot(tackler.x - runner.x, tackler.y - runner.y);
             const threatScore = scoreRunBlockTarget(blocker, runner, tackler, attackDirection, false);
             if (threatScore < minThreatDist && tacklerToRunner < 260) {
@@ -3226,25 +3429,29 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
           const target = targetTackler as Entity | null;
           if (target) {
+            assignedTacklers.add(target);
+            const isNewEngagement = shouldApplyRunBlockStun(blocker, target);
             blocker.blockingDefender = target;
-            const blockSpeed = 2.4;
-            const blockAccel = 0.38;
+            const blockSpeed = 1.8;
+            const blockAccel = 0.28;
             moveToward(blocker, target.x, target.y, blockAccel, blockSpeed);
 
             const contactDist = Math.hypot(blocker.x - target.x, blocker.y - target.y);
-            if (contactDist < (blocker.radius || 10) + (target.radius || 10) + 8) {
-              // Neutralize oncoming tackler pursuit momentum and stun with physical run block
-              target.pursuitTimer = 0;
-              target.vx = (target.vx || 0) * 0.2;
-              target.vy = (target.vy || 0) * 0.2;
-              target.brokenTackleStun = Math.max(target.brokenTackleStun || 0, 12);
-              // Seal the lane: shield returner by driving tackler outward
-              const pushDirX = target.x > runner.x ? 1.0 : -1.0;
-              target.x += pushDirX;
-              target.y += (0.7 * attackDirection);
+            if (contactDist < (blocker.radius || 10) + (target.radius || 10) + 4) {
+              if (isNewEngagement) {
+                target.pursuitTimer = 0;
+                target.vx = (target.vx || 0) * 0.5;
+                target.vy = (target.vy || 0) * 0.5;
+                target.brokenTackleStun = Math.max(target.brokenTackleStun || 0, 4);
+                const pushDirX = target.x > runner.x ? 0.5 : -0.5;
+                target.x += pushDirX;
+                target.y += (0.35 * attackDirection);
+              }
               blocker.isEngagedWithBlocker = true;
             }
           } else {
+            blocker.blockingDefender = null;
+            blocker.isEngagedWithBlocker = false;
             // Form lead blocking convoy ahead of returner downfield
             const leadY = runner.y + (45 * attackDirection);
             const leadX = blocker.x + (runner.x - blocker.x) * 0.25;
@@ -4030,13 +4237,14 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         }
         const dist = Math.hypot(activeEntity.x - d.x, activeEntity.y - d.y);
         const isBlitzer = Boolean(d.defenseAssignment === 'BLITZ' || d.passRusher);
-        const contactRadius = (activeEntity.radius || 10) + (d.radius || 10) + (isBlitzer ? 6 : 4);
+        const contactRadius = (activeEntity.radius || 10) + (d.radius || 10) + (isBlitzer ? 10 : 8);
 
         if (dist < contactRadius) {
           if (activeEntity === qb && !canTackleQuarterback(activeEntity.tackleImmunity || 0)) {
             return;
           }
-          if ((activeEntity.tackleImmunity || 0) > 0) {
+          const isReturner = Boolean(activeEntity.isReturner || isSpecialTeamsReturn);
+          if (!isReturner && (activeEntity.tackleImmunity || 0) > 0) {
             if (isBlitzer && Math.random() < 0.65) {
               activeEntity.tackleImmunity = 0;
             } else {
@@ -4061,7 +4269,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
             isBoosted,
             brokenCount,
             isBlitzer,
-            isQB
+            isQB,
+            isReturner
           });
           const isUserDefense = (activeOffense === 'P2');
           if (isUserDefense) {
@@ -4072,7 +4281,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
             // BROKEN TACKLE! Shed defender and explode for long breakaway gain
             activeEntity.brokenTacklesCount = brokenCount + 1;
             activeEntity.tackleImmunity = 42;
-            activeEntity.powerBoostTimer = 55;
+            if (!activeEntity.isReturner && !isSpecialTeamsReturn) activeEntity.powerBoostTimer = 55;
             d.brokenTackleStun = isUserDefense ? 25 : (isBlitzer ? 35 : 60); // Defender is stunned and knocked down/back
             d.pursuitTimer = 0; // Reset pursuit momentum for this stunned defender
             d.x += (d.x < activeEntity.x ? -30 : 30);
@@ -4131,31 +4340,39 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         const blockers = ball.isKickoff
           ? defenders.filter(d => !d.isReturner)
           : defenders.filter(d => !d.isReturner && d.type !== 'CB');
+        const engagedCoverageUnits = new Set<Entity>();
 
         blockers.forEach(b => {
           b.isBlocker = true;
           const nearestCov = coverageUnits.reduce<Entity | null>((closest, cov) => {
-            if (!cov) return closest;
+            if (!cov || engagedCoverageUnits.has(cov)) return closest;
             const dist = Math.hypot(cov.x - b.x, cov.y - b.y);
             if (!closest) return cov;
             return dist < Math.hypot(closest.x - b.x, closest.y - b.y) ? cov : closest;
           }, null);
           if (nearestCov) {
+            engagedCoverageUnits.add(nearestCov);
             moveToward(b, nearestCov.x, nearestCov.y, 0.28, 2.2, 0);
             const contactDist = Math.hypot(b.x - nearestCov.x, b.y - nearestCov.y);
             if (contactDist < (b.radius || 10) + (nearestCov.radius || 10) + 6) {
-              nearestCov.pursuitTimer = 0;
-              nearestCov.vx = (nearestCov.vx || 0) * 0.25;
-              nearestCov.vy = (nearestCov.vy || 0) * 0.25;
-              nearestCov.brokenTackleStun = Math.max(nearestCov.brokenTackleStun || 0, 8);
+              if (shouldApplyRunBlockStun(b, nearestCov)) {
+                nearestCov.pursuitTimer = 0;
+                nearestCov.vx = (nearestCov.vx || 0) * 0.5;
+                nearestCov.vy = (nearestCov.vy || 0) * 0.5;
+                nearestCov.brokenTackleStun = Math.max(nearestCov.brokenTackleStun || 0, 4);
+              }
+              b.blockingDefender = nearestCov;
               b.isEngagedWithBlocker = true;
             }
+          } else {
+            b.blockingDefender = null;
+            b.isEngagedWithBlocker = false;
           }
         });
 
         const returner = defenders.find(d => d.isReturner) || (ball.isKickoff ? defenders[0] : defenders[6]);
         if (returner) {
-          moveToward(returner, ball.targetX || 170, ball.targetY || returner.y, 0.20, 2.0, 0);
+          moveToward(returner, ball.targetX || 170, ball.targetY || returner.y, 0.20, 1.65, 0);
         }
 
         // Arrival / Landing Window
@@ -4194,7 +4411,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
             returner.y = ball.y;
             returner.vx = 0;
             returner.vy = 0;
-            returner.tackleImmunity = 20;
+            returner.tackleImmunity = 0;
+            returner.powerBoostTimer = 0;
             activeEntity = returner;
             isSpecialTeamsReturn = true;
             specialTeamsReturnType = ball.isKickoff ? 'KICKOFF' : 'PUNT';
@@ -5438,12 +5656,20 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
   let animationFrameId: number;
   function loop(timestamp: number) {
-    updateGameClock(timestamp);
-    update();
+    if (!isPaused) {
+      updateGameClock(timestamp);
+      update();
+    }
     draw();
+    if (isSessionActive && timestamp - lastSessionSaveTime >= 1000) {
+      saveGameSession();
+      lastSessionSaveTime = timestamp;
+    }
     animationFrameId = safeRequestAnimationFrame(loop);
   }
 
+  const handlePageHide = () => saveGameSession();
+  if (typeof window !== 'undefined') window.addEventListener('pagehide', handlePageHide);
   animationFrameId = safeRequestAnimationFrame(loop);
 
   return () => {
@@ -5451,6 +5677,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     safeCancelAnimationFrame(animationFrameId);
     if (typeof window !== 'undefined') {
       window.removeEventListener('resize', resizeGame);
+      window.removeEventListener('pagehide', handlePageHide);
     }
     canvas.removeEventListener('pointerdown', handlePointerDown);
     canvas.removeEventListener('pointermove', handlePointerMove);

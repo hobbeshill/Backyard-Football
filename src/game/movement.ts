@@ -1,6 +1,14 @@
 import type { Entity } from './types';
 
 export const GAME_SPEED_SCALE = 0.77;
+export function getBallCarrierRunSpeed(isReturner: boolean, isBoosted: boolean): number {
+  if (isReturner) return 1.4 * 1.18 * 0.68;
+  return isBoosted ? 2.65 : 1.84;
+}
+
+export function shouldApplyRunBlockStun(blocker: Entity, target: Entity): boolean {
+  return !blocker.isEngagedWithBlocker || blocker.blockingDefender !== target;
+}
 
 export function canEngagePassBlock(blocker: Entity, rusher: Entity): boolean {
   return Math.hypot(rusher.x - blocker.x, rusher.y - blocker.y) <= blocker.radius + rusher.radius + 6;

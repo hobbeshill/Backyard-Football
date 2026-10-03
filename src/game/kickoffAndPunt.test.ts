@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { calculateKickoffFlight, calculatePuntFlight, getKickoffLineY, getTouchbackYardLineY } from './rules';
+import { calculateBrokenTackleChance, calculateKickoffFlight, calculatePuntFlight, getKickoffLineY, getTouchbackYardLineY } from './rules';
 import { offensivePlaybook } from './playbook';
 import { scoreRunBlockTarget } from './ai';
 import { mountFootballGame, type GameEngineHandle } from './engine';
+import { getBallCarrierRunSpeed, shouldApplyRunBlockStun } from './movement';
 
 function createMockCanvas() {
   return {
@@ -122,6 +123,10 @@ test('game engine mounts with kickoff active at the beginning of the game', () =
   // Launch kickoff
   engine.kickoff(0.95);
   assert.equal(isKickoff, false);
+
+  engine.resetGame();
+  assert.equal(engine.isKickoffActive(), true);
+  assert.equal(isKickoff, true);
 
   if (cleanup) cleanup();
 });
@@ -243,24 +248,31 @@ test('receiving team blockers run block during kickoff and punt returns', () => 
   assert.ok(aheadScore < farScore, 'Run blocker must prioritize oncoming tackler threatening the returner');
 });
 
-test('AI kickoff receiver has identical speed and steering limits as user kickoff receiver', () => {
-  // Symmetrical calibrated return parameters
-  const userReturnBaseSpeed = 1.48;
-  const aiReturnBaseSpeed = 1.48;
-  const userReturnBoostedSpeed = 2.05;
-  const aiReturnBoostedSpeed = 2.05;
-  const userReturnMaxSteer = 2.2;
-  const aiReturnMaxSteer = 2.2;
-  const userReturnSteerFactor = 0.08;
-  const aiReturnSteerFactor = 0.08;
-  const userInFlightSpeed = 2.0;
-  const aiInFlightSpeed = 2.0;
+test('kick and punt returners use the slower return speed and cannot break tackles', () => {
+  const normalCarrierSpeed = getBallCarrierRunSpeed(false, false);
+  const regularWrRouteSpeed = 1.4 * 1.18 * 0.68;
 
-  assert.equal(aiReturnBaseSpeed, userReturnBaseSpeed, 'Base return speed must be identical');
-  assert.equal(aiReturnBoostedSpeed, userReturnBoostedSpeed, 'Boosted return speed must be identical');
-  assert.equal(aiReturnMaxSteer, userReturnMaxSteer, 'Maximum lateral steering must be identical');
-  assert.equal(aiReturnSteerFactor, userReturnSteerFactor, 'Steering responsiveness must be identical');
-  assert.equal(aiInFlightSpeed, userInFlightSpeed, 'In-flight catch fielding speed must be identical');
+  assert.equal(normalCarrierSpeed, 1.84);
+  assert.equal(getBallCarrierRunSpeed(true, false), regularWrRouteSpeed);
+  assert.equal(getBallCarrierRunSpeed(true, true), regularWrRouteSpeed);
+  assert.equal(getBallCarrierRunSpeed(false, true), 2.65);
+  assert.equal(calculateBrokenTackleChance({
+    isRB: false,
+    isBoosted: false,
+    brokenCount: 0,
+    isBlitzer: false,
+    isReturner: true
+  }), 0);
+});
+
+test('return blockers only stun once per tackler engagement', () => {
+  const tackler = { x: 100, y: 100, radius: 10 };
+  const otherTackler = { x: 120, y: 100, radius: 10 };
+  const blocker = { x: 105, y: 100, radius: 10, isEngagedWithBlocker: true, blockingDefender: tackler };
+
+  assert.equal(shouldApplyRunBlockStun(blocker, tackler), false);
+  assert.equal(shouldApplyRunBlockStun(blocker, otherTackler), true);
+  assert.equal(shouldApplyRunBlockStun({ x: 0, y: 0, radius: 10 }, tackler), true);
 });
 
 
