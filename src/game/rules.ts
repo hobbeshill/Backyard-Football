@@ -378,10 +378,10 @@ export interface KickPhysicsResult {
 export function calculateKickoffFlight(power: number, kickerRating = 1.0): KickPhysicsResult {
   const clampedPower = Math.max(0.15, Math.min(1.0, power));
   // Standard kickoff from 35-yard line: 65 yards reaches opponent goal line
-  const baseDistance = 42 + clampedPower * 28; // 42 to 70 yards
+  const baseDistance = 35 + clampedPower * 35; // 35 to 70 yards
   const distanceYards = Math.round(baseDistance * Math.max(0.85, Math.min(1.15, kickerRating)));
   const flightFrames = Math.max(38, Math.round(36 + clampedPower * 30));
-  const maxZ = Math.round(32 + clampedPower * 28);
+  const maxZ = Math.round(30 + clampedPower * 28);
   const isTouchback = distanceYards >= 65;
 
   return { distanceYards, flightFrames, maxZ, isTouchback };
@@ -389,11 +389,11 @@ export function calculateKickoffFlight(power: number, kickerRating = 1.0): KickP
 
 export function calculatePuntFlight(power: number, punterRating = 1.0): KickPhysicsResult {
   const clampedPower = Math.max(0.2, Math.min(1.0, power));
-  // Punts travel ~35 to 54 yards with high hangtime
-  const baseDistance = 32 + clampedPower * 20;
+  // Punts travel ~25 to 55 yards with high hangtime
+  const baseDistance = 25 + clampedPower * 30;
   const distanceYards = Math.round(baseDistance * Math.max(0.85, Math.min(1.15, punterRating)));
-  const flightFrames = Math.max(42, Math.round(44 + clampedPower * 26));
-  const maxZ = Math.round(38 + clampedPower * 20);
+  const flightFrames = Math.max(42, Math.round(42 + clampedPower * 28));
+  const maxZ = Math.round(35 + clampedPower * 22);
   const isTouchback = distanceYards >= 55;
 
   return { distanceYards, flightFrames, maxZ, isTouchback };
@@ -409,5 +409,18 @@ export function getTouchbackYardLineY(
   // AttackDirection 1: moving down towards y=fieldHeight. Own goal line is at endZoneHeight. 25 yards down: + 250
   const ownGoalLineY = attackDirection === -1 ? (fieldHeight - endZoneHeight) : endZoneHeight;
   return ownGoalLineY + (touchbackYards * 10 * attackDirection);
+}
+
+export function getKickoffLineY(
+  fieldHeight: number,
+  endZoneHeight: number,
+  kickAttackDirection: number,
+  kickoffYardLine = 35
+): number {
+  // Kickoff from kicking team's own 35-yard line
+  // If kickAttackDirection -1: own goal line at fieldHeight - endZoneHeight (1100). 35 yards upfield: 1100 - 350 = 750
+  // If kickAttackDirection 1: own goal line at endZoneHeight (100). 35 yards downfield: 100 + 350 = 450
+  const ownGoalLineY = kickAttackDirection === -1 ? (fieldHeight - endZoneHeight) : endZoneHeight;
+  return ownGoalLineY + (kickoffYardLine * 10 * kickAttackDirection);
 }
 

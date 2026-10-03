@@ -80,6 +80,10 @@ export interface Entity {
   mistakeAnnounced?: boolean;
   dropStepTimer?: number;
   isOpenDeep?: boolean;
+  isKicker?: boolean;
+  isPunter?: boolean;
+  isReturner?: boolean;
+  team?: 'P1' | 'P2';
   speechBubble?: {
     text: string;
     timer: number;
@@ -113,4 +117,7 @@ export interface Ball {
   intendedTarget?: Entity | null;
   isKickoff?: boolean;
   isPunt?: boolean;
+  kickingTeam?: 'P1' | 'P2';
+  receivingTeam?: 'P1' | 'P2';
+  kickPower?: number;
 }

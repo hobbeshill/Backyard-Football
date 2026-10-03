@@ -39,14 +39,34 @@ export default function App() {
   const [teamSearch, setTeamSearch] = useState('');
   const [showTeamModal, setShowTeamModal] = useState(true);
   const [hasKickedOff, setHasKickedOff] = useState(false);
+  const [isKickoffActive, setIsKickoffActive] = useState(true);
+  const [kickoffSide, setKickoffSide] = useState<{ kicking: 'P1' | 'P2'; receiving: 'P1' | 'P2' }>({ kicking: 'P2', receiving: 'P1' });
+  const [is4thDown, setIs4thDown] = useState(false);
+  const [kickMeterPower, setKickMeterPower] = useState(0.55);
   const [momentumState, setMomentumState] = useState(0);
   const [gameClockState, setGameClockState] = useState({ quarter: 1, seconds: 120 });
-  const [banner, setBanner] = useState<{ text: string; color: string; visible: boolean; big: boolean }>({
+  const [banner, setBanner] = useState<{
+    text: string;
+    color: string;
+    visible: boolean;
+    big: boolean;
+    category: 'TURNOVER' | 'TOUCHDOWN' | 'FIRST_DOWN' | 'SAFETY' | 'FUMBLE' | 'SACK' | 'SPECIAL_TEAMS' | 'INFO';
+    subtext?: string;
+    possessionTeam?: 'P1' | 'P2';
+    durationMs: number;
+    priority: number;
+    key: number;
+  }>({
     text: '',
     color: '#ffcc00',
     visible: false,
-    big: false
+    big: false,
+    category: 'INFO',
+    durationMs: 2800,
+    priority: 1,
+    key: 0
   });
+  const [screenVignette, setScreenVignette] = useState<'TURNOVER' | 'TOUCHDOWN' | null>(null);
   const [showHelp, setShowHelp] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
 
@@ -56,14 +76,99 @@ export default function App() {
     setSoundEnabled(!soundEnabled);
   };
 
-  // Banner timeout ref
+  // Banner timeout refs and priority protection
   const bannerTimeoutRef = useRef<any>(null);
-  const showAnnouncement = (text: string, color = '#ffcc00', big = false) => {
+  const vignetteTimeoutRef = useRef<any>(null);
+  const activePriorityRef = useRef<number>(0);
+  const bannerCreatedAtRef = useRef<number>(0);
+
+  const showAnnouncement = (
+    text: string,
+    color = '#ffcc00',
+    big = false,
+    meta?: {
+      category?: 'TURNOVER' | 'TOUCHDOWN' | 'FIRST_DOWN' | 'SAFETY' | 'FUMBLE' | 'SACK' | 'SPECIAL_TEAMS' | 'INFO';
+      subtext?: string;
+      durationMs?: number;
+      possessionTeam?: 'P1' | 'P2';
+    }
+  ) => {
+    const upper = text.toUpperCase();
+    let category = meta?.category;
+    let priority = 1;
+    let defaultDuration = 2800;
+
+    if (!category) {
+      if (
+        upper.includes('TURNOVER') ||
+        upper.includes('INTERCEPT') ||
+        upper.includes('PICKED OFF') ||
+        upper.includes('PICK-SIX')
+      ) {
+        category = 'TURNOVER';
+      } else if (upper.includes('TOUCHDOWN')) {
+        category = 'TOUCHDOWN';
+      } else if (upper.includes('FIRST DOWN')) {
+        category = 'FIRST_DOWN';
+      } else if (upper.includes('FUMBLE')) {
+        category = upper.includes('RECOVER') ? 'TURNOVER' : 'FUMBLE';
+      } else if (upper.includes('SACK') || upper.includes('SAFETY')) {
+        category = 'SACK';
+      } else if (upper.includes('KICKOFF') || upper.includes('PUNT') || upper.includes('TOUCHBACK')) {
+        category = 'SPECIAL_TEAMS';
+      } else {
+        category = 'INFO';
+      }
+    }
+
+    if (category === 'TURNOVER' || category === 'TOUCHDOWN') {
+      priority = 3;
+      defaultDuration = 5500;
+    } else if (category === 'FIRST_DOWN' || category === 'FUMBLE' || category === 'SACK' || big) {
+      priority = 2;
+      defaultDuration = 4000;
+    }
+
+    const duration = meta?.durationMs || defaultDuration;
+    const now = Date.now();
+
+    // Priority protection: if a major turnover or touchdown is active (< 3800ms ago),
+    // prevent routine priority 1 events from prematurely hiding it!
+    if (activePriorityRef.current >= 3 && priority < 3 && now - bannerCreatedAtRef.current < 3800) {
+      return;
+    }
+
+    activePriorityRef.current = priority;
+    bannerCreatedAtRef.current = now;
+
     if (bannerTimeoutRef.current) clearTimeout(bannerTimeoutRef.current);
-    setBanner({ text, color, visible: true, big });
+
+    // Full-screen alert vignette for turnovers and touchdowns
+    if (category === 'TURNOVER' || category === 'TOUCHDOWN') {
+      if (vignetteTimeoutRef.current) clearTimeout(vignetteTimeoutRef.current);
+      setScreenVignette(category);
+      vignetteTimeoutRef.current = setTimeout(() => {
+        setScreenVignette(null);
+      }, 1600);
+    }
+
+    setBanner({
+      text,
+      color,
+      visible: true,
+      big: big || priority >= 2,
+      category,
+      subtext: meta?.subtext,
+      possessionTeam: meta?.possessionTeam,
+      durationMs: duration,
+      priority,
+      key: now
+    });
+
     bannerTimeoutRef.current = setTimeout(() => {
       setBanner(prev => ({ ...prev, visible: false }));
-    }, 2800);
+      activePriorityRef.current = 0;
+    }, duration);
   };
 
   // Schematic rendering helper for playbook cards
@@ -223,7 +328,14 @@ export default function App() {
       setP2TeamState,
       setGameClockState: (quarter, seconds) => setGameClockState({ quarter, seconds }),
       showAnnouncement,
-      onEngineReady: engine => { engineRef.current = engine; }
+      onEngineReady: engine => { engineRef.current = engine; },
+      setIsKickoffState: (isKickoff, kicking, receiving) => {
+        setIsKickoffActive(isKickoff);
+        setKickoffSide({ kicking, receiving });
+      },
+      setIs4thDownState: (val) => setIs4thDown(val),
+      setKickMeterPowerState: (power) => setKickMeterPower(power),
+      setP1OffPlayState
     });
   }, []);
 
@@ -355,6 +467,105 @@ export default function App() {
         </div>
       </header>
 
+      {/* Special Teams: Kickoff Controls & Status HUD */}
+      {isKickoffActive ? (
+        <div className="flex items-center justify-between w-full max-w-[420px] bg-black/95 border-2 border-[#ffcc00] px-3 py-1.5 rounded-lg mb-1 shadow-2xl z-20">
+          {kickoffSide.kicking === 'P1' ? (
+            <>
+              <div className="flex flex-col text-left">
+                <span className="text-[#ffcc00] font-black text-[0.72rem] tracking-wider flex items-center gap-1">
+                  🏈 YOU ARE KICKING OFF
+                </span>
+                <span className="text-neutral-300 text-[0.58rem]">
+                  POWER: <b className="text-white">{Math.round(kickMeterPower * 100)}%</b> • TAP FIELD OR BUTTON
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-20 h-3 bg-neutral-800 rounded border border-white/40 overflow-hidden relative">
+                  <div
+                    className="h-full bg-gradient-to-r from-amber-400 via-cyan-400 to-emerald-400 transition-all duration-75"
+                    style={{ width: `${kickMeterPower * 100}%` }}
+                  />
+                </div>
+                <button
+                  onClick={() => engineRef.current?.kickoff?.(kickMeterPower)}
+                  className="px-3 py-1 bg-gradient-to-r from-amber-500 to-yellow-400 hover:from-amber-400 hover:to-yellow-300 text-black font-black text-xs uppercase rounded transition cursor-pointer shadow-lg active:scale-95"
+                >
+                  BOOT KICK 🏈
+                </button>
+              </div>
+            </>
+          ) : (
+            <div className="flex items-center justify-between w-full">
+              <span className="text-[#00ffff] font-black text-[0.72rem] tracking-wide flex items-center gap-1.5">
+                🏈 {p2TeamState.name.toUpperCase()} KICKING OFF
+              </span>
+              <span className="text-neutral-300 text-[0.58rem] bg-neutral-900 border border-neutral-700 px-2 py-0.5 rounded font-bold">
+                PREPARE FOR RETURN 🏃
+              </span>
+            </div>
+          )}
+        </div>
+      ) : activeOffenseState === 'P1' && p1OffPlayState === 'PUNT' ? (
+        /* Special Teams: Punt Skill Meter HUD */
+        <div className="flex items-center justify-between w-full max-w-[420px] bg-black/95 border-2 border-[#00ffff] px-3 py-1.5 rounded-lg mb-1 shadow-2xl z-20">
+          <div className="flex flex-col text-left">
+            <span className="text-[#00ffff] font-black text-[0.72rem] tracking-wider flex items-center gap-1">
+              🏈 PUNT UNIT READY
+            </span>
+            <span className="text-neutral-300 text-[0.58rem]">
+              POWER: <b className="text-white">{Math.round(kickMeterPower * 100)}%</b> (~{Math.round(25 + kickMeterPower * 30)} YDS)
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-20 h-3 bg-neutral-800 rounded border border-white/40 overflow-hidden relative">
+              <div
+                className="h-full bg-gradient-to-r from-amber-400 via-cyan-400 to-emerald-400 transition-all duration-75"
+                style={{ width: `${kickMeterPower * 100}%` }}
+              />
+            </div>
+            <button
+              onClick={() => engineRef.current?.punt?.(kickMeterPower)}
+              className="px-3 py-1 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-black font-black text-xs uppercase rounded transition cursor-pointer shadow-lg active:scale-95"
+            >
+              BOOT PUNT 🏈
+            </button>
+            <button
+              onClick={() => handleSelectOffensePlay('SHORT_PASS')}
+              className="px-2 py-1 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 border border-neutral-600 rounded font-bold text-[0.60rem] transition cursor-pointer"
+            >
+              AUDIBLE
+            </button>
+          </div>
+        </div>
+      ) : is4thDown && activeOffenseState === 'P1' ? (
+        /* Special Teams: 4th Down Decision & Punt Option HUD */
+        <div className="flex items-center justify-between w-full max-w-[420px] bg-red-950/95 border-2 border-red-500 px-3 py-1.5 rounded-lg mb-1 shadow-2xl z-20 animate-pulse">
+          <div className="flex flex-col text-left">
+            <span className="text-white font-black text-[0.72rem] tracking-wider flex items-center gap-1">
+              ⚠️ 4TH DOWN DECISION!
+            </span>
+            <span className="text-red-200 text-[0.56rem]">
+              Punt to flip field or Go For It!
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => engineRef.current?.callPunt?.()}
+              className="px-3 py-1 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded font-black text-xs uppercase tracking-wide transition cursor-pointer shadow-md"
+            >
+              🏈 PUNT UNIT
+            </button>
+            <button
+              onClick={() => handleSelectOffensePlay('SHORT_PASS')}
+              className="px-2 py-1 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 border border-neutral-600 rounded font-bold text-[0.62rem] transition cursor-pointer"
+            >
+              GO FOR IT
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       {/* Small UI: Active On-Field Alignment Indicator & Shift Controls */}
       <div className="flex items-center justify-between w-full max-w-[420px] bg-black/85 border border-[#ffcc00]/50 px-3 py-1 rounded-md mb-1 shadow-lg text-[0.68rem] z-20">
         <div className="flex items-center gap-2">
@@ -386,13 +597,165 @@ export default function App() {
         </div>
       </div>
 
+      {/* Screen edge alert vignette for turnovers and touchdowns */}
+      {screenVignette === 'TURNOVER' && (
+        <div className="pointer-events-none fixed inset-0 z-40 border-4 border-red-500/70 shadow-[inset_0_0_80px_rgba(239,68,68,0.55)] animate-pulse transition-opacity duration-300" />
+      )}
+      {screenVignette === 'TOUCHDOWN' && (
+        <div className="pointer-events-none fixed inset-0 z-40 border-4 border-amber-400/80 shadow-[inset_0_0_90px_rgba(245,158,11,0.6)] animate-pulse transition-opacity duration-300" />
+      )}
+
       {/* Main Game Announcement Banner */}
       {banner.visible && (
         <div
-          className={`absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-black/95 border-3 rounded-lg font-extrabold text-center z-50 tracking-wider shadow-[0_5px_30px_rgba(0,0,0,0.9)] animate-pulse ${banner.big ? 'max-w-[92vw] px-4 py-4 text-2xl leading-tight' : 'max-w-[90vw] px-6 py-3 text-[0.95rem]'}`}
-          style={{ borderColor: banner.color, ...getTeamTextStyle(banner.color) }}
+          className={`absolute top-[22%] sm:top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-[94vw] max-w-[440px] transition-all duration-200 select-none ${
+            banner.category === 'TURNOVER'
+              ? 'animate-turnover-glow'
+              : banner.category === 'TOUCHDOWN'
+                ? 'animate-touchdown-glow'
+                : 'shadow-[0_10px_35px_rgba(0,0,0,0.95)]'
+          }`}
         >
-          {banner.text}
+          {banner.category === 'TURNOVER' ? (
+            /* Major Event: TURNOVER (Interceptions, Fumbles, Turnover on Downs) */
+            <div className="relative overflow-hidden rounded-xl border-2 border-red-500 bg-gradient-to-b from-[#240606]/98 via-[#180303]/98 to-[#0b0101]/98 backdrop-blur-md shadow-2xl">
+              {/* Header Badge */}
+              <div className="flex items-center justify-between bg-gradient-to-r from-red-600 via-amber-500 to-red-600 px-3 py-1 text-black font-black uppercase text-[0.66rem] sm:text-xs tracking-widest shadow-md">
+                <span className="flex items-center gap-1.5">
+                  <span className="animate-ping inline-block h-2 w-2 rounded-full bg-black/80" />
+                  🚨 TURNOVER ALERT 🚨
+                </span>
+                <button
+                  onClick={() => {
+                    setBanner(prev => ({ ...prev, visible: false }));
+                    activePriorityRef.current = 0;
+                  }}
+                  className="rounded p-0.5 text-black hover:bg-black/20 transition cursor-pointer"
+                  title="Dismiss notification"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+
+              {/* Body */}
+              <div className="p-3 sm:p-4 text-center flex flex-col items-center gap-2">
+                <div className="text-xl sm:text-2xl font-black text-white tracking-wider uppercase drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)] leading-tight">
+                  {banner.text}
+                </div>
+                {banner.subtext && (
+                  <div className="w-full rounded-md bg-black/80 border border-red-500/40 px-2.5 py-1.5 text-[0.70rem] sm:text-xs font-bold text-amber-300 flex items-center justify-center gap-1.5 shadow-inner">
+                    <span>{banner.subtext}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Progress Timer Line */}
+              <div className="h-1.5 bg-neutral-900 w-full overflow-hidden">
+                <div
+                  key={banner.key}
+                  className="h-full bg-gradient-to-r from-red-500 via-amber-400 to-red-500 announcement-progress-bar w-full"
+                  style={{ animationDuration: `${banner.durationMs}ms` }}
+                />
+              </div>
+            </div>
+          ) : banner.category === 'TOUCHDOWN' ? (
+            /* Major Event: TOUCHDOWN */
+            <div className="relative overflow-hidden rounded-xl border-2 border-amber-400 bg-gradient-to-b from-[#261d04]/98 via-[#1c1502]/98 to-[#0d0901]/98 backdrop-blur-md shadow-2xl">
+              <div className="flex items-center justify-between bg-gradient-to-r from-yellow-400 via-amber-300 to-yellow-500 px-3 py-1 text-black font-black uppercase text-[0.66rem] sm:text-xs tracking-widest shadow-md">
+                <span className="flex items-center gap-1.5">
+                  🏆 TOUCHDOWN! 🏆
+                </span>
+                <button
+                  onClick={() => {
+                    setBanner(prev => ({ ...prev, visible: false }));
+                    activePriorityRef.current = 0;
+                  }}
+                  className="rounded p-0.5 text-black hover:bg-black/20 transition cursor-pointer"
+                  title="Dismiss notification"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+
+              <div className="p-3 sm:p-4 text-center flex flex-col items-center gap-2">
+                <div className="text-xl sm:text-2xl font-black text-amber-300 tracking-wider uppercase drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)] leading-tight">
+                  {banner.text}
+                </div>
+                {banner.subtext && (
+                  <div className="w-full rounded-md bg-black/80 border border-amber-400/40 px-2.5 py-1.5 text-[0.70rem] sm:text-xs font-bold text-emerald-300 flex items-center justify-center gap-1.5 shadow-inner">
+                    <span>{banner.subtext}</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="h-1.5 bg-neutral-900 w-full overflow-hidden">
+                <div
+                  key={banner.key}
+                  className="h-full bg-gradient-to-r from-yellow-400 via-amber-300 to-emerald-400 announcement-progress-bar w-full"
+                  style={{ animationDuration: `${banner.durationMs}ms` }}
+                />
+              </div>
+            </div>
+          ) : banner.big || banner.category === 'FIRST_DOWN' || banner.category === 'FUMBLE' ? (
+            /* Medium Event: First Down, Fumble Alert, Sacks */
+            <div
+              className="relative overflow-hidden rounded-xl border-2 bg-gradient-to-b from-neutral-900/98 to-black/98 backdrop-blur-md shadow-2xl"
+              style={{ borderColor: banner.color }}
+            >
+              <div
+                className="flex items-center justify-between px-3 py-1 font-black uppercase text-[0.62rem] sm:text-[0.68rem] tracking-wider"
+                style={{ backgroundColor: banner.color, color: '#000' }}
+              >
+                <span>
+                  {banner.category === 'FIRST_DOWN'
+                    ? '🎯 1ST DOWN ACHIEVED'
+                    : banner.category === 'FUMBLE'
+                      ? '⚠️ LOOSE BALL! FUMBLE'
+                      : '⚡ KEY PLAY'}
+                </span>
+                <button
+                  onClick={() => {
+                    setBanner(prev => ({ ...prev, visible: false }));
+                    activePriorityRef.current = 0;
+                  }}
+                  className="rounded p-0.5 text-black hover:bg-black/20 transition cursor-pointer"
+                  title="Dismiss notification"
+                >
+                  <X size={13} />
+                </button>
+              </div>
+
+              <div className="p-3 text-center flex flex-col items-center gap-1.5">
+                <div
+                  className="text-lg sm:text-xl font-black tracking-wide uppercase drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)]"
+                  style={{ color: banner.color }}
+                >
+                  {banner.text}
+                </div>
+                {banner.subtext && (
+                  <div className="text-[0.66rem] sm:text-xs font-semibold text-neutral-300">
+                    {banner.subtext}
+                  </div>
+                )}
+              </div>
+
+              <div className="h-1 bg-neutral-900 w-full overflow-hidden">
+                <div
+                  key={banner.key}
+                  className="h-full announcement-progress-bar w-full"
+                  style={{ backgroundColor: banner.color, animationDuration: `${banner.durationMs}ms` }}
+                />
+              </div>
+            </div>
+          ) : (
+            /* Routine / Info Announcement */
+            <div
+              className="bg-black/95 border-2 rounded-lg font-extrabold text-center px-5 py-2.5 text-[0.88rem] tracking-wide shadow-2xl animate-pulse"
+              style={{ borderColor: banner.color, ...getTeamTextStyle(banner.color) }}
+            >
+              {banner.text}
+            </div>
+          )}
         </div>
       )}
 

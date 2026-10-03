@@ -18,6 +18,7 @@ export interface TeamProfile {
     dbClosingSpeed: number;  // Modulates DB closing & pursuit speed (0.90 - 1.15)
     passRush: number;        // Modulates pass rush pressure speed (0.85 - 1.25)
     mistakeChance: number;   // Defensive coverage bust tendency (0.80 - 1.30)
+    kicking?: number;        // Special teams leg power & kicking accuracy (0.90 - 1.15)
   };
 }
 
