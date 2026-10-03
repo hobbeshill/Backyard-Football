@@ -2,6 +2,42 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createSeason, getSeasonRecord, recordSeasonGame } from './season';
 
+test('completed games return to the menu or automatically launch the next season matchup', async () => {
+  const { readFileSync } = await import('node:fs');
+  const source = readFileSync(new URL('../App.tsx', import.meta.url), 'utf8');
+  const start = source.indexOf('    if (!finishedGame) return;');
+  const end = source.indexOf('  }, [finishedGame]);', start);
+  assert.ok(start >= 0 && end > start);
+  const complete = new Function(
+    'finishedGame', 'gameModeRef', 'seasonProgressRef', 'setFinishedGame',
+    'handleReturnToMainMenu', 'recordSeasonGame', 'setSeasonProgress', 'saveSeasonProgress', 'handleStartGame',
+    source.slice(start, end)
+  );
+  const season = createSeason('A', ['A', 'B', 'C', 'D', 'E']);
+  const afterFirstGame = recordSeasonGame(season, 14, 7);
+  const beforeFinalGame = recordSeasonGame(recordSeasonGame(afterFirstGame, 7, 0), 0, 7);
+  const cases = [
+    { mode: 'ONE_GAME', progress: season, restored: false, menu: 1, next: 0, results: 0 },
+    { mode: 'SEASON', progress: season, restored: false, menu: 0, next: 1, results: 1 },
+    { mode: 'SEASON', progress: beforeFinalGame, restored: false, menu: 1, next: 0, results: 4 },
+    { mode: 'SEASON', progress: afterFirstGame, restored: true, menu: 0, next: 1, results: 1 }
+  ];
+  for (const scenario of cases) {
+    let menuVisits = 0;
+    let nextGames = 0;
+    const progressRef = { current: scenario.progress };
+    complete(
+      { p1Score: 14, p2Score: 7, restored: scenario.restored },
+      { current: scenario.mode }, progressRef, () => {},
+      () => { menuVisits++; }, recordSeasonGame, () => {}, () => {},
+      () => { nextGames++; }
+    );
+    assert.equal(menuVisits, scenario.menu);
+    assert.equal(nextGames, scenario.next);
+    assert.equal(progressRef.current.results.length, scenario.results);
+  }
+});
+
 test('season schedule excludes the selected team and contains four opponents', () => {
   const season = createSeason('A', ['A', 'B', 'C', 'D', 'E', 'F']);
 

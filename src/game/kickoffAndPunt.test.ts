@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { calculateBrokenTackleChance, calculateKickoffFlight, calculatePuntFlight, getKickoffLineY, getTouchbackYardLineY } from './rules';
+import { calculateBrokenTackleChance, calculateKickoffFlight, calculatePuntFlight, getKickoffLineY, getTouchbackYardLineY, isPlayerOutOfBounds } from './rules';
 import { offensivePlaybook } from './playbook';
 import { scoreRunBlockTarget } from './ai';
 import { mountFootballGame, type GameEngineHandle } from './engine';
@@ -24,6 +24,7 @@ function createMockCanvas() {
       roundRect: () => {},
       fillText: () => {},
       createLinearGradient: () => ({ addColorStop: () => {} }),
+      createRadialGradient: () => ({ addColorStop: () => {} }),
       setLineDash: () => {},
       measureText: () => ({ width: 50 }),
       translate: () => {},
@@ -38,6 +39,59 @@ function createMockCanvas() {
   } as unknown as HTMLCanvasElement;
 }
 
+test('fourth-down Go For It waits for a deliberate pass after the snap', (context) => {
+  context.mock.timers.enable({ apis: ['setTimeout'] });
+  const originalRequest = globalThis.requestAnimationFrame;
+  const originalCancel = globalThis.cancelAnimationFrame;
+  globalThis.requestAnimationFrame = () => 1;
+  globalThis.cancelAnimationFrame = () => {};
+  const handlers = new Map<string, EventListener>();
+  const canvas = createMockCanvas();
+  canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 340, height: 450 } as DOMRect);
+  canvas.addEventListener = ((name: string, handler: EventListener) => handlers.set(name, handler)) as typeof canvas.addEventListener;
+  let engine: GameEngineHandle | null = null;
+  const cleanup = mountFootballGame(canvas, {
+    setP2OffPlayState: () => {}, setP2DefPlayState: () => {},
+    setDownDistanceText: () => {}, setActiveOffenseState: () => {},
+    setUserScore: () => {}, setCpuScore: () => {}, setP1DefPlayState: () => {},
+    setMomentumState: () => {}, setGameClockState: () => {}, showAnnouncement: () => {},
+    onEngineReady: value => { engine = value; }
+  });
+  try {
+    assert.ok(engine);
+    const game = engine as GameEngineHandle;
+    game.setPossessionForTest?.('P1');
+    game.selectOffense('SHORT_PASS');
+    for (let down = 0; down < 3; down++) {
+      game.triggerPlayEnd?.(950, 'INCOMPLETE');
+      context.mock.timers.tick(1600);
+    }
+    assert.equal(game.is4thDown(), true);
+    game.callPunt();
+    game.selectOffense('SHORT_PASS');
+    game.resetDrill();
+    assert.equal(game.phase, 'PRE_SNAP');
+    assert.equal(game.is4thDown(), true);
+
+    const send = (name: string, x: number, y: number) => {
+      const handler = handlers.get(name);
+      assert.ok(handler);
+      handler({ clientX: x, clientY: y } as PointerEvent);
+    };
+    send('pointerdown', 170, 273);
+    assert.equal(game.phase, 'QB_DROP');
+    send('pointerup', 170, 284);
+    assert.equal(game.phase, 'QB_DROP', 'Snap jitter must not throw the ball');
+    send('pointerdown', 170, 273);
+    send('pointerup', 170, 333);
+    assert.equal(game.phase, 'THROWN', 'A deliberate pull should still throw');
+  } finally {
+    cleanup?.();
+    globalThis.requestAnimationFrame = originalRequest;
+    globalThis.cancelAnimationFrame = originalCancel;
+  }
+});
+
 test('kickoff line calculation correctly places kicking team at 35-yard line', () => {
   const fieldHeight = 1200;
   const endZoneHeight = 100;
@@ -46,6 +100,170 @@ test('kickoff line calculation correctly places kicking team at 35-yard line', (
 
   // AttackDirection 1: moving down towards y=1200. Own goal line is at 100. 35 yards downfield = 100 + 350 = 450
   assert.equal(getKickoffLineY(fieldHeight, endZoneHeight, 1, 35), 450);
+});
+
+test('real tutorial advances through offensive setup, throw, and defensive setup gestures', (context) => {
+  let timestamp = 1000;
+  context.mock.method(Date, 'now', () => timestamp);
+  context.mock.method(Math, 'random', () => 0.5);
+  const originalRequest = globalThis.requestAnimationFrame;
+  const originalCancel = globalThis.cancelAnimationFrame;
+  let frame: FrameRequestCallback = () => {};
+  globalThis.requestAnimationFrame = callback => { frame = callback; return 1; };
+  globalThis.cancelAnimationFrame = () => {};
+  const handlers = new Map<string, EventListener>();
+  const canvas = createMockCanvas();
+  const drawing = canvas.getContext('2d')!;
+  const midfieldNumbers = new Map<number, string>();
+  context.mock.method(drawing, 'fillText', (text: string, x: number, y: number) => {
+    if (text === '50' && y === 609) midfieldNumbers.set(x, drawing.font);
+  });
+  let offsetX = 0;
+  let offsetY = 0;
+  let scale = 1;
+  let highlight = { x: 0, y: 0 };
+  context.mock.method(drawing, 'translate', (x: number, y: number) => { offsetX = x; offsetY = y; });
+  context.mock.method(drawing, 'scale', (x: number) => { scale = x; });
+  context.mock.method(drawing, 'arc', (x: number, y: number) => {
+    highlight = { x: offsetX + x * scale, y: offsetY + y * scale };
+  });
+  canvas.getContext = (() => new Proxy(drawing, {
+    get: (target, key) => Reflect.get(target, key) ?? (() => {})
+  })) as unknown as typeof canvas.getContext;
+  canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 340, height: 450 } as DOMRect);
+  canvas.addEventListener = ((name: string, handler: EventListener) => handlers.set(name, handler)) as typeof canvas.addEventListener;
+  let engine: GameEngineHandle | null = null;
+  let step = -1;
+  const cleanup = mountFootballGame(canvas, {
+    setP2OffPlayState: () => {}, setP2DefPlayState: () => {},
+    setDownDistanceText: () => {}, setActiveOffenseState: () => {},
+    setUserScore: () => {}, setCpuScore: () => {}, setP1DefPlayState: () => {},
+    setMomentumState: () => {}, setGameClockState: () => {}, showAnnouncement: () => {},
+    onEngineReady: value => { engine = value; }, onTutorialStep: value => { step = value; }
+  }, { tutorial: true });
+  const send = (name: string, x: number, y: number) => {
+    const handler = handlers.get(name);
+    assert.ok(handler);
+    handler({ clientX: x, clientY: y } as PointerEvent);
+  };
+  const tap = (x: number, y: number) => { send('pointerdown', x, y); send('pointerup', x, y); };
+  const settle = () => {
+    for (let count = 0; count < 20; count++) {
+      timestamp += 16;
+      frame(timestamp);
+    }
+    timestamp += 500;
+  };
+  try {
+    assert.ok(engine);
+    const game = engine as GameEngineHandle;
+    assert.equal(step, 0);
+    tap(170, 273);
+    assert.equal(step, 0, 'Snapping cannot skip the alignment lesson');
+    send('pointerdown', 30, 380);
+    send('pointerup', 110, 380);
+    assert.equal(step, 1);
+    settle();
+    assert.equal(midfieldNumbers.get(30), 'bold 28px Courier New, monospace');
+    assert.equal(midfieldNumbers.get(310), 'bold 28px Courier New, monospace');
+    tap(300, 380);
+    timestamp += 100;
+    tap(300, 380);
+    assert.equal(step, 2);
+    settle();
+    send('pointerdown', 50, 225);
+    send('pointermove', 120, 225);
+    send('pointerup', 120, 225);
+    assert.equal(step, 3);
+    tap(250, 225);
+    assert.equal(step, 4);
+    tap(170, 273);
+    assert.equal(step, 5);
+    assert.equal(game.phase, 'QB_DROP');
+    settle();
+    assert.equal(step, 5, 'The tutorial must wait while the user aims');
+    send('pointerdown', highlight.x, highlight.y);
+    send('pointerup', highlight.x, highlight.y + 70);
+    assert.equal(step, 6);
+    assert.equal(game.phase, 'THROWN');
+    for (let count = 0; count < 1500 && step === 6; count++) {
+      timestamp += 16;
+      frame(timestamp);
+    }
+    assert.equal(step, 7, 'The real offensive play must finish before defense');
+    send('pointerdown', 5, 5);
+    send('pointerup', 85, 5);
+    assert.equal(step, 8);
+    settle();
+    tap(highlight.x, highlight.y);
+    assert.equal(step, 9);
+    settle();
+    tap(highlight.x, highlight.y);
+    assert.equal(step, 10);
+    for (let count = 0; count < 2000 && step === 10; count++) {
+      timestamp += 16;
+      frame(timestamp);
+    }
+    assert.equal(step, 11, 'The real defensive play must finish');
+  } finally {
+    cleanup?.();
+    globalThis.requestAnimationFrame = originalRequest;
+    globalThis.cancelAnimationFrame = originalCancel;
+  }
+});
+
+test('tutorial coaching overlays the field without changing its aspect ratio', async () => {
+  const { createElement } = await import('react');
+  const { renderToStaticMarkup } = await import('react-dom/server');
+  const { RealPlayTutorial } = await import('./RealPlayTutorial');
+  const markup = renderToStaticMarkup(createElement(RealPlayTutorial, { onFinish: () => {} }));
+
+  assert.ok(markup.includes('aspect-ratio:340 / 450'));
+  assert.ok(markup.includes('h-auto!'));
+  assert.ok(markup.includes('pointer-events-none absolute inset-x-0 top-0'));
+  assert.ok(markup.includes('aria-label="Live tutorial football field"'));
+});
+
+test('sideline contact uses player radius and the painted field edges', () => {
+  assert.equal(isPlayerOutOfBounds({ x: 170, y: 600, radius: 10 }, 340), false);
+  assert.equal(isPlayerOutOfBounds({ x: 31, y: 600, radius: 10 }, 340), false);
+  assert.equal(isPlayerOutOfBounds({ x: 30, y: 600, radius: 10 }, 340), true);
+  assert.equal(isPlayerOutOfBounds({ x: 310, y: 600, radius: 10 }, 340), true);
+  assert.equal(isPlayerOutOfBounds({ x: 309, y: 600, radius: 10 }, 340), false);
+  assert.equal(isPlayerOutOfBounds({ x: 32, y: 600, radius: 12 }, 340), true);
+});
+
+test('carrier out-of-bounds ends live plays and stops the clock at the exit spot', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { stripTypeScriptTypes } = await import('node:module');
+  const source = readFileSync(new URL('./engine.ts', import.meta.url), 'utf8');
+  const start = source.indexOf('  function checkCarrierOutOfBounds()');
+  const end = source.indexOf('  function update()', start);
+  assert.ok(start >= 0 && end > start);
+  const check = stripTypeScriptTypes(source.slice(start, end));
+  const createCheck = new Function('isPlayerOutOfBounds', 'startingPhase', 'carrierX', `
+    let phase = startingPhase, gameClockRunning = true, isAiming = true;
+    const fieldWidth = 340;
+    const qb = { x: carrierX, y: 640, radius: 12 };
+    const activeEntity = { x: carrierX, y: 640, radius: 10 };
+    let result = null;
+    const handlePlayEnd = (y, type) => { result = { y, type }; };
+    ${check}
+    const ended = checkCarrierOutOfBounds();
+    return { ended, phase, gameClockRunning, isAiming, result };
+  `);
+  for (const phase of ['RUNNING', 'QB_DROP', 'HANDOFF']) {
+    for (const x of [20, 320]) {
+      const state = createCheck(isPlayerOutOfBounds, phase, x);
+      assert.equal(state.ended, true);
+      assert.equal(state.phase, 'DEAD');
+      assert.equal(state.gameClockRunning, false);
+      assert.equal(state.isAiming, false);
+      assert.deepEqual(state.result, { y: 640, type: 'OUT_OF_BOUNDS' });
+    }
+  }
+  assert.equal(createCheck(isPlayerOutOfBounds, 'RUNNING', 170).ended, false);
+  assert.equal(createCheck(isPlayerOutOfBounds, 'THROWN', 20).ended, false);
 });
 
 test('touchback yard line calculation places ball at 25-yard line', () => {

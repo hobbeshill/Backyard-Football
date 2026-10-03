@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import { Volume2, VolumeX, RefreshCw, HelpCircle, X, Users, Shield, ArrowRight, Search, Pause, Play, Home } from 'lucide-react';
+import { Volume2, VolumeX, RefreshCw, HelpCircle, X, Users, Shield, ArrowRight, Search, Pause, Play, Home, Hand } from 'lucide-react';
 import { offensivePlaybook, defensivePlaybook } from './game/playbook';
 import { sounds } from './game/sound';
 import { hasSavedGameSession, mountFootballGame, type GameEngineHandle } from './game/engine';
 import { HelmetSpritePreview } from './game/HelmetSpritePreview';
+import { RealPlayTutorial } from './game/RealPlayTutorial';
 import { TEAM_KEYS, TEAMS, getAllTeams, getTeam, type TeamProfile } from './game/teams';
-import { createSeason, getSeasonRecord, loadGameMode, loadSeasonProgress, recordSeasonGame, saveGameMode, saveSeasonProgress, type GameMode, type SeasonGameResult, type SeasonProgress } from './game/season';
+import { createSeason, getSeasonRecord, loadGameMode, loadSeasonProgress, recordSeasonGame, saveGameMode, saveSeasonProgress, type GameMode, type SeasonProgress } from './game/season';
 
 function getTeamTextStyle(color: string) {
   const hex = color.replace('#', '');
@@ -19,6 +20,8 @@ function getTeamTextStyle(color: string) {
     backgroundColor: luminance < 0.18 ? '#f2f5f2' : undefined
   };
 }
+
+const CONTROLS_TUTORIAL_KEY = 'backyard-football-controls-tutorial-complete-v1';
 
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -43,7 +46,7 @@ export default function App() {
   const [showPauseMenu, setShowPauseMenu] = useState(hasSavedGameSession);
   const [gameMode, setGameMode] = useState<GameMode>(() => loadGameMode());
   const [seasonProgress, setSeasonProgress] = useState<SeasonProgress | null>(() => loadSeasonProgress());
-  const [seasonGameResult, setSeasonGameResult] = useState<SeasonGameResult | null>(null);
+  const [finishedGame, setFinishedGame] = useState<{ p1Score: number; p2Score: number; restored: boolean } | null>(null);
   const gameModeRef = useRef(gameMode);
   const seasonProgressRef = useRef(seasonProgress);
   const [isKickoffActive, setIsKickoffActive] = useState(true);
@@ -75,6 +78,8 @@ export default function App() {
   });
   const [screenVignette, setScreenVignette] = useState<'TURNOVER' | 'TOUCHDOWN' | null>(null);
   const [showHelp, setShowHelp] = useState(false);
+  const [showTutorial, setShowTutorial] = useState(false);
+  const tutorialResumeRef = useRef(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
 
   // Synchronize sound toggle
@@ -337,22 +342,7 @@ export default function App() {
       showAnnouncement,
       onEngineReady: engine => { engineRef.current = engine; },
       onGameOver: (p1FinalScore, p2FinalScore, restored) => {
-        if (gameModeRef.current !== 'SEASON') return;
-        const currentSeason = seasonProgressRef.current;
-        if (!currentSeason) return;
-        if (restored) {
-          const savedResult = currentSeason.results[currentSeason.results.length - 1];
-          if (savedResult && savedResult.p1Score === p1FinalScore && savedResult.p2Score === p2FinalScore) {
-            setSeasonGameResult(savedResult);
-          }
-          return;
-        }
-        const updatedSeason = recordSeasonGame(currentSeason, p1FinalScore, p2FinalScore);
-        if (updatedSeason === currentSeason) return;
-        seasonProgressRef.current = updatedSeason;
-        setSeasonProgress(updatedSeason);
-        saveSeasonProgress(updatedSeason);
-        setSeasonGameResult(updatedSeason.results[updatedSeason.results.length - 1] || null);
+        setFinishedGame({ p1Score: p1FinalScore, p2Score: p2FinalScore, restored: Boolean(restored) });
       },
       setIsKickoffState: (isKickoff, kicking, receiving) => {
         setIsKickoffActive(isKickoff);
@@ -367,6 +357,12 @@ export default function App() {
   useEffect(() => {
     if (showPauseMenu) engineRef.current?.setPaused(true);
   }, [showPauseMenu]);
+
+  useEffect(() => {
+    if (!showTutorial) return;
+    tutorialResumeRef.current = hasKickedOff && !showPauseMenu;
+    engineRef.current?.setPaused(true);
+  }, [showTutorial, hasKickedOff, showPauseMenu]);
 
   useEffect(() => {
     const pauseWhenHidden = () => {
@@ -455,7 +451,6 @@ export default function App() {
     }
     setUserScore(0);
     setCpuScore(0);
-    setSeasonGameResult(null);
     engineRef.current?.resetGame();
     setHasKickedOff(true);
     setShowPauseMenu(false);
@@ -470,6 +465,52 @@ export default function App() {
     setHasKickedOff(false);
     setShowPauseMenu(false);
     setShowTeamModal(true);
+  };
+
+  useEffect(() => {
+    if (!finishedGame) return;
+    setFinishedGame(null);
+    if (gameModeRef.current === 'ONE_GAME') {
+      handleReturnToMainMenu();
+      return;
+    }
+
+    const currentSeason = seasonProgressRef.current;
+    if (!currentSeason) {
+      handleReturnToMainMenu();
+      return;
+    }
+    const savedResult = currentSeason.results[currentSeason.results.length - 1];
+    const resultAlreadySaved = finishedGame.restored && savedResult
+      && savedResult.p1Score === finishedGame.p1Score && savedResult.p2Score === finishedGame.p2Score;
+    const updatedSeason = resultAlreadySaved
+      ? currentSeason
+      : recordSeasonGame(currentSeason, finishedGame.p1Score, finishedGame.p2Score);
+    seasonProgressRef.current = updatedSeason;
+    setSeasonProgress(updatedSeason);
+    saveSeasonProgress(updatedSeason);
+    if (updatedSeason.results.length < updatedSeason.opponentIds.length) {
+      handleStartGame();
+    } else {
+      handleReturnToMainMenu();
+    }
+  }, [finishedGame]);
+
+  const finishTutorial = () => {
+    try {
+      window.localStorage.setItem(CONTROLS_TUTORIAL_KEY, 'true');
+    } catch {
+      // Keep the tutorial dismissible when browser storage is unavailable.
+    }
+    setShowTutorial(false);
+    if (tutorialResumeRef.current && !showPauseMenu) engineRef.current?.setPaused(false);
+  };
+
+  const replayTutorial = () => {
+    tutorialResumeRef.current = hasKickedOff && !showPauseMenu;
+    setShowHelp(false);
+    engineRef.current?.setPaused(true);
+    setShowTutorial(true);
   };
 
   const handleGameModeChange = (mode: GameMode) => {
@@ -501,9 +542,6 @@ export default function App() {
     : createSeason(p1TeamState.id, TEAM_KEYS);
   const seasonRecord = getSeasonRecord(seasonForDisplay);
   const seasonComplete = seasonForDisplay.results.length >= seasonForDisplay.opponentIds.length;
-  const nextSeasonOpponentId = seasonComplete
-    ? null
-    : seasonForDisplay.opponentIds[seasonForDisplay.results.length];
 
   return (
     <div className="relative w-screen h-screen overflow-hidden flex flex-col items-center justify-center bg-[#030704] text-white font-mono select-none">
@@ -962,12 +1000,20 @@ export default function App() {
               </div>
             </div>
 
-            <button
-              onClick={() => setShowHelp(false)}
-              className="mt-4 w-full bg-[#ffcc00] text-black font-bold py-1.5 rounded text-xs hover:bg-yellow-400 transition"
-            >
-              GOT IT, LET'S PLAY!
-            </button>
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <button
+                onClick={replayTutorial}
+                className="rounded border border-[#52715b] px-3 py-2 text-xs font-bold text-[#b9dfc2] transition hover:bg-[#173121]"
+              >
+                Replay controls tutorial
+              </button>
+              <button
+                onClick={() => setShowHelp(false)}
+                className="rounded bg-[#ffcc00] px-3 py-2 text-xs font-bold text-black transition hover:bg-yellow-400"
+              >
+                GOT IT, LET'S PLAY!
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -1010,7 +1056,7 @@ export default function App() {
             </div>
 
             {!hasKickedOff && (
-              <div className="grid shrink-0 grid-cols-2 gap-1 border-b border-[#dce3dd] bg-[#f7f9f7] p-2" role="group" aria-label="Game mode">
+              <div className="grid shrink-0 grid-cols-3 gap-1 border-b border-[#dce3dd] bg-[#f7f9f7] p-2" role="group" aria-label="Game mode">
                 <button
                   type="button"
                   aria-pressed={gameMode === 'ONE_GAME'}
@@ -1026,6 +1072,13 @@ export default function App() {
                   className={`rounded-md px-3 py-2 text-sm font-bold transition ${gameMode === 'SEASON' ? 'bg-[#bd5635] text-white' : 'text-[#59685f] hover:bg-[#f4e9e4]'}`}
                 >
                   Season
+                </button>
+                <button
+                  type="button"
+                  onClick={replayTutorial}
+                  className="flex items-center justify-center gap-1 rounded-md px-3 py-2 text-sm font-bold text-[#246344] transition hover:bg-[#e9efea]"
+                >
+                  <Hand size={16} aria-hidden="true" /> Tutorial
                 </button>
               </div>
             )}
@@ -1252,35 +1305,8 @@ export default function App() {
         </div>
       )}
 
-      {seasonGameResult && gameMode === 'SEASON' && (
-        <div className="absolute inset-0 z-[115] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
-          <section role="dialog" aria-modal="true" aria-labelledby="season-result-title" className="w-full max-w-md rounded-lg border-2 border-[#ffcc00] bg-[#07110a] p-5 text-center shadow-2xl">
-            <p className="text-xs font-bold uppercase tracking-wide text-[#b8c7bc]">Season · Week {seasonGameResult.week} Final</p>
-            <h2 id="season-result-title" className="mt-1 text-xl font-black uppercase text-[#ffcc00]">{p1TeamState.name} {seasonGameResult.p1Score} · {seasonGameResult.p2Score} {getTeam(seasonGameResult.opponentId).name}</h2>
-            <p className="mt-2 text-sm font-semibold text-[#d5ded7]">Record: {seasonRecord.wins}-{seasonRecord.losses}-{seasonRecord.ties}</p>
-            {nextSeasonOpponentId ? (
-              <button
-                onClick={() => {
-                  setSeasonGameResult(null);
-                  handleStartGame();
-                }}
-                className="mt-5 flex w-full items-center justify-center gap-2 rounded-md bg-[#246344] px-4 py-3 text-sm font-bold text-white transition hover:bg-[#2c7751]"
-              >
-                Next week · {getTeam(nextSeasonOpponentId).name} <ArrowRight size={17} />
-              </button>
-            ) : (
-              <button
-                onClick={() => {
-                  setSeasonGameResult(null);
-                  handleReturnToMainMenu();
-                }}
-                className="mt-5 flex w-full items-center justify-center gap-2 rounded-md bg-[#bd5635] px-4 py-3 text-sm font-bold text-white transition hover:bg-[#a9492d]"
-              >
-                View season <ArrowRight size={17} />
-              </button>
-            )}
-          </section>
-        </div>
+      {showTutorial && (
+        <RealPlayTutorial onFinish={finishTutorial} />
       )}
 
     </div>

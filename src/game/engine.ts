@@ -4,7 +4,7 @@ import { alignDefenderAcrossFromRunningBack, alignDefenders, chooseCpuDefensiveA
 import { evaluateCpuOffensiveAudibles, evaluateCpuBallCarrierMoves, shouldCpuReleasePass, shouldCpuScramble, scoreRunBlockTarget } from './ai';
 import { createFumbleBall } from './fumbles';
 import { canEngagePassBlock, distToSegment, GAME_SPEED_SCALE, getBallCarrierRunSpeed, moveToward, resolveCollisions, shouldApplyRunBlockStun, updateRouteMovement } from './movement';
-import { resolvePlayResult, calculateBrokenTackleChance, calculateYardsToGo, getDriveStartY, getSnapBallPosition, getPassArcHeight, getPassArcMaxHeight, getPassFlightFrames, findTappedPassReceiver, getPassLeadTarget, getRoutePassLeadTarget, canDefenderDeflectPass, canTackleQuarterback, resolveCatchContestOutcome, evaluateQbThrowAccuracy, calculateKickoffFlight, calculatePuntFlight, getTouchbackYardLineY, getKickoffLineY } from './rules';
+import { resolvePlayResult, calculateBrokenTackleChance, calculateYardsToGo, getDriveStartY, getSnapBallPosition, getPassArcHeight, getPassArcMaxHeight, getPassFlightFrames, findTappedPassReceiver, shouldReleaseUserPass, getPassLeadTarget, getRoutePassLeadTarget, canDefenderDeflectPass, canTackleQuarterback, resolveCatchContestOutcome, evaluateQbThrowAccuracy, calculateKickoffFlight, calculatePuntFlight, getTouchbackYardLineY, getKickoffLineY, isPlayerOutOfBounds } from './rules';
 import { sounds } from './sound';
 import { evaluateDirtSwipeGesture, drawDirtSwipeGesture } from './chalkMenu';
 import { getHelmetDesign, type HelmetDesign } from './helmetDesigns';
@@ -69,6 +69,7 @@ export interface GameEngineCallbacks {
   ) => void;
   onEngineReady: (engine: GameEngineHandle | null) => void;
   onGameOver?: (p1Score: number, p2Score: number, restored?: boolean) => void;
+  onTutorialStep?: (step: number) => void;
   setIsKickoffState?: (isKickoff: boolean, kickingTeam: 'P1' | 'P2', receivingTeam: 'P1' | 'P2') => void;
   setIs4thDownState?: (is4thDown: boolean) => void;
   setKickMeterPowerState?: (power: number) => void;
@@ -85,7 +86,7 @@ export function hasSavedGameSession(): boolean {
   }
 }
 
-export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngineCallbacks): (() => void) | undefined {
+export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngineCallbacks, options: { tutorial?: boolean } = {}): (() => void) | undefined {
   const {
     setP2OffPlayState,
     setP2DefPlayState,
@@ -150,6 +151,14 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   let isSessionActive = false;
   let lastSessionSaveTime = 0;
   let drillResetTimer: ReturnType<typeof setTimeout> | null = null;
+  let tutorialStep = 0;
+  let tutorialAimFrames = 0;
+
+  function completeTutorialAction(expectedStep: number): void {
+    if (!options.tutorial || tutorialStep !== expectedStep) return;
+    tutorialStep++;
+    callbacks.onTutorialStep?.(tutorialStep);
+  }
 
   let qb: Entity = {
     x: 170,
@@ -251,7 +260,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   }
 
   function saveGameSession(): void {
-    if (!isSessionActive || typeof window === 'undefined') return;
+    if (options.tutorial || !isSessionActive || typeof window === 'undefined') return;
     try {
       const entries = getSessionEntities();
       const entityIds = new Map(entries.map(([id, entity]) => [entity, id]));
@@ -421,6 +430,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       if (activeDefense === 'P2') {
         applyDefensiveAlignment(true, false);
       }
+      if (target === centerReceiver && value === 'BLOCK') completeTutorialAction(3);
+      else if (value !== 'BLOCK') completeTutorialAction(2);
     } else if (role === 'RB' && rb) {
       rb.routeType = value;
       rb.isBlocker = (value === 'BLOCK');
@@ -441,6 +452,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       if (activeOffense === 'P2') {
         triggerCpuOffensiveAudible(false);
       }
+      completeTutorialAction(8);
     }
   }
 
@@ -884,7 +896,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   // CPU Play Selection: CPU autonomously calls its own offense or defense
   function runCpuAiPlaySelection() {
     if (activeOffense === 'P2') {
-      p2OffPlay = getCpuOffensivePlayCall();
+      p2OffPlay = options.tutorial ? 'SHORT_PASS' : getCpuOffensivePlayCall();
       setP2OffPlayState(p2OffPlay);
     }
     if (activeDefense === 'P2') {
@@ -1228,6 +1240,28 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
   function handlePlayEnd(endingY: number, resultType: string, customMessage?: string, customColor?: string) {
     if (playEnding) return;
+    if (options.tutorial) {
+      gameClockRunning = false;
+      phase = 'DEAD';
+      isAiming = false;
+      playEnding = true;
+      if (tutorialStep === 6) {
+        activeOffense = 'P2';
+        activeDefense = 'P1';
+        attackDirection = 1;
+        lineOfScrimmageY = 500;
+        firstDownMarkerY = 600;
+        currentDown = 1;
+        yardsToGo = 10;
+        playEnding = false;
+        resetDrill();
+        setActiveOffenseState('P2');
+        completeTutorialAction(6);
+      } else {
+        completeTutorialAction(10);
+      }
+      return;
+    }
     playEnding = true;
     const endedInterceptionReturn = isInterceptionReturn;
     const endedOffense = activeOffense;
@@ -1335,13 +1369,14 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       checkFirstDownOrTurnover();
     } else {
       gameClockRunning = false;
-      sounds.playTackle();
+      if (resultType === 'OUT_OF_BOUNDS') sounds.playWhistle();
+      else sounds.playTackle();
       lineOfScrimmageY = endingY;
       yardsToGo = calculateYardsToGo(lineOfScrimmageY, firstDownMarkerY, attackDirection);
       currentDown++;
       applyMomentum(Math.max(0, matchup.momentumDelta) + (yardsGained >= 12 ? 1 : 0) - (yardsGained <= 2 ? 1 : 0));
       if (!endedInterceptionReturn && !endedSpecialTeamsReturn) {
-        showAnnouncement(`Gain of ${yardsGained} yards. (${currentDown} Down, ${Math.max(0, yardsToGo)} yards to go)`, "#ffcc00");
+        showAnnouncement(customMessage || `Gain of ${yardsGained} yards. (${currentDown} Down, ${Math.max(0, yardsToGo)} yards to go)`, "#ffcc00");
       }
       checkFirstDownOrTurnover();
     }
@@ -1806,6 +1841,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   }
 
   function triggerCpuOffensiveAudible(silent = false) {
+    if (options.tutorial) return;
     if (activeOffense !== 'P2') return;
     const cpuPlay = offensivePlaybook[p2OffPlay];
     if (!cpuPlay) return;
@@ -1842,7 +1878,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     p1DefPlay,
     p2OffPlay,
     p2DefPlay,
-    phase,
+    get phase() { return phase; },
     activeOffense,
     activeDefense,
     p1Team,
@@ -1987,6 +2023,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       p1OffPlay = playKey;
       resetDrill(true);
       sounds.playJuke();
+      completeTutorialAction(0);
     } else if (activeDefense === 'P1') {
       const defKeys = ['COVER3', 'COVER2MAN', 'TAMPA2', 'BLITZ', 'QUARTERS'];
       const curIdx = defKeys.indexOf(p1DefPlay);
@@ -1994,10 +2031,21 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       const nextDef = defKeys[nextIdx];
       engineHandle.selectDefense(nextDef);
       sounds.playJuke();
+      completeTutorialAction(7);
     }
   }
 
-  if (!restoreGameSession()) {
+  if (options.tutorial) {
+    isKickoffPhase = false;
+    activeOffense = 'P1';
+    activeDefense = 'P2';
+    attackDirection = -1;
+    lineOfScrimmageY = 700;
+    firstDownMarkerY = 600;
+    resetDrill();
+    setActiveOffenseState('P1');
+    callbacks.onTutorialStep?.(0);
+  } else if (!restoreGameSession()) {
     setupKickoff('P2', 'P1', 'OPENING KICKOFF - Q1 🏈');
   }
 
@@ -2007,6 +2055,9 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     sounds.playSnap();
     gameClockRunning = true;
     qb.hasBall = true;
+    tutorialAimFrames = 0;
+    completeTutorialAction(4);
+    completeTutorialAction(9);
   }
 
   function startCpuPlay(): void {
@@ -2048,11 +2099,22 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
   // Pointer events
   const handlePointerDown = (e: PointerEvent) => {
+    if (isPaused) return;
     rbDoubleTapConsumed = false;
     const { x: px, y: py } = screenToWorld(e.clientX, e.clientY);
     const screenPos = getScreenCoords(e.clientX, e.clientY);
 
     const currentTime = Date.now();
+
+    if (options.tutorial) {
+      const near = (entity: Entity | null) => entity && Math.hypot(entity.x - px, entity.y - py) < 32;
+      if (tutorialStep === 6 || tutorialStep === 10 || tutorialStep === 11) return;
+      if (tutorialStep === 2 && !receivers.some(near)) return;
+      if (tutorialStep === 3 && !near(centerReceiver)) return;
+      if ((tutorialStep === 4 || tutorialStep === 9) && !near(qb)) return;
+      if (tutorialStep === 8 && !defenders.some(near)) return;
+      if ((tutorialStep === 0 || tutorialStep === 1 || tutorialStep === 7) && [qb, rb, centerReceiver, ...receivers, ...defenders].some(near)) return;
+    }
 
     // Guard against tap-through immediately after closing playbook or selecting defense
     if (currentTime - lastDefenseSelectTime < 450) {
@@ -2196,6 +2258,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           rb.side = 'right';
           rb.startX = 220; rb.x = 220;
         }
+        completeTutorialAction(1);
         lastTapTime = 0;
         return;
       }
@@ -2263,6 +2326,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   };
 
   const handlePointerMove = (e: PointerEvent) => {
+    if (isPaused) return;
     const { x: curX, y: curY } = screenToWorld(e.clientX, e.clientY);
     const screenPos = getScreenCoords(e.clientX, e.clientY);
     aimCurrentX = curX;
@@ -2271,7 +2335,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     aimScreenCurrentY = screenPos.y;
 
     if (phase === 'RUNNING' && activeEntity && activeOffense === 'P1') {
-      const targetX = Math.max(30, Math.min(fieldWidth - 30, curX));
+      const targetX = Math.max(20, Math.min(fieldWidth - 20, curX));
       const steerDiff = targetX - activeEntity.x;
       const isReturn = Boolean(isSpecialTeamsReturn || activeEntity.isReturner);
       const maxSteerSpeed = isReturn ? 0.5 : 4.5;
@@ -2293,6 +2357,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   };
 
   const handlePointerUp = (e: PointerEvent) => {
+    if (isPaused) return;
     if (rbDoubleTapConsumed) {
       rbDoubleTapConsumed = false;
       return;
@@ -2468,7 +2533,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       );
 
       // Releasing without a pull keeps the QB in the pocket after the snap.
-      if (pullDist < 10 && !isTapThrow) {
+      if (!shouldReleaseUserPass(Math.hypot(deltaScreenX, deltaScreenY), isTapThrow)) {
         return;
       }
 
@@ -2567,6 +2632,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       qb.hasBall = false;
       phase = 'THROWN';
       sounds.playThrow();
+      completeTutorialAction(5);
     }
   };
 
@@ -2591,7 +2657,19 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     );
   }
 
+  function checkCarrierOutOfBounds(): boolean {
+    if (phase !== 'RUNNING' && phase !== 'QB_DROP' && phase !== 'HANDOFF') return false;
+    const carrier = phase === 'HANDOFF' ? qb : activeEntity;
+    if (!carrier || !isPlayerOutOfBounds(carrier, fieldWidth)) return false;
+    gameClockRunning = false;
+    phase = 'DEAD';
+    isAiming = false;
+    handlePlayEnd(carrier.y, 'OUT_OF_BOUNDS', 'OUT OF BOUNDS - CLOCK STOPPED');
+    return true;
+  }
+
   function update() {
+    if (checkCarrierOutOfBounds()) return;
     if (snapBall) {
       snapBall.frame++;
       if (snapBall.frame >= 8 || (phase !== 'QB_DROP' && phase !== 'HANDOFF')) snapBall = null;
@@ -2661,7 +2739,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       fumbleBall.z = Math.max(0, Math.sin(fumbleBall.timer * 0.28) * Math.max(0, 10 - fumbleBall.timer * 0.15));
 
       // Out of bounds
-      if (fumbleBall.x < 25 || fumbleBall.x > fieldWidth - 25) {
+      if (fumbleBall.x <= 20 || fumbleBall.x >= fieldWidth - 20) {
         const boundY = fumbleBall.y;
         fumbleBall = null;
         phase = 'DEAD';
@@ -3255,6 +3333,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           activeEntity.vx *= 0.88;
           activeEntity.x += activeEntity.vx * 0.8 * GAME_SPEED_SCALE;
         }
+        if (checkCarrierOutOfBounds()) return;
         activeEntity.x = Math.max(30, Math.min(fieldWidth - 30, activeEntity.x));
 
         if ((activeEntity.powerBoostTimer || 0) > 0) activeEntity.powerBoostTimer!--;
@@ -3338,6 +3417,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
             rb.x += (angleTargetX - rb.x) * 0.04 * GAME_SPEED_SCALE;
           }
         }
+        if (checkCarrierOutOfBounds()) return;
         activeEntity.x = Math.max(25, Math.min(fieldWidth - 25, activeEntity.x));
       }
     }
@@ -4147,6 +4227,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       defenders,
       phase === 'RUNNING' ? activeEntity : (phase === 'QB_DROP' ? qb : null)
     );
+    if (checkCarrierOutOfBounds()) return;
 
     // Defender reaches QB in the pocket during QB_DROP -> SACK!
     if (phase === 'QB_DROP' && !ball) {
@@ -4613,10 +4694,10 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         });
       }
 
-      if (ball && (ball.currentFrame >= ball.flightFrames || ball.y < 30 || ball.x < 15 || ball.x > fieldWidth - 15)) {
+      if (ball && (ball.currentFrame >= ball.flightFrames || ball.y < 30 || ball.x <= 20 || ball.x >= fieldWidth - 20)) {
         playResolved = true;
         phase = 'DEAD';
-        const isOob = (ball.x < 15 || ball.x > fieldWidth - 15);
+        const isOob = (ball.x <= 20 || ball.x >= fieldWidth - 20);
         const incompleteMsg = isOob ? 'PASS OUT OF BOUNDS! ❌ Over the sideline!' : 'PASS INCOMPLETE! 🏈 Hit the turf!';
         handlePlayEnd(qb.y, 'INCOMPLETE', incompleteMsg, '#aaaaaa');
         ball = null;
@@ -4892,7 +4973,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
     // Sideline boundaries
     ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 3;
+    ctx.lineWidth = 6;
     ctx.beginPath();
     ctx.moveTo(20, cameraWorldTop); ctx.lineTo(20, cameraWorldBottom);
     ctx.moveTo(fieldWidth - 20, cameraWorldTop); ctx.lineTo(fieldWidth - 20, cameraWorldBottom);
@@ -4900,8 +4981,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
     // Field turf pattern
     for (let y = endZoneHeight; y <= fieldHeight - endZoneHeight; y += 100) {
-      ctx.strokeStyle = 'rgba(255,255,255,0.4)';
-      ctx.lineWidth = 2;
+      ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+      ctx.lineWidth = 4;
       ctx.beginPath();
       ctx.moveTo(20, y);
       ctx.lineTo(fieldWidth - 20, y);
@@ -4911,31 +4992,22 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       let yardNum = Math.round(distFromOwnGoal / 10);
       if (yardNum > 50) yardNum = 100 - yardNum;
 
-      if (yardNum > 0 && yardNum < 50 && yardNum % 10 === 0) {
-        ctx.fillStyle = 'rgba(255,255,255,0.85)';
-        ctx.font = 'bold 16px Courier New, monospace';
+      if (yardNum > 0 && yardNum <= 50 && yardNum % 10 === 0) {
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 28px Courier New, monospace';
         ctx.textAlign = 'left';
-        ctx.fillText(yardNum.toString(), 30, y + 6);
+        ctx.fillText(yardNum.toString(), 30, y + 9);
 
-        // End-zone back boundaries
-        ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 6;
-        ctx.beginPath();
-        ctx.moveTo(20, 0);
-        ctx.lineTo(fieldWidth - 20, 0);
-        ctx.moveTo(20, fieldHeight);
-        ctx.lineTo(fieldWidth - 20, fieldHeight);
-        ctx.stroke();
         ctx.textAlign = 'right';
-        ctx.fillText(yardNum.toString(), fieldWidth - 30, y + 6);
+        ctx.fillText(yardNum.toString(), fieldWidth - 30, y + 9);
       }
     }
 
     // Hash marks
     for (let y = endZoneHeight + 10; y < fieldHeight - endZoneHeight; y += 10) {
       if (y % 100 !== 0) {
-        ctx.strokeStyle = 'rgba(255,255,255,0.2)';
-        ctx.lineWidth = 1;
+        ctx.strokeStyle = 'rgba(255,255,255,0.65)';
+        ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.moveTo(135, y); ctx.lineTo(145, y);
         ctx.moveTo(195, y); ctx.lineTo(205, y);
@@ -4956,6 +5028,15 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     ctx.fillRect(20, fieldHeight - endZoneHeight, fieldWidth - 40, endZoneHeight);
     ctx.fillStyle = '#fff';
     ctx.fillText('▲ END ZONE ▲', fieldWidth / 2, fieldHeight - 45);
+
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 6;
+    for (const boundaryY of [0, endZoneHeight, fieldHeight - endZoneHeight, fieldHeight]) {
+      ctx.beginPath();
+      ctx.moveTo(20, boundaryY);
+      ctx.lineTo(fieldWidth - 20, boundaryY);
+      ctx.stroke();
+    }
 
     // Line of Scrimmage (Cyan)
     ctx.strokeStyle = '#00ffff';
@@ -5657,10 +5738,28 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   let animationFrameId: number;
   function loop(timestamp: number) {
     if (!isPaused) {
-      updateGameClock(timestamp);
-      update();
+      if (!options.tutorial) updateGameClock(timestamp);
+      const tutorialSnapAnimating = options.tutorial && tutorialStep === 5 && tutorialAimFrames++ < 24;
+      if (!options.tutorial || tutorialSnapAnimating || tutorialStep === 6 || tutorialStep === 10 || phase === 'PRE_SNAP') update();
     }
     draw();
+    if (options.tutorial) {
+      const target = tutorialStep === 2 ? receivers[0]
+        : tutorialStep === 3 ? centerReceiver
+        : tutorialStep === 4 || tutorialStep === 5 || tutorialStep === 9 ? qb
+        : tutorialStep === 8 ? defenders[3] : null;
+      if (target && ctx) {
+        ctx.save();
+        ctx.translate(cameraOffsetX, -cameraY * cameraScale);
+        ctx.scale(cameraScale, cameraScale);
+        ctx.strokeStyle = '#ffcc00';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(target.x, target.y, target.radius + 12, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
     if (isSessionActive && timestamp - lastSessionSaveTime >= 1000) {
       saveGameSession();
       lastSessionSaveTime = timestamp;
@@ -5675,6 +5774,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   return () => {
     callbacks.onEngineReady(null);
     safeCancelAnimationFrame(animationFrameId);
+    if (drillResetTimer) clearTimeout(drillResetTimer);
     if (typeof window !== 'undefined') {
       window.removeEventListener('resize', resizeGame);
       window.removeEventListener('pagehide', handlePageHide);

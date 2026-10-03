@@ -1,6 +1,13 @@
 import type { Entity } from './types';
 import { updateRouteMovement } from './movement';
 
+export const FIELD_SIDELINE_INSET = 20;
+
+export function isPlayerOutOfBounds(player: Entity, fieldWidth: number): boolean {
+  return player.x - player.radius <= FIELD_SIDELINE_INSET
+    || player.x + player.radius >= fieldWidth - FIELD_SIDELINE_INSET;
+}
+
 export interface PlayResultInput {
   lineOfScrimmageY: number;
   endingY: number;
@@ -54,6 +61,10 @@ export function findTappedPassReceiver(receivers: Array<Entity | null | undefine
     .map(receiver => ({ receiver, distance: Math.hypot(receiver.x - x, receiver.y - y) }))
     .filter(({ receiver, distance }) => distance < receiver.radius + 20)
     .sort((first, second) => first.distance - second.distance)[0]?.receiver || null;
+}
+
+export function shouldReleaseUserPass(pointerDistance: number, isTapThrow: boolean): boolean {
+  return isTapThrow || pointerDistance >= 24;
 }
 
 export function getPassLeadTarget(receiver: Entity, flightFrames: number, leadFactor = 0.9): { x: number; y: number } {

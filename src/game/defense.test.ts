@@ -978,6 +978,8 @@ test('offensive double-taps only reposition the RB on offset and scaled canvases
   context.mock.method(Date, 'now', () => timestamp);
   const createHandlers = new Function('cyclePreSnapFormation', 'canvasLeft', 'canvasTop', 'scale', `
     let phase = 'PRE_SNAP', activeOffense = 'P1', activeDefense = 'P2';
+    const isPaused = false, options = {}, tutorialStep = 0;
+    const completeTutorialAction = () => {};
     let rbDoubleTapConsumed = false, lastDefenseSelectTime = 0, lastTapTime = 0;
     let tapThrowTarget = null, gestureEntity = null, isDirtGestureActive = false;
     let touchStartX = 0, touchStartY = 0, touchScreenStartX = 0, touchScreenStartY = 0;
@@ -1020,6 +1022,17 @@ test('offensive double-taps only reposition the RB on offset and scaled canvases
     handlers.up(eventAt(100));
     assert.deepEqual(formationChanges, [-1]);
   }
+});
+
+test('snap releases and small pointer movements do not throw a pass', async () => {
+  const { shouldReleaseUserPass } = await import('./rules');
+
+  for (const pointerDistance of [0, 1, 10, 11, 23]) {
+    assert.equal(shouldReleaseUserPass(pointerDistance, false), false);
+  }
+  assert.equal(shouldReleaseUserPass(24, false), true);
+  assert.equal(shouldReleaseUserPass(60, false), true);
+  assert.equal(shouldReleaseUserPass(0, true), true);
 });
 
 test('Swiping field cycles formations correctly in both directions', () => {
