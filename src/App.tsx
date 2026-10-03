@@ -3,6 +3,7 @@ import { Volume2, VolumeX, RefreshCw, HelpCircle, X, Users, Shield, ArrowRight, 
 import { offensivePlaybook, defensivePlaybook } from './game/playbook';
 import { sounds } from './game/sound';
 import { mountFootballGame, type GameEngineHandle } from './game/engine';
+import { HelmetSpritePreview } from './game/HelmetSpritePreview';
 import { TEAMS, getAllTeams, type TeamProfile } from './game/teams';
 
 function getTeamTextStyle(color: string) {
@@ -34,6 +35,7 @@ export default function App() {
   const [p1TeamState, setP1TeamState] = useState<TeamProfile>(TEAMS.ALABAMA);
   const [p2TeamState, setP2TeamState] = useState<TeamProfile>(TEAMS.GEORGIA);
   const [teamSelectionSide, setTeamSelectionSide] = useState<'P1' | 'P2'>('P1');
+  const [pendingTeam, setPendingTeam] = useState<TeamProfile | null>(null);
   const [teamSearch, setTeamSearch] = useState('');
   const [showTeamModal, setShowTeamModal] = useState(true);
   const [hasKickedOff, setHasKickedOff] = useState(false);
@@ -266,18 +268,9 @@ export default function App() {
     }
   };
 
-  const selectedTeamProfile = teamSelectionSide === 'P1' ? p1TeamState : p2TeamState;
   const visibleTeams = getAllTeams().filter(team =>
-    `${team.city} ${team.name} ${team.nickname}`.toLowerCase().includes(teamSearch.trim().toLowerCase())
+    team.name.toLowerCase().includes(teamSearch.trim().toLowerCase())
   );
-  const selectedTeamRatings = [
-    { label: 'Receiver speed', value: Math.round(selectedTeamProfile.ratings.wrSpeed * 100) },
-    { label: 'Pass protection', value: Math.round(selectedTeamProfile.ratings.passProtection * 100) },
-    { label: 'Run power', value: Math.round(selectedTeamProfile.ratings.runPower * 100) },
-    { label: 'DB speed', value: Math.round(selectedTeamProfile.ratings.dbClosingSpeed * 100) },
-    { label: 'Pass rush', value: Math.round(selectedTeamProfile.ratings.passRush * 100) },
-    { label: 'Discipline', value: Math.round((2 - selectedTeamProfile.ratings.mistakeChance) * 100) }
-  ];
 
   return (
     <div className="relative w-screen h-screen overflow-hidden flex flex-col items-center justify-center bg-[#030704] text-white font-mono select-none">
@@ -287,21 +280,21 @@ export default function App() {
         {/* Team Matchup Selector Button */}
         <button
           onClick={() => setShowTeamModal(true)}
-          className="flex items-center gap-1.5 px-2.5 py-0.5 mb-1 bg-black/85 hover:bg-neutral-900 border border-[#ffcc00]/60 rounded text-[0.60rem] font-bold text-neutral-200 transition cursor-pointer active:scale-95 shadow-md"
+          className="flex max-w-full flex-wrap items-center justify-center gap-1.5 px-2.5 py-0.5 mb-1 bg-black/85 hover:bg-neutral-900 border border-[#ffcc00]/60 rounded text-[0.60rem] font-bold text-neutral-200 transition cursor-pointer active:scale-95 shadow-md"
           title="Change Teams, Rosters & Strengths/Weaknesses"
         >
           <Users size={11} className="text-[#ffcc00]" />
-          <span className="rounded-sm px-0.5" style={getTeamTextStyle(p1TeamState.primaryColor)}>{p1TeamState.nickname.toUpperCase()}</span>
+          <span className="rounded-sm px-0.5" style={getTeamTextStyle(p1TeamState.primaryColor)}>{p1TeamState.name}</span>
           <span className="text-neutral-400 font-normal">VS</span>
-          <span className="rounded-sm px-0.5" style={getTeamTextStyle(p2TeamState.primaryColor)}>{p2TeamState.nickname.toUpperCase()}</span>
+          <span className="rounded-sm px-0.5" style={getTeamTextStyle(p2TeamState.primaryColor)}>{p2TeamState.name}</span>
           <span className="text-[#ffcc00] ml-1">▾ TEAMS</span>
         </button>
 
-        <div className="flex items-center justify-between w-full bg-black/90 border-2 border-[#ffcc00] px-3 py-1.5 rounded-lg shadow-xl">
+        <div className="grid grid-cols-3 items-center gap-1 w-full bg-black/90 border-2 border-[#ffcc00] px-3 py-1.5 rounded-lg shadow-xl">
           {/* P2 CPU Score */}
-          <div className="flex items-center gap-1.5">
-            <span className="rounded-sm px-0.5 font-extrabold text-[0.68rem] tracking-wide" style={getTeamTextStyle(p2TeamState.primaryColor)}>
-              {p2TeamState.nickname.toUpperCase()} (CPU):
+          <div className="flex min-w-0 flex-col items-center gap-1.5 text-center">
+            <span className="rounded-sm px-0.5 font-extrabold text-[0.60rem]" style={getTeamTextStyle(p2TeamState.primaryColor)}>
+              {p2TeamState.name} (CPU)
             </span>
             <span className="text-white text-base font-black bg-red-950/80 border border-red-500/50 px-2 py-0.5 rounded leading-none">
               {cpuScore}
@@ -327,12 +320,12 @@ export default function App() {
           </div>
 
           {/* P1 YOU Score & Quick Controls */}
-          <div className="flex items-center gap-1.5">
+          <div className="flex min-w-0 flex-col items-center gap-1.5 text-center">
+            <span className="rounded-sm px-0.5 font-extrabold text-[0.60rem]" style={getTeamTextStyle(p1TeamState.primaryColor)}>
+              {p1TeamState.name} (YOU)
+            </span>
             <span className="text-white text-base font-black bg-emerald-950/80 border border-emerald-500/50 px-2 py-0.5 rounded leading-none">
               {userScore}
-            </span>
-            <span className="rounded-sm px-0.5 font-extrabold text-[0.68rem] tracking-wide" style={getTeamTextStyle(p1TeamState.primaryColor)}>
-              {p1TeamState.nickname.toUpperCase()} (YOU)
             </span>
 
             <div className="flex items-center gap-1 ml-1 border-l border-white/20 pl-1">
@@ -547,14 +540,14 @@ export default function App() {
                 <span className="mb-1 block text-[11px] font-bold uppercase text-[#246344]">You</span>
                 <span className="flex items-center gap-2 truncate text-sm font-bold sm:text-base">
                   <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ backgroundColor: p1TeamState.primaryColor }} />
-                  {p1TeamState.city} {p1TeamState.nickname}
+                  {p1TeamState.name}
                 </span>
               </div>
               <span className="rounded bg-white px-2 py-1 text-[11px] font-bold text-[#6b786f]">VS</span>
               <div className="min-w-0 text-right">
                 <span className="mb-1 block text-[11px] font-bold uppercase text-[#b45435]">CPU</span>
                 <span className="flex items-center justify-end gap-2 truncate text-sm font-bold sm:text-base">
-                  {p2TeamState.city} {p2TeamState.nickname}
+                  {p2TeamState.name}
                   <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ backgroundColor: p2TeamState.primaryColor }} />
                 </span>
               </div>
@@ -569,7 +562,7 @@ export default function App() {
                   className={`min-w-28 rounded-md border px-3 py-2 text-left transition ${teamSelectionSide === 'P1' ? 'border-[#246344] bg-[#e8f0ea] text-[#1e573b]' : 'border-[#dce3dd] bg-white text-[#59685f] hover:bg-[#f5f7f5]'}`}
                 >
                   <span className="block text-xs font-bold">You</span>
-                  <span className="block truncate text-[11px]">{p1TeamState.nickname}</span>
+                  <span className="block text-[11px]">{p1TeamState.name}</span>
                 </button>
                 <button
                   type="button"
@@ -578,14 +571,14 @@ export default function App() {
                   className={`min-w-28 rounded-md border px-3 py-2 text-left transition ${teamSelectionSide === 'P2' ? 'border-[#b45435] bg-[#f7ece7] text-[#93442c]' : 'border-[#dce3dd] bg-white text-[#59685f] hover:bg-[#f5f7f5]'}`}
                 >
                   <span className="block text-xs font-bold">CPU</span>
-                  <span className="block truncate text-[11px]">{p2TeamState.nickname}</span>
+                  <span className="block text-[11px]">{p2TeamState.name}</span>
                 </button>
               </div>
               <span className="text-xs text-[#758178]">Assigning to {teamSelectionSide === 'P1' ? 'You' : 'CPU'}</span>
             </div>
 
-            <div className="min-h-0 flex-1 overflow-y-auto md:grid md:grid-cols-[minmax(0,1fr)_280px] md:overflow-hidden">
-              <div className="p-3 sm:p-5 md:min-h-0 md:overflow-y-auto">
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              <div className="p-3 sm:p-5">
                 <div className="mb-3 flex items-center justify-between gap-3">
                   <h3 className="text-sm font-bold text-[#253a2d]">SEC teams <span className="ml-1 text-xs font-normal text-[#718077]">{getAllTeams().length}</span></h3>
                   <label className="flex w-44 items-center gap-2 rounded-md border border-[#dce3dd] bg-white px-2.5 py-2 text-[#718077] focus-within:border-[#7da78a] sm:w-56">
@@ -600,7 +593,7 @@ export default function App() {
                     />
                   </label>
                 </div>
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
                   {visibleTeams.map((team) => {
                     const isP1 = p1TeamState.id === team.id;
                     const isP2 = p2TeamState.id === team.id;
@@ -611,22 +604,11 @@ export default function App() {
                         key={team.id}
                         type="button"
                         aria-pressed={isActiveSide}
-                        onClick={() => teamSelectionSide === 'P1' ? handleSelectP1Team(team.id) : handleSelectP2Team(team.id)}
-                        style={{ borderLeftColor: team.primaryColor }}
-                        className={`min-h-[100px] rounded-md border border-l-4 px-3 py-2.5 text-left transition-colors ${isActiveSide ? 'border-[#246344] bg-[#e8f0ea]' : 'border-[#dce3dd] bg-white hover:bg-[#f8faf8]'} focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#246344]`}
+                        onClick={() => setPendingTeam(team)}
+                        className={`flex items-center gap-2 rounded-md border px-3 py-2 text-left text-sm font-bold transition-colors ${isActiveSide ? 'border-[#246344] bg-[#e8f0ea] text-[#1e573b]' : 'border-[#dce3dd] bg-white text-[#1b3026] hover:bg-[#f8faf8]'} focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#246344]`}
                       >
-                        <span className="flex items-start justify-between gap-2">
-                          <span className="min-w-0">
-                            <span className="block truncate text-[11px] font-semibold text-[#718077]">{team.city}</span>
-                            <span className="block truncate text-base font-bold text-[#1b3026]">{team.nickname}</span>
-                          </span>
-                          <span className="flex shrink-0 flex-wrap justify-end gap-1">
-                            {isP1 && <span className="rounded bg-[#e4efe7] px-1.5 py-0.5 text-[10px] font-bold text-[#246344]">You</span>}
-                            {isP2 && <span className="rounded bg-[#f7ece7] px-1.5 py-0.5 text-[10px] font-bold text-[#a34d32]">CPU</span>}
-                          </span>
-                        </span>
-                        <span className="mt-1 block truncate text-[11px] text-[#64736a]">{team.archetype.replace('_', ' ')}</span>
-                        <span className="mt-1 line-clamp-2 block text-xs leading-4 text-[#425349]">{team.strengths}</span>
+                        <HelmetSpritePreview team={team} />
+                        <span>{team.name}</span>
                       </button>
                     );
                   })}
@@ -635,40 +617,6 @@ export default function App() {
                   <p className="rounded-md border border-dashed border-[#cbd6cd] px-4 py-8 text-center text-sm text-[#68776d]">No SEC teams match that search.</p>
                 )}
               </div>
-
-              <aside className="border-t border-[#dce3dd] bg-[#eaf0eb] p-4 sm:p-5 md:min-h-0 md:overflow-y-auto md:border-l md:border-t-0">
-                <div className="flex items-center gap-2">
-                  <span className="h-3 w-3 rounded-sm" style={{ backgroundColor: selectedTeamProfile.primaryColor }} />
-                  <span className="text-xs font-bold uppercase text-[#68776d]">Selected for {teamSelectionSide === 'P1' ? 'you' : 'CPU'}</span>
-                </div>
-                <h3 className="mt-2 text-2xl font-extrabold leading-tight">{selectedTeamProfile.city} {selectedTeamProfile.nickname}</h3>
-                <p className="mt-1 text-xs font-semibold text-[#617168]">{selectedTeamProfile.archetype.replace('_', ' ')}</p>
-                <p className="mt-3 text-sm leading-5 text-[#405047]">{selectedTeamProfile.description}</p>
-
-                <div className="mt-4 border-t border-[#d1dbd3] pt-3">
-                  <p className="text-xs font-bold uppercase text-[#246344]">Strength</p>
-                  <p className="mt-1 text-xs leading-4 text-[#405047]">{selectedTeamProfile.strengths}</p>
-                  <p className="mt-3 text-xs font-bold uppercase text-[#a34d32]">Watch out for</p>
-                  <p className="mt-1 text-xs leading-4 text-[#405047]">{selectedTeamProfile.weaknesses}</p>
-                </div>
-
-                <div className="mt-4 border-t border-[#d1dbd3] pt-3">
-                  <p className="mb-2 text-xs font-bold uppercase text-[#68776d]">Team ratings <span className="font-normal">(100 = average)</span></p>
-                  <div className="space-y-2">
-                    {selectedTeamRatings.map(({ label, value }) => (
-                      <div key={label}>
-                        <div className="mb-1 flex items-center justify-between text-[11px]">
-                          <span className="text-[#59695f]">{label}</span>
-                          <span className="font-bold text-[#273b30]">{value}</span>
-                        </div>
-                        <div className="h-1.5 overflow-hidden rounded-full bg-[#d4ded6]">
-                          <div className="h-full rounded-full bg-[#43815e]" style={{ width: `${Math.max(0, Math.min(100, value / 1.4))}%` }} />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </aside>
             </div>
 
             <div className="shrink-0 border-t border-[#dce3dd] bg-white px-4 py-3 sm:px-6">
@@ -694,6 +642,50 @@ export default function App() {
               )}
             </div>
           </div>
+          {pendingTeam && (
+            <div
+              onPointerDown={event => event.stopPropagation()}
+              className="absolute inset-0 z-[110] flex items-center justify-center bg-[#101713]/65 p-4 backdrop-blur-sm"
+            >
+              <section
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="team-confirmation-title"
+                className="w-full max-w-md rounded-lg border border-[#d5ded7] bg-[#f2f5f2] p-5 text-left text-[#1b3026] shadow-2xl sm:p-6"
+              >
+                <h2 id="team-confirmation-title" className="text-xl font-extrabold">{pendingTeam.name}</h2>
+                <div className="mt-5">
+                  <h3 className="text-xs font-bold uppercase text-[#246344]">Strengths</h3>
+                  <p className="mt-1 text-sm leading-5 text-[#405047]">{pendingTeam.strengths}</p>
+                  <h3 className="mt-4 text-xs font-bold uppercase text-[#a34d32]">Weaknesses</h3>
+                  <p className="mt-1 text-sm leading-5 text-[#405047]">{pendingTeam.weaknesses}</p>
+                </div>
+                <div className="mt-6 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (teamSelectionSide === 'P1') {
+                        handleSelectP1Team(pendingTeam.id);
+                      } else {
+                        handleSelectP2Team(pendingTeam.id);
+                      }
+                      setPendingTeam(null);
+                    }}
+                    className="rounded-md bg-[#246344] px-4 py-2.5 text-sm font-bold text-white transition hover:bg-[#1e573b] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#246344]"
+                  >
+                    pick this team
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPendingTeam(null)}
+                    className="rounded-md border border-[#cbd6cd] bg-white px-4 py-2.5 text-sm font-bold text-[#405047] transition hover:bg-[#edf1ed] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#246344]"
+                  >
+                    close
+                  </button>
+                </div>
+              </section>
+            </div>
+          )}
         </div>
       )}
 

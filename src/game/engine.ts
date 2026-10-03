@@ -7,6 +7,8 @@ import { canEngagePassBlock, distToSegment, GAME_SPEED_SCALE, moveToward, resolv
 import { resolvePlayResult, calculateBrokenTackleChance, calculateYardsToGo, getDriveStartY, getSnapBallPosition, getPassArcHeight, getPassArcMaxHeight, getPassFlightFrames, findTappedPassReceiver, getPassLeadTarget, getRoutePassLeadTarget, canDefenderDeflectPass, canTackleQuarterback, resolveCatchContestOutcome, evaluateQbThrowAccuracy } from './rules';
 import { sounds } from './sound';
 import { evaluateDirtSwipeGesture, drawDirtSwipeGesture } from './chalkMenu';
+import { getHelmetDesign, type HelmetDesign } from './helmetDesigns';
+import { drawHelmetSprite } from './helmetRenderer';
 import { getTeam, TEAMS, TeamProfile } from './teams';
 
 export interface GameEngineHandle {
@@ -3878,125 +3880,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     }
   }
 
-  function drawHelmet(entity: Entity, shellColor: string, stripeColor: string, forwardDirection: number) {
-    const radius = entity.radius * 1.16;
-    const velocityX = entity.vx || 0;
-    const velocityY = entity.vy || 0;
-    const moving = Math.hypot(velocityX, velocityY) > 0.5;
-    const rotation = moving
-      ? Math.atan2(velocityX, -velocityY)
-      : forwardDirection === -1 ? 0 : Math.PI;
-    const drawShellPath = () => {
-      ctx!.beginPath();
-      ctx!.moveTo(-radius * 0.72, -radius * 0.66);
-      ctx!.quadraticCurveTo(0, -radius * 0.92, radius * 0.72, -radius * 0.66);
-      ctx!.bezierCurveTo(radius * 0.93, -radius * 0.43, radius * 0.98, radius * 0.42, radius * 0.64, radius * 0.80);
-      ctx!.quadraticCurveTo(0, radius * 1.11, -radius * 0.64, radius * 0.80);
-      ctx!.bezierCurveTo(-radius * 0.98, radius * 0.42, -radius * 0.93, -radius * 0.43, -radius * 0.72, -radius * 0.66);
-      ctx!.closePath();
-    };
-
-    ctx!.save();
-    ctx!.translate(entity.x, entity.y);
-    ctx!.rotate(rotation);
-
-    ctx!.save();
-    ctx!.translate(radius * 0.12, radius * 0.18);
-    ctx!.fillStyle = 'rgba(0, 0, 0, 0.28)';
-    drawShellPath();
-    ctx!.fill();
-    ctx!.restore();
-
-    ctx!.lineJoin = 'round';
-    ctx!.lineCap = 'round';
-    ctx!.beginPath();
-    ctx!.moveTo(-radius * 0.72, -radius * 0.48);
-    ctx!.lineTo(-radius * 0.66, -radius * 0.99);
-    ctx!.quadraticCurveTo(0, -radius * 1.43, radius * 0.66, -radius * 0.99);
-    ctx!.lineTo(radius * 0.72, -radius * 0.48);
-    ctx!.moveTo(-radius * 0.64, -radius * 0.89);
-    ctx!.quadraticCurveTo(0, -radius * 1.18, radius * 0.64, -radius * 0.89);
-    for (const side of [-1, 1]) {
-      ctx!.moveTo(side * radius * 0.37, -radius * 0.65);
-      ctx!.lineTo(side * radius * 0.43, -radius * 1.10);
-    }
-    ctx!.strokeStyle = '#172127';
-    ctx!.lineWidth = Math.max(2.2, radius * 0.19);
-    ctx!.stroke();
-    ctx!.strokeStyle = '#c9d1d2';
-    ctx!.lineWidth = Math.max(0.9, radius * 0.075);
-    ctx!.stroke();
-
-    ctx!.fillStyle = shellColor;
-    drawShellPath();
-    ctx!.fill();
-    ctx!.strokeStyle = '#151d20';
-    ctx!.lineWidth = Math.max(1.2, radius * 0.11);
-    ctx!.stroke();
-
-    ctx!.save();
-    drawShellPath();
-    ctx!.clip();
-    const shellShade = ctx!.createRadialGradient(-radius * 0.28, -radius * 0.24, radius * 0.08, 0, radius * 0.12, radius * 1.06);
-    shellShade.addColorStop(0, 'rgba(255, 255, 255, 0.40)');
-    shellShade.addColorStop(0.38, 'rgba(255, 255, 255, 0.12)');
-    shellShade.addColorStop(0.72, 'rgba(0, 0, 0, 0.04)');
-    shellShade.addColorStop(1, 'rgba(0, 0, 0, 0.40)');
-    ctx!.fillStyle = shellShade;
-    ctx!.fillRect(-radius, -radius, radius * 2, radius * 2.2);
-
-    ctx!.beginPath();
-    ctx!.moveTo(0, -radius * 0.83);
-    ctx!.lineTo(0, radius * 1.02);
-    ctx!.strokeStyle = 'rgba(0, 0, 0, 0.55)';
-    ctx!.lineWidth = radius * 0.34;
-    ctx!.stroke();
-    ctx!.strokeStyle = '#f5f2e9';
-    ctx!.lineWidth = radius * 0.27;
-    ctx!.stroke();
-    ctx!.strokeStyle = stripeColor;
-    ctx!.lineWidth = radius * 0.17;
-    ctx!.stroke();
-
-    for (const side of [-1, 1]) {
-      for (const ventY of [-0.14, 0.18]) {
-        ctx!.beginPath();
-        ctx!.moveTo(side * radius * 0.39, radius * ventY);
-        ctx!.lineTo(side * radius * 0.43, radius * (ventY + 0.14));
-        ctx!.strokeStyle = 'rgba(0, 0, 0, 0.60)';
-        ctx!.lineWidth = Math.max(1.2, radius * 0.10);
-        ctx!.stroke();
-        ctx!.strokeStyle = 'rgba(255, 255, 255, 0.20)';
-        ctx!.lineWidth = 0.5;
-        ctx!.stroke();
-      }
-    }
-
-    ctx!.strokeStyle = 'rgba(255, 255, 255, 0.36)';
-    ctx!.lineWidth = Math.max(0.7, radius * 0.055);
-    ctx!.beginPath();
-    ctx!.moveTo(-radius * 0.68, radius * 0.31);
-    ctx!.bezierCurveTo(-radius * 0.78, -radius * 0.04, -radius * 0.69, -radius * 0.48, -radius * 0.35, -radius * 0.58);
-    ctx!.stroke();
-    ctx!.restore();
-
-    ctx!.strokeStyle = '#263036';
-    ctx!.lineWidth = Math.max(1.6, radius * 0.14);
-    ctx!.beginPath();
-    ctx!.moveTo(-radius * 0.65, -radius * 0.63);
-    ctx!.quadraticCurveTo(0, -radius * 0.87, radius * 0.65, -radius * 0.63);
-    ctx!.stroke();
-
-    for (const side of [-1, 1]) {
-      ctx!.fillStyle = '#d6dcdb';
-      ctx!.strokeStyle = '#273139';
-      ctx!.lineWidth = 0.7;
-      ctx!.beginPath();
-      ctx!.ellipse(side * radius * 0.78, -radius * 0.43, radius * 0.065, radius * 0.095, side * 0.2, 0, Math.PI * 2);
-      ctx!.fill();
-      ctx!.stroke();
-    }
-    ctx!.restore();
+  function drawHelmet(entity: Entity, design: HelmetDesign, forwardDirection: number) {
+    drawHelmetSprite(ctx!, entity, design, forwardDirection);
   }
 
   function drawFootball(x: number, y: number, rotation: number, size = 8) {
@@ -4040,17 +3925,6 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     }
     ctx!.stroke();
     ctx!.restore();
-  }
-
-  function getColorLuminance(color: string) {
-    const hex = color.replace('#', '');
-    if (hex.length !== 6) return 1;
-    const channels = [0, 2, 4].map(index => Number.parseInt(hex.slice(index, index + 2), 16) / 255);
-    if (channels.some(channel => !Number.isFinite(channel))) return 1;
-    const [red, green, blue] = channels.map(channel =>
-      channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4
-    );
-    return red * 0.2126 + green * 0.7152 + blue * 0.0722;
   }
 
   function draw() {
@@ -4189,19 +4063,10 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
     const offenseTeam = activeOffense === 'P1' ? p1Team : p2Team;
     const defenseTeam = activeDefense === 'P1' ? p1Team : p2Team;
-    const bothTeamsHaveDarkHelmets = getColorLuminance(p1Team.primaryColor) < 0.18
-      && getColorLuminance(p2Team.primaryColor) < 0.18;
-    const getHelmetColors = (team: TeamProfile, isP2: boolean) => {
-      const useWhiteShell = bothTeamsHaveDarkHelmets && isP2;
-      return {
-        shell: useWhiteShell ? '#f4f1e8' : team.primaryColor,
-        stripe: useWhiteShell ? team.primaryColor : team.secondaryColor
-      };
-    };
-    const offenseHelmet = getHelmetColors(offenseTeam, activeOffense === 'P2');
-    const defenseHelmet = getHelmetColors(defenseTeam, activeDefense === 'P2');
+    const offenseHelmet = getHelmetDesign(offenseTeam);
+    const defenseHelmet = getHelmetDesign(defenseTeam);
 
-    drawHelmet(qb, offenseHelmet.shell, offenseHelmet.stripe, attackDirection);
+    drawHelmet(qb, offenseHelmet, attackDirection);
     if (activeEntity === qb || (qb.powerBoostTimer || 0) > 0) {
       ctx.strokeStyle = (qb.powerBoostTimer || 0) > 0 ? '#00ffff' : '#ff00ff';
       ctx.lineWidth = 2.5 / cameraScale;
@@ -4286,12 +4151,12 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
     // Linemen
     linemen.forEach(l => {
-      drawHelmet(l, offenseHelmet.shell, offenseHelmet.stripe, attackDirection);
+      drawHelmet(l, offenseHelmet, attackDirection);
     });
 
     // Center Receiver
     if (centerReceiver) {
-      drawHelmet(centerReceiver, offenseHelmet.shell, offenseHelmet.stripe, attackDirection);
+      drawHelmet(centerReceiver, offenseHelmet, attackDirection);
       if ((centerReceiver.flash || 0) > 0) {
         ctx.strokeStyle = '#00ff00';
         ctx.lineWidth = 2.5 / cameraScale;
@@ -4317,7 +4182,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
     // Receivers
     receivers.forEach(r => {
-      drawHelmet(r, offenseHelmet.shell, offenseHelmet.stripe, attackDirection);
+      drawHelmet(r, offenseHelmet, attackDirection);
       if ((r.flash || 0) > 0) {
         ctx.strokeStyle = '#00ff00';
         ctx.lineWidth = 2.5 / cameraScale;
@@ -4359,7 +4224,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
     // Running Back
     if (rb) {
-      drawHelmet(rb, offenseHelmet.shell, offenseHelmet.stripe, attackDirection);
+      drawHelmet(rb, offenseHelmet, attackDirection);
       if (activeEntity === rb || (rb.powerBoostTimer || 0) > 0) {
         ctx.strokeStyle = (rb.powerBoostTimer || 0) > 0 ? '#00ffff' : '#ff00ff';
         ctx.lineWidth = 2.5 / cameraScale;
@@ -4418,7 +4283,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         ctx.stroke();
         ctx.restore();
       }
-      drawHelmet(d, defenseHelmet.shell, defenseHelmet.stripe, -attackDirection);
+      drawHelmet(d, defenseHelmet, -attackDirection);
       if (isInterceptionReturn && d === activeEntity) {
         ctx.save();
         ctx.strokeStyle = '#ffd166';
