@@ -2,9 +2,56 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { isCpuPressureRecognized, scoreRunBlockTarget, shouldCpuReleasePass, shouldCpuScramble } from './ai';
 import { alignDefenderAcrossFromReceiver, alignDefenderAcrossFromRunningBack, alignDefenderToZone, alignDefenders, chooseCpuDefensiveAssignments, constrainDefendersToFieldSide, getBlitzAlignmentY, getBracketCoverageTarget, getDefensiveLineAlignmentY, matchCpuDefendersToReceivers, separateDefenderAlignments } from './defense';
-import { calculateYardsToGo, canDefenderDeflectPass, canTackleQuarterback, findTappedPassReceiver, getDefenderPassReachHeight, getDriveStartY, getSnapBallPosition, getPassArcHeight, getPassArcMaxHeight, getPassFlightFrames, getPassLeadTarget, getRoutePassLeadTarget, resolvePlayResult } from './rules';
-import { canEngagePassBlock, clampPlayerToFieldY, getPassBlockHoldFrames, isRusherActivelyBlocked, moveToward, shouldHoldPassBlock, updateRouteMovement } from './movement';
+import { calculateYardsToGo, canDefenderDeflectPass, canTackleQuarterback, findTappedPassReceiver, getCatchCompletionChance, getDefenderPassReachHeight, getDriveStartY, getSnapBallPosition, getPassArcHeight, getPassArcMaxHeight, getPassFlightFrames, getPassLeadTarget, getRoutePassLeadTarget, resolveCatchContestOutcome, resolvePlayResult } from './rules';
+import { canEngagePassBlock, clampPlayerToFieldY, getFatigueSpeedMultiplier, getPassBlockHoldFrames, isRusherActivelyBlocked, moveToward, shouldHoldPassBlock, updatePlayerStamina, updateRouteMovement } from './movement';
 import type { Entity } from './types';
+
+test('coverage reduces catches smoothly and touching players are not wide open', () => {
+  const chance = (distance: number) => getCatchCompletionChance({ effectiveDefDist: distance, effectiveBallDist: distance, isTargetSpammed: false, isRbFlatSpammed: false, isRb: false });
+  assert.ok(chance(20) < 0.40);
+  assert.ok(Math.abs(chance(19.99) - chance(20.01)) < 0.001);
+  assert.ok(chance(35) > chance(20));
+  assert.equal(chance(60), 0.905);
+});
+
+test('double coverage, ball-side positioning, receiver hands and fatigue affect contested catches', () => {
+  const contest = { effectiveDefDist: 25, effectiveBallDist: 25, isTargetSpammed: false, isRbFlatSpammed: false, isRb: false };
+  const baseline = getCatchCompletionChance(contest);
+  assert.ok(getCatchCompletionChance({ ...contest, defenderCount: 2 }) < baseline);
+  assert.ok(getCatchCompletionChance({ ...contest, ballSideDefender: true }) < baseline);
+  assert.ok(getCatchCompletionChance({ ...contest, archetype: 'POSSESSION' }) > getCatchCompletionChance({ ...contest, archetype: 'SPEEDSTER' }));
+  assert.ok(getCatchCompletionChance({ ...contest, stamina: 0 }) < baseline);
+  assert.equal(getCatchCompletionChance({ ...contest, isTargetSpammed: true, isRbFlatSpammed: true }), baseline);
+  assert.equal(getCatchCompletionChance({ ...contest, effectiveDefDist: 80, effectiveBallDist: 80, stamina: 0 }), 0.905);
+});
+
+test('catch outcomes favor breakups over picks and boundary decisions use actual position', () => {
+  const contest = { effectiveDefDist: 20, effectiveBallDist: 20, isTargetSpammed: false, isRbFlatSpammed: false, isRb: false };
+  const outcomes = Array.from({ length: 1000 }, (_, index) => resolveCatchContestOutcome({ ...contest, roll: index / 1000 }));
+  assert.ok(outcomes.filter(outcome => outcome.type === 'BROKEN_UP').length > outcomes.filter(outcome => outcome.type === 'INTERCEPTED').length * 5);
+  assert.equal(resolveCatchContestOutcome({ ...contest, receiverX: 29, fieldWidth: 340, roll: 0.99 }).type, 'OUT_OF_BOUNDS');
+  assert.equal(resolveCatchContestOutcome({ ...contest, receiverX: 30, fieldWidth: 340, roll: 0.99 }).type, 'COMPLETE');
+});
+
+test('route movement applies the speed bonus once and fatigue slows receivers', () => {
+  const runRoute = (speedMultiplier: number, stamina: number) => {
+    const receiver: Entity = { x: 100, y: 500, radius: 10, routeType: 'GO', speedMultiplier, stamina };
+    for (let frame = 0; frame < 60; frame++) updateRouteMovement(receiver, 'QB_DROP', 1, [], 340);
+    return receiver.y - 500;
+  };
+  const normal = runRoute(1, 100);
+  assert.ok(Math.abs(runRoute(1.08, 100) / normal - 1.08) < 0.001);
+  assert.ok(runRoute(1, 0) / normal > 0.83 && runRoute(1, 0) / normal <= 0.85);
+});
+
+test('fatigue follows workload and endurance, with bounded recovery and speed penalties', () => {
+  assert.equal(updatePlayerStamina(100, 500), 70);
+  assert.ok(updatePlayerStamina(100, 500, 0.9) < updatePlayerStamina(100, 500, 1.15));
+  assert.equal(updatePlayerStamina(2, 500), 0);
+  assert.equal(updatePlayerStamina(99, 0, 1, 5), 100);
+  assert.equal(getFatigueSpeedMultiplier(100), 1);
+  assert.equal(getFatigueSpeedMultiplier(-20), 0.85);
+});
 
 test('deep blitzers must run to a blocker before pass protection can engage them', () => {
   for (const attackDirection of [-1, 1]) {
@@ -938,7 +985,8 @@ test('defenders labeled to blitz experience significantly less broken tackles an
     isBlitzer: true
   });
 
-  assert.equal(regularChance, 0.38);
+  assert.equal(regularChance, 0.30);
+  assert.equal(calculateBrokenTackleChance({ isRB: false, isBoosted: false, brokenCount: 0, isBlitzer: false }), 0.14);
   assert.equal(blitzerChance, 0.05);
   assert.ok(blitzerChance < regularChance, 'Blitzer should experience far fewer broken tackles');
 
@@ -956,7 +1004,7 @@ test('defenders labeled to blitz experience significantly less broken tackles an
     isBlitzer: false
   });
   assert.equal(boostedBlitzerChance, 0.12);
-  assert.equal(boostedRegularChance, 0.63);
+  assert.equal(boostedRegularChance, 0.42);
   assert.ok(boostedBlitzerChance < boostedRegularChance, 'Boosted runner should still break far fewer tackles against blitzers');
 });
 

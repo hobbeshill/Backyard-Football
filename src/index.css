@@ -1,5 +1,15 @@
 @import "tailwindcss";
 
+.keyboard-controls {
+	display: none;
+}
+
+@media (hover: hover) and (pointer: fine) {
+	.keyboard-controls {
+		display: inline-block;
+	}
+}
+
 @keyframes team-selector-enter {
 	from { opacity: 0; transform: translateY(10px); }
 	to { opacity: 1; transform: translateY(0); }

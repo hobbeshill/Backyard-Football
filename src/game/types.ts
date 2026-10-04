@@ -34,12 +34,17 @@ export interface Entity {
   vy?: number;
   speed?: number;
   speedMultiplier?: number;
+  stamina?: number;
+  endurance?: number;
+  rosterKey?: string;
   archetype?: string;
   radius: number;
   color?: string;
   boostUsed?: boolean;
   powerBoostTimer?: number;
   tackleImmunity?: number;
+  contactSlowTimer?: number;
+  diveCooldownTimer?: number;
   type?: string;
   passRusher?: boolean;
   defenseAssignment?: DefensiveAssignment;

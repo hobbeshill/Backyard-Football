@@ -153,10 +153,10 @@ export function calculateBrokenTackleChance(input: TackleChanceInput): number {
     return input.brokenCount >= 1 ? base * 0.4 : base;
   }
 
-  let breakChance = input.isRB ? 0.38 : 0.28;
-  if (input.isBoosted) breakChance += 0.25;
+  let breakChance = input.isRB ? 0.30 : 0.14;
+  if (input.isBoosted) breakChance += 0.12;
   if (input.brokenCount === 1) breakChance *= 0.6;
-  if (input.brokenCount >= 2) breakChance = 0.12;
+  if (input.brokenCount >= 2) breakChance = 0.04;
   return breakChance;
 }
 
@@ -174,6 +174,12 @@ export interface CatchContestParams {
   isRb: boolean;
   receiverX?: number;
   fieldWidth?: number;
+  receiverRadius?: number;
+  defenderCount?: number;
+  ballSideDefender?: boolean;
+  archetype?: string;
+  stamina?: number;
+  distanceToCatch?: number;
   roll?: number;
 }
 
@@ -185,119 +191,42 @@ export interface CatchContestResult {
   resultType: string;
 }
 
+export function getCatchCompletionChance(params: CatchContestParams): number {
+  const separation = Math.min(params.effectiveDefDist, params.effectiveBallDist);
+  const openness = Math.max(0, Math.min(1, (separation - 12) / 43));
+  const coverageCurve = openness * openness * (3 - 2 * openness);
+  const handsBonus = params.archetype === 'POSSESSION' || params.archetype === 'TIGHT_END' ? 0.06 : params.archetype === 'SPEEDSTER' ? -0.03 : 0;
+  const fatiguePenalty = Math.max(0, (55 - (params.stamina ?? 100)) / 55) * 0.06;
+  const doubleCoveragePenalty = Math.min(2, Math.max(0, (params.defenderCount ?? 1) - 1)) * 0.10;
+  const positionPenalty = params.ballSideDefender ? 0.08 : 0;
+  const reachPenalty = Math.max(0, (params.distanceToCatch ?? 0) - 12) * 0.008;
+  return Math.max(0.10, Math.min(0.905, 0.30 + 0.605 * coverageCurve + (handsBonus - fatiguePenalty - doubleCoveragePenalty - positionPenalty) * (1 - coverageCurve) - reachPenalty));
+}
+
 export function resolveCatchContestOutcome(params: CatchContestParams): CatchContestResult {
   const roll = params.roll !== undefined ? params.roll : Math.random();
-
-  // 1. TIGHT BLANKET COVERAGE (< 14px separation or < 13px defender to ball)
-  if (params.effectiveDefDist < 14 || params.effectiveBallDist < 13) {
-    if (params.isRbFlatSpammed) {
-      if (roll < 0.35) {
-        return { type: 'BATTED_DOWN', caught: false, announcement: 'PASS BATTED DOWN IN THE FLAT! 🛑', color: '#ffaa00', resultType: 'BATTED_DOWN' };
-      } else if (roll < 0.65) {
-        return { type: 'INTERCEPTED', caught: false, announcement: 'INTERCEPTED IN THE FLAT!', color: '#ff3333', resultType: 'INT' };
-      } else if (roll < 0.88) {
-        return { type: 'BROKEN_UP', caught: false, announcement: 'BLOWN UP IN THE FLAT! PASS BROKEN UP! 💥', color: '#ff8888', resultType: 'BROKEN_UP' };
-      } else {
-        return { type: 'TACKLED_FOR_LOSS', caught: true, announcement: 'TACKLED IN THE FLAT FOR A LOSS! 🛑💥', color: '#ff3333', resultType: 'TACKLE' };
-      }
-    }
-
-    if (params.isTargetSpammed) {
-      if (roll < 0.35) {
-        return { type: 'BATTED_DOWN', caught: false, announcement: 'PASS BATTED DOWN BY DEFENDER!', color: '#ffaa00', resultType: 'BATTED_DOWN' };
-      } else if (roll < 0.62) {
-        return { type: 'INTERCEPTED', caught: false, announcement: 'PICKED OFF! CONTESTED INTERCEPTION!', color: '#ff3333', resultType: 'INT' };
-      } else if (roll < 0.88) {
-        return { type: 'BROKEN_UP', caught: false, announcement: 'PASS BROKEN UP ON CONTACT!', color: '#ff8888', resultType: 'BROKEN_UP' };
-      } else {
-        return { type: 'COMPLETE', caught: true, announcement: 'SPECTACULAR CONTESTED CATCH!', color: '#00ffaa', resultType: 'COMPLETE' };
-      }
-    }
-
-    if (roll < 0.25) {
-      return { type: 'BATTED_DOWN', caught: false, announcement: 'PASS BATTED DOWN BY DEFENDER!', color: '#ffaa00', resultType: 'BATTED_DOWN' };
-    } else if (roll < 0.40) {
-      return { type: 'INTERCEPTED', caught: false, announcement: 'PICKED OFF! CONTESTED INTERCEPTION!', color: '#ff3333', resultType: 'INT' };
-    } else if (roll < 0.68) {
-      return { type: 'BROKEN_UP', caught: false, announcement: 'PASS BROKEN UP ON CONTACT! 💥', color: '#ff8888', resultType: 'BROKEN_UP' };
-    } else {
-      return { type: 'COMPLETE', caught: true, announcement: 'SPECTACULAR CONTESTED CATCH! 🔥', color: '#00ffaa', resultType: 'COMPLETE' };
-    }
-  }
-
-  // 2. MODERATE / TIGHT NFL WINDOW (14px - 20px)
-  if (params.effectiveDefDist < 20) {
-    if (params.isTargetSpammed && roll < 0.60) {
-      return { type: 'BROKEN_UP', caught: false, announcement: 'TIPPED PASS! INCOMPLETE!', color: '#aaaaaa', resultType: 'DEFLECT' };
-    } else if (roll < 0.68) {
-      return {
-        type: 'COMPLETE',
-        caught: true,
-        announcement: params.isRb ? 'PASS COMPLETE TO RUNNING BACK! 🏈' : 'CATCH IN TIGHT WINDOW! 🎯',
-        color: params.isRb ? '#00ffaa' : '#00ffff',
-        resultType: 'COMPLETE'
-      };
-    } else if (roll < 0.80) {
-      return { type: 'BROKEN_UP', caught: false, announcement: 'TIPPED PASS! INCOMPLETE! 💨', color: '#aaaaaa', resultType: 'DEFLECT' };
-    } else if (roll < 0.90) {
-      return { type: 'DROP', caught: false, announcement: 'DROPPED ON CONTACT! 💥 Hard hit jars ball loose!', color: '#ff8888', resultType: 'INCOMPLETE' };
-    } else {
-      return { type: 'INTERCEPTED', caught: false, announcement: 'TIPPED BALL INTERCEPTED! 😱', color: '#ffcc00', resultType: 'INT' };
-    }
-  }
-
-  // 3. WIDE OPEN RECEIVER (>= 20px separation, no one around)
-  // Requirement: "All passes should not be completed, even if the user is wide open with no one around. Build in some real life football mistakes."
-  // Check sideline boundary mistake if catch occurs right on the chalk line
-  const isNearSideline = params.receiverX !== undefined && params.fieldWidth !== undefined &&
-    (params.receiverX < 32 || params.receiverX > params.fieldWidth - 32);
-
-  if (isNearSideline && roll < 0.12) {
+  const outsideBoundary = params.receiverX !== undefined && params.fieldWidth !== undefined &&
+    (params.receiverX - (params.receiverRadius ?? 10) < 20 || params.receiverX + (params.receiverRadius ?? 10) > params.fieldWidth - 20);
+  if (outsideBoundary) {
     return {
       type: 'OUT_OF_BOUNDS',
       caught: false,
-      announcement: 'OUT OF BOUNDS! 🦶❌ Only got one foot in bounds along sideline!',
+      announcement: 'CATCH OUT OF BOUNDS!',
       color: '#ffaa66',
       resultType: 'INCOMPLETE'
     };
   }
-
-  // Realistic football mistakes on wide-open passes (~9.5% drop / slip rate):
-  // Even with nobody around, real NFL receivers drop passes, look upfield too early, bobble, or slip on turf cuts.
-  if (roll < 0.095) {
-    if (roll < 0.026) {
-      return {
-        type: 'DROP',
-        caught: false,
-        announcement: 'DROPPED PASS! 🤦 Looked upfield before securing the catch!',
-        color: '#ff9999',
-        resultType: 'INCOMPLETE'
-      };
-    } else if (roll < 0.052) {
-      return {
-        type: 'DROP',
-        caught: false,
-        announcement: 'BOBBLED & DROPPED! 💨 Off the fingertips wide open!',
-        color: '#ff9999',
-        resultType: 'INCOMPLETE'
-      };
-    } else if (roll < 0.075) {
-      return {
-        type: 'DROP',
-        caught: false,
-        announcement: 'INCOMPLETE! ❌ Slipped right through his hands in space!',
-        color: '#ff9999',
-        resultType: 'INCOMPLETE'
-      };
-    } else {
-      return {
-        type: 'DROP',
-        caught: false,
-        announcement: 'RECEIVER SLIPPED ON TURF! 👟🏈 Incomplete!',
-        color: '#ffaa66',
-        resultType: 'INCOMPLETE'
-      };
+  const contested = Math.min(params.effectiveDefDist, params.effectiveBallDist) < 45;
+  const completionChance = getCatchCompletionChance(params);
+  if (roll < 1 - completionChance) {
+    const interceptionChance = contested ? (params.ballSideDefender ? 0.08 : 0.04) : 0;
+    if (roll < interceptionChance) {
+      return { type: 'INTERCEPTED', caught: false, announcement: 'INTERCEPTED AT THE CATCH POINT!', color: '#ff3333', resultType: 'INT' };
     }
+    if (contested && roll >= 0.095) {
+      return { type: 'BROKEN_UP', caught: false, announcement: 'PASS BROKEN UP ON CONTACT!', color: '#ff8888', resultType: 'DEFLECT' };
+    }
+    return { type: 'DROP', caught: false, announcement: roll >= 0.075 ? 'RECEIVER SLIPPED ON TURF! INCOMPLETE!' : 'DROPPED PASS!', color: '#ff9999', resultType: 'INCOMPLETE' };
   }
 
   return {
@@ -315,6 +244,7 @@ export interface QbAccuracyInput {
   isDeepShot: boolean;
   isHitAsThrown?: boolean;
   isCpuThrow?: boolean;
+  isMoving?: boolean;
   passProtectionRating?: number;
   roll?: number;
 }
@@ -348,7 +278,7 @@ export function evaluateQbThrowAccuracy(input: QbAccuracyInput, attackDirection:
   }
 
   // Baseline inaccuracy: clean short/medium passes (~8%), deep balls (~16%), under heavy rusher pressure (~28%)
-  const baseRate = Math.min(0.45, (input.isUnderPressure ? 0.28 : input.isDeepShot ? 0.16 : 0.08) * proMod);
+  const baseRate = Math.min(0.45, ((input.isUnderPressure ? 0.28 : input.isDeepShot ? 0.16 : 0.08) + (input.isMoving ? 0.07 : 0)) * proMod);
 
   if (roll >= baseRate) {
     return { isOffTarget: false, offsetX: 0, offsetY: 0 };

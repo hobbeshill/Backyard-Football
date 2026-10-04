@@ -1,7 +1,35 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mountFootballGame, type GameEngineHandle } from './engine';
-import { getDesignedRunLateralBias } from './movement';
+import { createSimulationClock, getDesignedRunLateralBias } from './movement';
+
+test('simulation runs at 60 Hz regardless of display refresh rate', () => {
+  for (const refreshRate of [30, 60, 120]) {
+    const clock = createSimulationClock();
+    let updates = 0;
+    for (let frame = 0; frame <= refreshRate * 5; frame++) {
+      updates += clock(frame * 1000 / refreshRate, false);
+    }
+    assert.equal(updates, 300);
+  }
+});
+
+test('simulation discards paused time and caps catch-up after a stalled frame', () => {
+  const clock = createSimulationClock();
+  assert.equal(clock(0, false), 0);
+  assert.equal(clock(10000, true), 0);
+  assert.equal(clock(10000 + 1000 / 60, false), 1);
+  assert.equal(clock(20000, false), 5);
+});
+
+test('relaxed pace consistently slows simulation on all displays', () => {
+  for (const refreshRate of [30, 60, 120]) {
+    const clock = createSimulationClock();
+    let updates = 0;
+    for (let frame = 0; frame <= refreshRate * 5; frame++) updates += clock(frame * 1000 / refreshRate, false, 0.8);
+    assert.equal(updates, 240);
+  }
+});
 
 function createMockCanvas(): HTMLCanvasElement {
   const listeners = new Map<string, EventListener>();
@@ -21,6 +49,8 @@ function createMockCanvas(): HTMLCanvasElement {
     fill: () => {},
     arc: () => {},
     bezierCurveTo: () => {},
+    quadraticCurveTo: () => {},
+    ellipse: () => {},
     clip: () => {},
     roundRect: () => {},
     setLineDash: () => {},
@@ -50,6 +80,60 @@ test('Sweep lane bias steers outside on either side while ISO keeps its inside p
   assert.equal(getDesignedRunLateralBias('SWEEP', 120, 'left'), -1.15);
   assert.equal(getDesignedRunLateralBias('SWEEP', 255, 'right'), 0);
   assert.equal(getDesignedRunLateralBias('ISO', 220, 'right'), 0);
+});
+
+test('receiver fatigue persists across play calls, substitutions and possessions, but resets for a new game', () => {
+  const originalRequest = globalThis.requestAnimationFrame;
+  const originalCancel = globalThis.cancelAnimationFrame;
+  let nextFrame: FrameRequestCallback = () => {};
+  globalThis.requestAnimationFrame = callback => { nextFrame = callback; return 1; };
+  globalThis.cancelAnimationFrame = () => {};
+  let engine: GameEngineHandle | null = null;
+  const cleanup = mountFootballGame(createMockCanvas(), {
+    setP2OffPlayState: () => {}, setP2DefPlayState: () => {},
+    setDownDistanceText: () => {}, setActiveOffenseState: () => {},
+    setUserScore: () => {}, setCpuScore: () => {}, setP1DefPlayState: () => {},
+    setMomentumState: () => {}, setGameClockState: () => {}, showAnnouncement: () => {},
+    onEngineReady: value => { engine = value; }
+  });
+  try {
+    assert.ok(engine);
+    const game = engine as GameEngineHandle;
+    game.setPossessionForTest?.('P1');
+    game.resetDrill();
+    const receiver = game.getReceivers()[0];
+    receiver.stamina = 30;
+    nextFrame(0);
+    nextFrame(1000 / 60);
+    const tiredStamina = receiver.stamina;
+    game.selectOffense('SHORT_PASS');
+    assert.equal(game.getReceivers()[0].stamina, tiredStamina);
+    game.substituteReceiver(0);
+    assert.equal(game.getReceivers()[0].archetype, 'RESERVE');
+    assert.equal(game.getReceivers()[0].stamina, 100);
+    game.substituteReceiver(0);
+    assert.equal(game.getReceivers()[0].stamina, tiredStamina);
+    game.setPossessionForTest?.('P2');
+    game.resetDrill();
+    assert.equal(game.getReceivers()[0].stamina, 100);
+    game.setPossessionForTest?.('P1');
+    game.resetDrill();
+    assert.equal(game.getReceivers()[0].stamina, tiredStamina);
+    game.startPlay?.();
+    const liveReceiver = game.getReceivers()[0];
+    game.substituteReceiver(0);
+    assert.equal(game.getReceivers()[0], liveReceiver);
+    nextFrame(2000 / 60);
+    assert.ok(liveReceiver.stamina! < tiredStamina);
+    game.resetGame();
+    game.setPossessionForTest?.('P1');
+    game.resetDrill();
+    assert.equal(game.getReceivers()[0].stamina, 100);
+  } finally {
+    cleanup?.();
+    globalThis.requestAnimationFrame = originalRequest;
+    globalThis.cancelAnimationFrame = originalCancel;
+  }
 });
 
 test('relative joystick controls QB in pocket and does not interfere with tapping receiver to pass', () => {
@@ -537,6 +621,59 @@ test('user cannot pull defensive sprite across the line of scrimmage (illegal of
     assert.equal(def0.defenseAssignment, 'USER');
   } finally {
     cleanup?.();
+  }
+});
+
+test('Space starts ready plays on both sides, ignores repeats and typing, and arrows do not scroll', () => {
+  const originalWindow = globalThis.window;
+  const listeners = new Map<string, EventListener>();
+  const mockWindow = {
+    innerWidth: 350, innerHeight: 695,
+    localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
+    addEventListener: (type: string, listener: EventListener) => listeners.set(type, listener),
+    removeEventListener: (type: string) => listeners.delete(type)
+  };
+  globalThis.window = mockWindow as unknown as Window & typeof globalThis;
+  let engine: GameEngineHandle | null = null;
+  const cleanup = mountFootballGame(createMockCanvas(), {
+    setP2OffPlayState: () => {}, setP2DefPlayState: () => {},
+    setDownDistanceText: () => {}, setActiveOffenseState: () => {},
+    setUserScore: () => {}, setCpuScore: () => {}, setP1DefPlayState: () => {},
+    setMomentumState: () => {}, setGameClockState: () => {}, showAnnouncement: () => {},
+    onEngineReady: value => { engine = value; }
+  });
+  try {
+    assert.ok(engine);
+    const game = engine as GameEngineHandle;
+    const keyDown = listeners.get('keydown');
+    assert.ok(keyDown);
+    let prevented = false;
+    const space = { key: ' ', repeat: false, preventDefault: () => { prevented = true; } };
+    keyDown(space as KeyboardEvent);
+    assert.equal(game.phase, 'KICKOFF');
+    for (const team of ['P1', 'P2'] as const) {
+      game.setPossessionForTest?.(team);
+      game.resetDrill();
+      keyDown({ ...space, target: { tagName: 'INPUT' } } as unknown as KeyboardEvent);
+      assert.equal(game.phase, 'PRE_SNAP');
+      keyDown({ ...space, repeat: true } as KeyboardEvent);
+      assert.equal(game.phase, 'PRE_SNAP');
+      game.setPaused(true);
+      keyDown(space as KeyboardEvent);
+      assert.equal(game.phase, 'PRE_SNAP');
+      game.setPaused(false);
+      prevented = false;
+      keyDown(space as KeyboardEvent);
+      assert.notEqual(game.phase, 'PRE_SNAP');
+      assert.equal(prevented, true);
+    }
+    prevented = false;
+    keyDown({ key: 'ArrowLeft', preventDefault: () => { prevented = true; } } as KeyboardEvent);
+    assert.equal(prevented, true);
+  } finally {
+    cleanup?.();
+    if (originalWindow === undefined) Reflect.deleteProperty(globalThis, 'window');
+    else globalThis.window = originalWindow;
   }
 });
 

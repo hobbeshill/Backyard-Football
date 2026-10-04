@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { Volume2, VolumeX, RefreshCw, HelpCircle, X, Users, Shield, ArrowRight, Search, Pause, Play, Home, Hand } from 'lucide-react';
+import { Volume2, VolumeX, RefreshCw, HelpCircle, X, Users, Shield, ArrowRight, Search, Pause, Play, Home, Hand, Repeat2, Crosshair, BatteryLow } from 'lucide-react';
 import { offensivePlaybook, defensivePlaybook } from './game/playbook';
 import { sounds } from './game/sound';
-import { hasSavedGameSession, mountFootballGame, type GameBoxScore, type GameEngineHandle } from './game/engine';
+import { hasSavedGameSession, mountFootballGame, type GameBoxScore, type GameEngineHandle, type ReceiverStatus } from './game/engine';
 import { HelmetSpritePreview } from './game/HelmetSpritePreview';
 import { RealPlayTutorial } from './game/RealPlayTutorial';
 import { TEAM_KEYS, TEAMS, getAllTeams, getTeam, type TeamProfile } from './game/teams';
@@ -54,6 +54,8 @@ export default function App() {
   const [kickoffSide, setKickoffSide] = useState<{ kicking: 'P1' | 'P2'; receiving: 'P1' | 'P2' }>({ kicking: 'P2', receiving: 'P1' });
   const [is4thDown, setIs4thDown] = useState(false);
   const [phaseState, setPhaseState] = useState('PRE_SNAP');
+  const [receiverStatus, setReceiverStatus] = useState<ReceiverStatus[]>([]);
+  const [gameSpeed, setGameSpeed] = useState<0.8 | 1>(1);
   const [kickMeterPower, setKickMeterPower] = useState(0.55);
   const [momentumState, setMomentumState] = useState(0);
   const [gameClockState, setGameClockState] = useState({ quarter: 1, seconds: 120 });
@@ -342,7 +344,9 @@ export default function App() {
       },
       setIs4thDownState: (val) => setIs4thDown(val),
       setKickMeterPowerState: (power) => setKickMeterPower(power),
-      setP1OffPlayState
+      setP1OffPlayState,
+      setReceiverStatus,
+      setGameSpeedState: setGameSpeed
     });
   }, []);
 
@@ -533,7 +537,7 @@ export default function App() {
     p1OffPlayState !== 'PUNT' && !showPauseMenu && !finishedGame;
 
   return (
-    <div className="relative w-screen h-screen overflow-hidden flex flex-col items-center justify-center bg-[#030704] text-white font-mono select-none">
+    <div className="relative w-screen h-dvh overflow-hidden flex flex-col items-center justify-center pb-20 bg-[#030704] text-white font-mono select-none">
       
       {/* Top Header & Scoreboard */}
       <header className="flex flex-col items-center justify-center z-20 mb-1 w-full max-w-[430px] px-2 pt-1">
@@ -865,6 +869,32 @@ export default function App() {
       </div>
 
       {/* Footer Controls & Info */}
+      {isReadyPhase && !isKickoffActive && p1OffPlayState !== 'PUNT' && activeOffenseState === 'P1' && !showPauseMenu && !finishedGame && (
+        <div className="grid w-full max-w-[420px] grid-cols-3 gap-2 px-2 py-2">
+          {receiverStatus.map((receiver, index) => (
+            <div key={receiver.slot} className="min-w-0 text-xs text-neutral-100">
+              <div className="flex items-center justify-between gap-1">
+                <span className="truncate">{receiver.slot}</span>
+                <button type="button" onClick={() => engineRef.current?.substituteReceiver(index)} title={`Swap ${receiver.slot}: ${Math.round(receiver.reserveStamina)}% stamina on bench`} aria-label={`Substitute ${receiver.slot}`} className="shrink-0 rounded p-2 hover:bg-neutral-700">
+                  <Repeat2 size={16} />
+                </button>
+              </div>
+              <meter aria-label={`${receiver.slot} stamina`} min={0} max={100} low={55} high={75} optimum={100} value={receiver.stamina} className="block h-2 w-full" />
+              <span className="mt-1 flex min-h-4 items-center gap-1 text-[10px]">
+                {receiver.stamina < 55 && <BatteryLow size={12} />}
+                {receiver.isReserve ? 'Reserve' : 'Starter'} · {Math.round(receiver.stamina)}%
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {phaseState === 'RUNNING' && activeOffenseState === 'P2' && !showPauseMenu && !finishedGame && (
+        <button type="button" onClick={() => engineRef.current?.diveTackle()} title="Dive tackle" aria-label="Dive tackle" className="fixed bottom-4 right-4 z-[85] flex h-14 w-14 items-center justify-center rounded-lg border-2 border-cyan-300 bg-neutral-950 text-cyan-200 shadow-xl">
+          <Crosshair size={26} />
+        </button>
+      )}
+
       <footer className="mt-1 text-[0.54rem] text-[#adff2f] text-center z-20 px-2 max-w-[420px] flex items-center justify-between gap-2">
         <span className="font-bold opacity-90">v2.8.6 • 7v7 Football Sandbox</span>
         <span className="text-neutral-300">
@@ -873,6 +903,9 @@ export default function App() {
             : 'Move Highlighted Defender • Ready to Start'}
         </span>
       </footer>
+      <p className="keyboard-controls mt-1 max-w-[420px] px-2 text-center text-xs text-neutral-200">
+        <kbd>Space</kbd> Ready / Snap · <kbd>WASD</kbd> / <kbd>Arrow keys</kbd> Move
+      </p>
 
       {/* Ready button for user defense */}
       {isReadyPhase && activeOffenseState === 'P2' && !showPauseMenu && !finishedGame && (
@@ -883,9 +916,11 @@ export default function App() {
               engineRef.current?.startPlay?.();
             }}
             className="flex items-center gap-1.5 px-4 py-2.5 bg-gradient-to-r from-emerald-600 via-emerald-500 to-green-500 hover:from-emerald-500 hover:to-green-400 active:scale-95 text-white font-black text-xs uppercase rounded-xl border-2 border-emerald-300 shadow-2xl transition cursor-pointer tracking-wider animate-pulse"
-            title="Start Defensive Play"
+            title="Start Defensive Play (Space)"
+            aria-keyshortcuts="Space"
           >
             <Play size={14} className="fill-white" /> READY
+            <kbd className="keyboard-controls rounded border border-white/40 px-1 text-[10px]">Space</kbd>
           </button>
         </div>
       )}
@@ -986,8 +1021,8 @@ export default function App() {
               <div className="bg-black/60 p-2.5 rounded border border-neutral-800">
                 <span className="text-[#00ffaa] font-bold block mb-1">3. BALL CARRIER MOVES & BROKEN TACKLES:</span>
                 <ul className="list-disc list-inside space-y-1 text-neutral-300">
-                  <li><b className="text-white">Broken Tackles for Long Gains:</b> Ball carriers can break and shed tackles! Shedding a defender grants tackle immunity and a turbo boost to break away for massive yardage or touchdowns!</li>
-                  <li><b className="text-white">Relentless Pursuit:</b> Defenders in pursuit steadily accelerate with ever-increasing catch-up speed to hunt down breakaway ball carriers!</li>
+                  <li><b className="text-white">Broken Tackles:</b> Running backs shed contact more often than receivers. A broken tackle briefly slows momentum before a modest burst.</li>
+                  <li><b className="text-white">Pursuit:</b> Defenders accelerate to a bounded top speed and take angles to cut off the runner.</li>
                   <li><b className="text-white">Fumbles & Live Scrambles:</b> Hard hits can pop the football loose! Both offense and defense dive for the tumbling ball—defense recovery causes a turnover!</li>
                   <li><b className="text-white">Clean Pocket Protection:</b> Offensive linemen hold blocks for 5 full seconds before breakdown unless an extra blitzer brings immediate pressure!</li>
                   <li><b className="text-white">Lateral Juke:</b> Quick horizontal swipe left or right to side-step defenders. Jukes do not grant tackle immunity.</li>
@@ -998,9 +1033,9 @@ export default function App() {
               <div className="bg-black/60 p-2.5 rounded border border-neutral-800">
                 <span className="text-[#ff9999] font-bold block mb-1">4. COVERAGE & CONTESTED CATCHES:</span>
                 <ul className="list-disc list-inside space-y-1 text-neutral-300">
-                  <li><b className="text-white">Open Receivers (&gt; 20px):</b> High-percentage clean catches in stride!</li>
-                  <li><b className="text-white">Tight NFL Windows (12–20px):</b> Rewarding on-time throws (~72% completions) with potential pass breakups.</li>
-                  <li><b className="text-white">Tight Blanket (&lt; 12px):</b> Contested grabs (40%), pass breakups, deflections, and rare interceptions.</li>
+                  <li><b className="text-white">Open Receivers:</b> Accurate throws with clear separation remain high-percentage catches.</li>
+                  <li><b className="text-white">Contested Catches:</b> Nearby defenders, double coverage, catch angle, receiver hands, and fatigue determine the catch window. Touching players are not wide open.</li>
+                  <li><b className="text-white">Fatigue:</b> Stamina bars turn amber when tired and red when exhausted. Sprinting and contact reduce stamina; resting and quarter breaks restore it. Swap receivers before the snap using the substitution controls.</li>
                 </ul>
               </div>
 
@@ -1271,6 +1306,16 @@ export default function App() {
             className="w-full max-w-sm rounded-lg border-2 border-[#ffcc00] bg-[#07110a] p-5 text-center shadow-2xl"
           >
             <h2 id="pause-menu-title" className="text-xl font-black uppercase text-[#ffcc00]">Game Paused</h2>
+            <fieldset className="mt-4">
+              <legend className="mb-2 text-xs font-bold text-neutral-200">Game pace</legend>
+              <div className="grid grid-cols-2 rounded border border-neutral-600 p-1">
+                {([{ speed: 0.8, label: 'Relaxed' }, { speed: 1, label: 'Normal' }] as const).map(option => (
+                  <button key={option.speed} type="button" aria-pressed={gameSpeed === option.speed} onClick={() => engineRef.current?.setGameSpeed(option.speed)} className={`rounded px-3 py-2 text-sm font-bold ${gameSpeed === option.speed ? 'bg-neutral-200 text-neutral-950' : 'text-neutral-300 hover:bg-neutral-800'}`}>
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </fieldset>
             <div className="mt-5 grid gap-3">
               <button
                 onClick={() => {

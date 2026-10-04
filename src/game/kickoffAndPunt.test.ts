@@ -531,7 +531,7 @@ test('kick and punt returners use the slower return speed and cannot break tackl
   assert.equal(normalCarrierSpeed, 1.84);
   assert.equal(getBallCarrierRunSpeed(true, false), regularWrRouteSpeed);
   assert.equal(getBallCarrierRunSpeed(true, true), regularWrRouteSpeed);
-  assert.equal(getBallCarrierRunSpeed(false, true), 2.65);
+  assert.equal(getBallCarrierRunSpeed(false, true), 2.15);
   assert.equal(calculateBrokenTackleChance({
     isRB: false,
     isBoosted: false,
