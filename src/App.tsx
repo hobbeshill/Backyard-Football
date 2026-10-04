@@ -53,6 +53,7 @@ export default function App() {
   const [isKickoffActive, setIsKickoffActive] = useState(true);
   const [kickoffSide, setKickoffSide] = useState<{ kicking: 'P1' | 'P2'; receiving: 'P1' | 'P2' }>({ kicking: 'P2', receiving: 'P1' });
   const [is4thDown, setIs4thDown] = useState(false);
+  const [phaseState, setPhaseState] = useState('PRE_SNAP');
   const [kickMeterPower, setKickMeterPower] = useState(0.55);
   const [momentumState, setMomentumState] = useState(0);
   const [gameClockState, setGameClockState] = useState({ quarter: 1, seconds: 120 });
@@ -316,6 +317,7 @@ export default function App() {
       setP2DefPlayState,
       setDownDistanceText,
       setActiveOffenseState,
+      setPhaseState,
       setUserScore,
       setCpuScore,
       setP1DefPlayState,
@@ -867,9 +869,25 @@ export default function App() {
         <span className="text-neutral-300">
           {activeOffenseState === 'P1'
             ? 'Draw Routes • Double-tap field to flip RB • Tap QB to Snap'
-            : 'Tap Defenders to Toggle • Swipe to Shift • Tap QB to Start'}
+            : 'Pull Defender to Reposition • Ready Button to Start'}
         </span>
       </footer>
+
+      {/* Defense Ready Button in bottom left of screen */}
+      {hasKickedOff && !isKickoffActive && activeOffenseState === 'P2' && (phaseState === 'PRE_SNAP' || engineRef.current?.phase === 'PRE_SNAP') && !showPauseMenu && !finishedGame && (
+        <div className="fixed bottom-3 left-3 z-[85]">
+          <button
+            type="button"
+            onClick={() => {
+              engineRef.current?.startDefensePlay?.();
+            }}
+            className="flex items-center gap-1.5 px-4 py-2.5 bg-gradient-to-r from-emerald-600 via-emerald-500 to-green-500 hover:from-emerald-500 hover:to-green-400 active:scale-95 text-white font-black text-xs uppercase rounded-xl border-2 border-emerald-300 shadow-2xl transition cursor-pointer tracking-wider animate-pulse"
+            title="Start Play (Defense Ready)"
+          >
+            <Play size={14} className="fill-white" /> READY
+          </button>
+        </div>
+      )}
 
       {(showPuntAction || showRunPlayActions) && (
         <div className="pointer-events-none fixed inset-x-0 bottom-3 z-[80] flex justify-center px-3 pb-[env(safe-area-inset-bottom)]">
@@ -953,13 +971,14 @@ export default function App() {
               </div>
 
               <div className="bg-black/60 p-2.5 rounded border border-neutral-800">
-                <span className="text-[#ffcc00] font-bold block mb-1">2. PASSING & REALISTIC ARC (OVER THE LINEMEN):</span>
+                <span className="text-[#ffcc00] font-bold block mb-1">2. TAP TO THROW & RELATIVE JOYSTICK CONTROLS:</span>
                 <ul className="list-disc list-inside space-y-1 text-neutral-300">
-                  <li><b className="text-white">High Clearance Over Linemen:</b> Passes release overhand from shoulder height into a realistic parabolic trajectory that climbs high over the helmets and blocks of offensive and defensive linemen in the pocket, complete with a realistic 3D turf drop shadow underneath the football!</li>
-                  <li><b className="text-white">Slingshot Pass:</b> Touch and drag backwards to aim forward. Release to launch the football cleanly!</li>
-                  <li><b className="text-white">Backward Throw / QB Run:</b> Aiming and releasing backwards turns the QB into a runner with all teammates lead-blocking!</li>
-                  <li><b className="text-white">Throw to RB:</b> Hit your Running Back streaking deep on a fly or checking down into the flat!</li>
-                  <li><b className="text-white">QB Scramble:</b> Pull and release backward to tuck the ball and run with the QB.</li>
+                  <li><b className="text-white">Tap to Throw:</b> Tap any eligible receiver downfield (WR, Center, or RB) to launch a crisp pass with smart lead targeting so they catch the ball in stride!</li>
+                  <li><b className="text-white">Relative Virtual Joystick:</b> Touch and drag anywhere on screen (or use WASD / Arrow keys on keyboard) to control your player with a smooth floating joystick!</li>
+                  <li><b className="text-white">Quarterback Control:</b> Maneuver the QB in the pocket, step up to avoid blitzers, roll out, or cross the line of scrimmage to scramble!</li>
+                  <li><b className="text-white">Ball Carrier Control:</b> Steer the Running Back through holes, cut laterally, or slow down behind lead blockers!</li>
+                  <li><b className="text-white">Edge Rusher on Defense:</b> Take control of the edge rusher with the joystick, bend around the tackle, collapse the pocket, and deliver a bone-crushing sack!</li>
+                  <li><b className="text-white">Zero Interference:</b> The relative joystick never interferes with tapping a receiver to pass—two-thumb control works effortlessly!</li>
                 </ul>
               </div>
 

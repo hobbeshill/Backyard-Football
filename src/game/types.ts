@@ -1,6 +1,6 @@
 export type PlayRisk = 'SAFE' | 'BALANCED' | 'EXPLOSIVE';
 export type RouteType = 'SHORT' | 'MEDIUM' | 'VERTICAL';
-export type DefensiveAssignment = 'BLITZ' | 'MAN' | 'ZONE' | 'QB_SPY' | 'RB_SPY';
+export type DefensiveAssignment = 'BLITZ' | 'MAN' | 'ZONE' | 'QB_SPY' | 'RB_SPY' | 'USER';
 
 export interface PlayOption {
   name: string;
