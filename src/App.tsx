@@ -1011,7 +1011,7 @@ export default function App() {
                 <ul className="list-disc list-inside space-y-1 text-neutral-300">
                   <li><b className="text-white">Open Receivers:</b> Accurate throws with clear separation remain high-percentage catches.</li>
                   <li><b className="text-white">Contested Catches:</b> Nearby defenders, double coverage, catch angle, receiver hands, and fatigue determine the catch window. Touching players are not wide open.</li>
-                  <li><b className="text-white">Fatigue:</b> Stamina bars under players turn amber when tired and red when exhausted. Each pass target costs a receiver one-third of their stamina; two plays without a target restore it.</li>
+                  <li><b className="text-white">Fatigue:</b> Stamina bars under players turn amber when tired and red when exhausted. Each pass target costs a receiver one-third of their stamina; two plays without a target restore it. Exhausted receivers run slower and are more likely to fumble after hard contact.</li>
                 </ul>
               </div>
 

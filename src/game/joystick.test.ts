@@ -192,9 +192,15 @@ test('relative joystick controls QB in pocket and does not interfere with tappin
     downHandler({ clientX: 170, clientY: 273, pointerId: 1 } as PointerEvent);
     upHandler({ clientX: 170, clientY: 273, pointerId: 1 } as PointerEvent);
     assert.equal(game.phase, 'QB_DROP');
+    assert.equal(game.isJoystickActiveForTest?.(), false);
 
-    // 2. Relative Joystick touch starts on left side of field (pointerId: 10)
+    downHandler({ clientX: 80, clientY: 100, pointerId: 9 } as PointerEvent);
+    assert.equal(game.isJoystickActiveForTest?.(), false, 'Top-half touch must not activate the joystick');
+    upHandler({ clientX: 80, clientY: 100, pointerId: 9 } as PointerEvent);
+
+    // Relative joystick is restricted to the lower half of the field.
     downHandler({ clientX: 80, clientY: 350, pointerId: 10 } as PointerEvent);
+    assert.equal(game.isJoystickActiveForTest?.(), true);
     // Drag joystick up and right
     moveHandler({ clientX: 110, clientY: 320, pointerId: 10 } as PointerEvent);
 
@@ -205,9 +211,69 @@ test('relative joystick controls QB in pocket and does not interfere with tappin
 
     // Pass should be thrown immediately to the WR without joystick interference!
     assert.equal(game.phase, 'THROWN');
+    assert.equal(game.isJoystickActiveForTest?.(), true, 'Receiver tap must not replace or disturb the movement pointer');
 
     // Lift joystick finger
     upHandler({ clientX: 110, clientY: 320, pointerId: 10 } as PointerEvent);
+  } finally {
+    cleanup?.();
+  }
+});
+
+test('tapping a receiver to pass does not activate the joystick by itself', () => {
+  const canvas = createMockCanvas();
+  let engine: GameEngineHandle | null = null;
+  const cleanup = mountFootballGame(canvas, {
+    setP2OffPlayState: () => {}, setP2DefPlayState: () => {},
+    setDownDistanceText: () => {}, setActiveOffenseState: () => {},
+    setUserScore: () => {}, setCpuScore: () => {}, setP1DefPlayState: () => {},
+    setMomentumState: () => {}, setGameClockState: () => {}, showAnnouncement: () => {},
+    onEngineReady: value => { engine = value; }
+  });
+  try {
+    assert.ok(engine);
+    const game = engine as GameEngineHandle;
+    game.setPossessionForTest?.('P1');
+    game.resetDrill();
+    const pointerDown = (canvas as any)._listeners.get('pointerdown');
+    const pointerUp = (canvas as any)._listeners.get('pointerup');
+    pointerDown({ clientX: 170, clientY: 273, pointerId: 1 } as PointerEvent);
+    pointerUp({ clientX: 170, clientY: 273, pointerId: 1 } as PointerEvent);
+    pointerDown({ clientX: 40, clientY: 225, pointerId: 2 } as PointerEvent);
+    assert.equal(game.phase, 'THROWN');
+    assert.equal(game.isJoystickActiveForTest?.(), false);
+  } finally {
+    cleanup?.();
+  }
+});
+
+test('a safety awards two points to the defense and sends the conceding team to kick off', () => {
+  let p1Score = 0;
+  let p2Score = 0;
+  let kickoff: ['P1' | 'P2', 'P1' | 'P2'] | null = null;
+  let engine: GameEngineHandle | null = null;
+  const cleanup = mountFootballGame(createMockCanvas(), {
+    setP2OffPlayState: () => {}, setP2DefPlayState: () => {},
+    setDownDistanceText: () => {}, setActiveOffenseState: () => {},
+    setUserScore: score => { p1Score = score; },
+    setCpuScore: score => { p2Score = score; },
+    setP1DefPlayState: () => {}, setMomentumState: () => {},
+    setGameClockState: () => {}, showAnnouncement: () => {},
+    setIsKickoffState: (active, kicking, receiving) => {
+      if (active) kickoff = [kicking, receiving];
+    },
+    onEngineReady: value => { engine = value; }
+  });
+  try {
+    assert.ok(engine);
+    const game = engine as GameEngineHandle;
+    game.setPossessionForTest?.('P1');
+    game.resetDrill();
+    game.triggerPlayEnd?.(1150, 'TACKLE');
+    assert.equal(p1Score, 0);
+    assert.equal(p2Score, 2);
+    assert.deepEqual(kickoff, ['P1', 'P2']);
+    assert.equal(game.isKickoffActive(), true);
   } finally {
     cleanup?.();
   }

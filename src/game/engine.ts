@@ -2,9 +2,9 @@ import type { Ball, DefensiveAssignment, Entity, FumbleBall } from './types';
 import { defensiveKeys, defensivePlaybook, middleRoutes, offensiveKeys, offensivePlaybook, outsideRoutes, runningBackRoutes, wrRoutes } from './playbook';
 import { alignDefenderAcrossFromReceiver, alignDefenderAcrossFromRunningBack, alignDefenderToZone, alignDefenders, chooseCpuDefensiveAssignments, constrainDefendersToFieldSide, getBlitzAlignmentY, getBracketCoverageTarget, getDefensiveLineAlignmentY, matchCpuDefendersToReceivers, separateDefenderAlignments } from './defense';
 import { evaluateCpuOffensiveAudibles, evaluateCpuBallCarrierMoves, isCpuPressureRecognized, shouldCpuGoForItOnFourthDown, shouldCpuReleasePass, shouldCpuScramble, scoreRunBlockTarget } from './ai';
-import { createFumbleBall } from './fumbles';
+import { createFumbleBall, getCarrierFumbleChance } from './fumbles';
 import { canEngagePassBlock, clampPlayerToFieldY, createSimulationClock, distToSegment, GAME_SPEED_SCALE, getBallCarrierRunSpeed, getDesignedRunLateralBias, getFatigueSpeedMultiplier, getPassBlockHoldFrames, getReturnPursuitSpeed, getReturnTeamBlockers, isRusherActivelyBlocked, moveToward, resolveCollisions, shouldApplyRunBlockStun, shouldHoldPassBlock, updatePlayerStamina, updateReceiverTargetStamina, updateRouteMovement } from './movement';
-import { resolvePlayResult, calculateBrokenTackleChance, calculateYardsToGo, getDriveStartY, getSnapBallPosition, getPassArcHeight, getPassArcMaxHeight, getPassFlightFrames, findTappedPassReceiver, shouldReleaseUserPass, getPassLeadTarget, getRoutePassLeadTarget, canDefenderDeflectPass, canTackleQuarterback, resolveCatchContestOutcome, evaluateQbThrowAccuracy, getCpuThrowAimVariance, calculateKickoffFlight, calculatePuntFlight, getTouchbackYardLineY, getKickoffLineY, getDefenderPassReachHeight, isPlayerOutOfBounds } from './rules';
+import { resolvePlayResult, isSafety, calculateBrokenTackleChance, calculateYardsToGo, getDriveStartY, getSnapBallPosition, getPassArcHeight, getPassArcMaxHeight, getPassFlightFrames, findTappedPassReceiver, shouldReleaseUserPass, getPassLeadTarget, getRoutePassLeadTarget, canDefenderDeflectPass, canTackleQuarterback, resolveCatchContestOutcome, evaluateQbThrowAccuracy, getCpuThrowAimVariance, calculateKickoffFlight, calculatePuntFlight, getTouchbackYardLineY, getKickoffLineY, getDefenderPassReachHeight, isPlayerOutOfBounds } from './rules';
 import { sounds } from './sound';
 import { evaluateDirtSwipeGesture, drawDirtSwipeGesture } from './chalkMenu';
 import { getHelmetDesign, type HelmetDesign } from './helmetDesigns';
@@ -50,6 +50,7 @@ export interface GameEngineHandle {
   repositionDefender?: (index: number, x: number, y: number) => void;
   diveTackle: () => void;
   getReceivers: () => Entity[];
+  isJoystickActiveForTest?: () => boolean;
 }
 
 export interface GameEngineCallbacks {
@@ -1478,7 +1479,31 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     });
     const yardsGained = playResult.yardsGained;
 
-    if (playResult.isTouchdown) {
+    if (isSafety(endingY, attackDirection, fieldHeight, endZoneHeight, resultType)) {
+      gameClockRunning = false;
+      sounds.playWhistle();
+      const scoringTeam: 'P1' | 'P2' = endedOffense === 'P1' ? 'P2' : 'P1';
+      if (scoringTeam === 'P1') {
+        p1Score += 2;
+        p1QuarterScores[quarter - 1] += 2;
+        setUserScore(p1Score);
+      } else {
+        p2Score += 2;
+        p2QuarterScores[quarter - 1] += 2;
+        setCpuScore(p2Score);
+      }
+      showAnnouncement('SAFETY! 2 POINTS!', scoringTeam === 'P1' ? '#00ffff' : '#ff3333', true, {
+        category: 'SAFETY',
+        subtext: `${(scoringTeam === 'P1' ? p1Team : p2Team).name.toUpperCase()} SCORES 2 • ${endedOffense === 'P1' ? p1Team.name.toUpperCase() : p2Team.name.toUpperCase()} TO KICK OFF`,
+        possessionTeam: scoringTeam,
+        durationMs: 5500
+      });
+      applyMomentum(1);
+      isKickoffPhase = true;
+      kickoffKickingTeam = endedOffense;
+      kickoffReceivingTeam = scoringTeam;
+      setIsKickoffState?.(true, kickoffKickingTeam, kickoffReceivingTeam);
+    } else if (playResult.isTouchdown) {
       gameClockRunning = false;
       sounds.playTouchdown();
       applyMomentum(2);
@@ -2144,6 +2169,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     p1Team,
     p2Team,
     getReceivers: () => receivers,
+    isJoystickActiveForTest: () => joystick.active,
     diveTackle,
     selectP1Team: (teamId: string) => {
       p1Team = getTeam(teamId);
@@ -2800,16 +2826,18 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     const isLiveMovementPhase = (phase === 'QB_DROP' || phase === 'HANDOFF' || phase === 'RUNNING');
     if (typeof joystick !== 'undefined' && isLiveMovementPhase && !joystick.active) {
       const cPos = typeof getCanvasCoords === 'function' ? getCanvasCoords(e.clientX, e.clientY) : { x: e.clientX, y: e.clientY };
-      joystick.active = true;
-      joystick.pointerId = e.pointerId;
-      joystick.baseX = cPos.x;
-      joystick.baseY = cPos.y;
-      joystick.currentX = cPos.x;
-      joystick.currentY = cPos.y;
-      joystick.inputX = 0;
-      joystick.inputY = 0;
-      joystick.distance = 0;
-      joystick.alpha = 1.0;
+      if (cPos.y >= canvas.height / 2) {
+        joystick.active = true;
+        joystick.pointerId = e.pointerId;
+        joystick.baseX = cPos.x;
+        joystick.baseY = cPos.y;
+        joystick.currentX = cPos.x;
+        joystick.currentY = cPos.y;
+        joystick.inputX = 0;
+        joystick.inputY = 0;
+        joystick.distance = 0;
+        joystick.alpha = 1.0;
+      }
     }
   };
 
@@ -4857,7 +4885,12 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
           // FUMBLE EVALUATION on hard hit
           const fumbleRoll = Math.random();
-          const fumbleChance = isBlitzer ? 0.17 : isBigHit ? 0.12 : 0.08;
+          const fumbleChance = getCarrierFumbleChance({
+            isBlitzer,
+            isBigHit,
+            isFatiguedReceiver: receivers.includes(activeEntity),
+            stamina: activeEntity.stamina ?? 100
+          });
           if (fumbleRoll < fumbleChance) {
             triggerFumble(activeEntity);
             return;

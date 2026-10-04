@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { isCpuPressureRecognized, scoreRunBlockTarget, shouldCpuReleasePass, shouldCpuScramble } from './ai';
 import { alignDefenderAcrossFromReceiver, alignDefenderAcrossFromRunningBack, alignDefenderToZone, alignDefenders, chooseCpuDefensiveAssignments, constrainDefendersToFieldSide, getBlitzAlignmentY, getBracketCoverageTarget, getDefensiveLineAlignmentY, matchCpuDefendersToReceivers, separateDefenderAlignments } from './defense';
-import { calculateYardsToGo, canDefenderDeflectPass, canTackleQuarterback, findTappedPassReceiver, getCatchCompletionChance, getDefenderPassReachHeight, getDriveStartY, getSnapBallPosition, getPassArcHeight, getPassArcMaxHeight, getPassFlightFrames, getPassLeadTarget, getRoutePassLeadTarget, resolveCatchContestOutcome, resolvePlayResult } from './rules';
+import { getCarrierFumbleChance } from './fumbles';
+import { calculateYardsToGo, canDefenderDeflectPass, canTackleQuarterback, findTappedPassReceiver, getCatchCompletionChance, getDefenderPassReachHeight, getDriveStartY, getSnapBallPosition, getPassArcHeight, getPassArcMaxHeight, getPassFlightFrames, getPassLeadTarget, getRoutePassLeadTarget, isSafety, resolveCatchContestOutcome, resolvePlayResult } from './rules';
 import { canEngagePassBlock, clampPlayerToFieldY, getFatigueSpeedMultiplier, getPassBlockHoldFrames, isRusherActivelyBlocked, moveToward, shouldHoldPassBlock, updatePlayerStamina, updateReceiverTargetStamina, updateRouteMovement } from './movement';
 import type { Entity } from './types';
 
@@ -41,7 +42,7 @@ test('route movement applies the speed bonus once and fatigue slows receivers', 
   };
   const normal = runRoute(1, 100);
   assert.ok(Math.abs(runRoute(1.08, 100) / normal - 1.08) < 0.001);
-  assert.ok(runRoute(1, 0) / normal > 0.83 && runRoute(1, 0) / normal <= 0.85);
+  assert.ok(runRoute(1, 0) / normal > 0.62 && runRoute(1, 0) / normal <= 0.63);
 });
 
 test('fatigue follows workload and endurance, with bounded recovery and speed penalties', () => {
@@ -50,7 +51,7 @@ test('fatigue follows workload and endurance, with bounded recovery and speed pe
   assert.equal(updatePlayerStamina(2, 500), 0);
   assert.equal(updatePlayerStamina(99, 0, 1, 5), 100);
   assert.equal(getFatigueSpeedMultiplier(100), 1);
-  assert.equal(getFatigueSpeedMultiplier(-20), 0.85);
+  assert.equal(getFatigueSpeedMultiplier(-20), 0.65);
 });
 
 test('three WR targets exhaust stamina and two untargeted plays restore it', () => {
@@ -65,6 +66,14 @@ test('three WR targets exhaust stamina and two untargeted plays restore it', () 
   assert.equal(stamina, 50);
   stamina = updateReceiverTargetStamina(stamina, false);
   assert.equal(stamina, 100);
+});
+
+test('an exhausted WR has increased hit-triggered fumble risk, unlike other carriers', () => {
+  const contact = { isBlitzer: false, isBigHit: false };
+  assert.equal(getCarrierFumbleChance({ ...contact, isFatiguedReceiver: true, stamina: 100 }), 0.08);
+  assert.ok(Math.abs(getCarrierFumbleChance({ ...contact, isFatiguedReceiver: true, stamina: 0 }) - 0.23) < 0.000001);
+  assert.equal(getCarrierFumbleChance({ ...contact, isFatiguedReceiver: false, stamina: 0 }), 0.08);
+  assert.ok(Math.abs(getCarrierFumbleChance({ isBlitzer: true, isBigHit: true, isFatiguedReceiver: true, stamina: 0 }) - 0.32) < 0.000001);
 });
 
 test('deep blitzers must run to a blocker before pass protection can engage them', () => {
@@ -143,6 +152,16 @@ test('fresh possessions start at the offense own 20 in either direction', () => 
     const firstDownY = startY + 100 * attackDirection;
     assert.equal(calculateYardsToGo(startY, firstDownY, attackDirection), 10);
   }
+});
+
+test('tackles and sacks in either own end zone are safeties, but incomplete passes are not', () => {
+  assert.equal(isSafety(1100, -1, 1200, 100, 'TACKLE'), true);
+  assert.equal(isSafety(1150, -1, 1200, 100, 'SACK'), true);
+  assert.equal(isSafety(100, 1, 1200, 100, 'TACKLE'), true);
+  assert.equal(isSafety(50, 1, 1200, 100, 'SACK'), true);
+  assert.equal(isSafety(1099, -1, 1200, 100, 'TACKLE'), false);
+  assert.equal(isSafety(101, 1, 1200, 100, 'TACKLE'), false);
+  assert.equal(isSafety(1150, -1, 1200, 100, 'INCOMPLETE'), false);
 });
 
 test('short passes clear defensive linemen on a safe arc', () => {

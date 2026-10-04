@@ -2,7 +2,7 @@ import type { Entity } from './types';
 
 export const GAME_SPEED_SCALE = 0.77;
 export function getFatigueSpeedMultiplier(stamina = 100): number {
-  return 1 - Math.min(1, Math.max(0, (70 - stamina) / 70)) * 0.15;
+  return 1 - Math.min(1, Math.max(0, (70 - stamina) / 70)) * 0.35;
 }
 
 export function updatePlayerStamina(stamina: number, distance: number, endurance = 1, recovery = 0): number {

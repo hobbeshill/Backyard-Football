@@ -127,6 +127,13 @@ export function resolvePlayResult(input: PlayResultInput): PlayResult {
   };
 }
 
+export function isSafety(endingY: number, attackDirection: number, fieldHeight: number, endZoneHeight: number, resultType: string): boolean {
+  if (resultType !== 'TACKLE' && resultType !== 'SACK') return false;
+  return attackDirection === -1
+    ? endingY >= fieldHeight - endZoneHeight
+    : endingY <= endZoneHeight;
+}
+
 export interface TackleChanceInput {
   isRB: boolean;
   isBoosted: boolean;
