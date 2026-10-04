@@ -875,7 +875,7 @@ export default function App() {
 
       {/* Shared Ready button for offense and defense */}
       {hasKickedOff && !isKickoffActive && (activeOffenseState === 'P1' || activeOffenseState === 'P2') && (phaseState === 'PRE_SNAP' || engineRef.current?.phase === 'PRE_SNAP') && !showPauseMenu && !finishedGame && (
-        <div className="fixed bottom-3 left-3 z-[85]">
+        <div className="fixed bottom-3 right-3 z-[85]">
           <button
             type="button"
             onClick={() => {
@@ -891,7 +891,7 @@ export default function App() {
 
       {(showPuntAction || showRunPlayActions) && (
         <div className="pointer-events-none fixed inset-x-0 bottom-3 z-[80] flex justify-center px-3 pb-[env(safe-area-inset-bottom)]">
-          <div className="pointer-events-auto flex w-full max-w-[420px] gap-2 pl-28">
+          <div className="pointer-events-auto flex w-full max-w-[420px] gap-2 pr-28">
             {showRunPlayActions && (
               <>
                 <button

@@ -70,7 +70,7 @@ export function RealPlayTutorial({ onFinish }: { onFinish: () => void }) {
         <button
           type="button"
           onClick={() => engineRef.current?.startPlay?.()}
-          className="absolute bottom-3 left-3 z-20 flex items-center gap-1.5 rounded-lg border-2 border-emerald-300 bg-emerald-600 px-4 py-2.5 text-xs font-black uppercase text-white shadow-xl"
+          className="absolute bottom-3 right-3 z-20 flex items-center gap-1.5 rounded-lg border-2 border-emerald-300 bg-emerald-600 px-4 py-2.5 text-xs font-black uppercase text-white shadow-xl"
         >
           <Play size={14} className="fill-white" /> READY
         </button>
