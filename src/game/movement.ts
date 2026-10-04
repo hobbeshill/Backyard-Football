@@ -23,6 +23,29 @@ export function canEngagePassBlock(blocker: Entity, rusher: Entity): boolean {
   return Math.hypot(rusher.x - blocker.x, rusher.y - blocker.y) <= blocker.radius + rusher.radius + 6;
 }
 
+export function getPassBlockHoldFrames(baseHoldFrames: number, passProtection: number, passRush: number): number {
+  return Math.max(45, Math.min(210, Math.round(baseHoldFrames * passProtection / passRush)));
+}
+
+export function shouldHoldPassBlock(blocker: Entity, rusher: Entity, holdFrames: number): boolean {
+  if (!canEngagePassBlock(blocker, rusher)) {
+    if ((rusher.blockEngagedTimer || 0) <= holdFrames) rusher.blockEngagedTimer = 0;
+    return false;
+  }
+  if (rusher.isEngagedWithBlocker) return true;
+
+  rusher.blockEngagedTimer = (rusher.blockEngagedTimer || 0) + 1;
+  if (rusher.blockEngagedTimer > holdFrames) return false;
+  rusher.isEngagedWithBlocker = true;
+  rusher.vx = 0;
+  rusher.vy = 0;
+  return true;
+}
+
+export function isRusherActivelyBlocked(rusher: Entity, blockers: Entity[]): boolean {
+  return Boolean(rusher.isEngagedWithBlocker && blockers.some(blocker => canEngagePassBlock(blocker, rusher)));
+}
+
 export function distToSegment(
   p1: { x: number; y: number },
   p2: { x: number; y: number },

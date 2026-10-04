@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { isCpuPressureRecognized, scoreRunBlockTarget, shouldCpuReleasePass, shouldCpuScramble } from './ai';
-import { alignDefenderAcrossFromRunningBack, alignDefenders, chooseCpuDefensiveAssignments, getBracketCoverageTarget, matchCpuDefendersToReceivers } from './defense';
+import { alignDefenderAcrossFromReceiver, alignDefenderAcrossFromRunningBack, alignDefenders, chooseCpuDefensiveAssignments, getBracketCoverageTarget, matchCpuDefendersToReceivers, separateDefenderAlignments } from './defense';
 import { calculateYardsToGo, canDefenderDeflectPass, canTackleQuarterback, findTappedPassReceiver, getDefenderPassReachHeight, getDriveStartY, getSnapBallPosition, getPassArcHeight, getPassArcMaxHeight, getPassFlightFrames, getPassLeadTarget, getRoutePassLeadTarget, resolvePlayResult } from './rules';
-import { canEngagePassBlock, moveToward, updateRouteMovement } from './movement';
+import { canEngagePassBlock, getPassBlockHoldFrames, isRusherActivelyBlocked, moveToward, shouldHoldPassBlock, updateRouteMovement } from './movement';
 import type { Entity } from './types';
 
 test('deep blitzers must run to a blocker before pass protection can engage them', () => {
@@ -35,6 +35,26 @@ test('pass protection engagement checks real contact without moving either playe
   assert.deepEqual(blocker, originalBlocker);
   assert.deepEqual(rusher, originalRusher);
   assert.equal(canEngagePassBlock(blocker, { ...rusher, y: 527 }), false);
+});
+
+test('pass blockers can be shed and nearby unengaged blockers do not prevent sacks', () => {
+  const blocker: Entity = { x: 170, y: 500, radius: 10 };
+  const rusher: Entity = { x: 170, y: 526, radius: 10 };
+  assert.equal(getPassBlockHoldFrames(100, 1.2, 1), 120);
+  assert.equal(getPassBlockHoldFrames(100, 0.6, 1.5), 45);
+
+  for (let frame = 0; frame < 3; frame++) {
+    rusher.isEngagedWithBlocker = false;
+    assert.equal(shouldHoldPassBlock(blocker, rusher, 3), true);
+  }
+  rusher.isEngagedWithBlocker = false;
+  assert.equal(shouldHoldPassBlock(blocker, rusher, 3), false);
+  assert.equal(isRusherActivelyBlocked(rusher, [blocker]), false);
+
+  rusher.isEngagedWithBlocker = true;
+  assert.equal(isRusherActivelyBlocked(rusher, [blocker]), true);
+  blocker.x = 230;
+  assert.equal(isRusherActivelyBlocked(rusher, [blocker]), false);
 });
 
 test('snaps travel from the center in front of the QB to the QB carrying position in either direction', () => {
@@ -555,6 +575,33 @@ test('RB coverage aligns across the line on the RB side for either attack direct
     assert.equal(defender.startX, defender.x);
     assert.equal(defender.startY, defender.y);
   }
+});
+
+test('MAN coverage aligns directly across the line from its assigned receiver', () => {
+  for (const attackDirection of [-1, 1]) {
+    const receiver: Entity = { x: 72, y: 500, radius: 10 };
+    const defender: Entity = { x: 250, y: 620, radius: 10 };
+
+    alignDefenderAcrossFromReceiver(defender, receiver, 500, attackDirection);
+
+    assert.equal(defender.x, receiver.x);
+    assert.equal(defender.y, 500 + (24 * attackDirection));
+    assert.equal(defender.startX, defender.x);
+    assert.equal(defender.startY, defender.y);
+    assert.ok(Math.hypot(defender.x - receiver.x, defender.y - receiver.y) >= 20);
+  }
+});
+
+test('defender alignments separate stacked players before they can be tapped', () => {
+  const defenders: Entity[] = Array.from({ length: 7 }, () => ({ x: 170, y: 500, radius: 10 }));
+
+  separateDefenderAlignments(defenders);
+
+  defenders.forEach((defender, index) => {
+    for (const other of defenders.slice(index + 1)) {
+      assert.ok(Math.hypot(defender.x - other.x, defender.y - other.y) >= 30);
+    }
+  });
 });
 
 test('all WRs have all routes available in their route tree, while RB keeps the two assigned routes plus BLOCK', async () => {
@@ -1088,6 +1135,7 @@ test('offensive double-taps only reposition the RB on offset and scaled canvases
     let phase = 'PRE_SNAP', activeOffense = 'P1', activeDefense = 'P2';
     const isPaused = false, options = {}, tutorialStep = 0;
     const completeTutorialAction = () => {};
+    const receiverHitPadding = 20, touchHitPadding = 18;
     let rbDoubleTapConsumed = false, lastDefenseSelectTime = 0, lastTapTime = 0;
     let tapThrowTarget = null, gestureEntity = null, isDirtGestureActive = false;
     let touchStartX = 0, touchStartY = 0, touchScreenStartX = 0, touchScreenStartY = 0;

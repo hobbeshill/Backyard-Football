@@ -526,6 +526,8 @@ export default function App() {
   const canContinueSeason = gameMode === 'SEASON' && Boolean(
     seasonProgress && seasonProgress.results.length < seasonProgress.opponentIds.length
   );
+  const showPuntAction = !isKickoffActive && activeOffenseState === 'P1' &&
+    (is4thDown || p1OffPlayState === 'PUNT');
 
   return (
     <div className="relative w-screen h-screen overflow-hidden flex flex-col items-center justify-center bg-[#030704] text-white font-mono select-none">
@@ -662,39 +664,7 @@ export default function App() {
             </div>
           )}
         </div>
-      ) : activeOffenseState === 'P1' && p1OffPlayState === 'PUNT' ? (
-        /* Special Teams: Punt Skill Meter HUD */
-        <div className="flex items-center justify-between w-full max-w-[420px] bg-black/95 border-2 border-[#00ffff] px-3 py-1.5 rounded-lg mb-1 shadow-2xl z-20">
-          <div className="flex flex-col text-left">
-            <span className="text-[#00ffff] font-black text-[0.72rem] tracking-wider flex items-center gap-1">
-              🏈 PUNT UNIT READY
-            </span>
-            <span className="text-neutral-300 text-[0.58rem]">
-              POWER: <b className="text-white">{Math.round(kickMeterPower * 100)}%</b> (~{Math.round(25 + kickMeterPower * 30)} YDS)
-            </span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-20 h-3 bg-neutral-800 rounded border border-white/40 overflow-hidden relative">
-              <div
-                className="h-full bg-gradient-to-r from-amber-400 via-cyan-400 to-emerald-400 transition-all duration-75"
-                style={{ width: `${kickMeterPower * 100}%` }}
-              />
-            </div>
-            <button
-              onClick={() => engineRef.current?.punt?.(kickMeterPower)}
-              className="px-3 py-1 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-black font-black text-xs uppercase rounded transition cursor-pointer shadow-lg active:scale-95"
-            >
-              BOOT PUNT 🏈
-            </button>
-            <button
-              onClick={() => handleSelectOffensePlay('SHORT_PASS')}
-              className="px-2 py-1 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 border border-neutral-600 rounded font-bold text-[0.60rem] transition cursor-pointer"
-            >
-              AUDIBLE
-            </button>
-          </div>
-        </div>
-      ) : is4thDown && activeOffenseState === 'P1' ? (
+      ) : is4thDown && activeOffenseState === 'P1' && p1OffPlayState !== 'PUNT' ? (
         /* Special Teams: 4th Down Decision & Punt Option HUD */
         <div className="flex items-center justify-between w-full max-w-[420px] bg-red-950/95 border-2 border-red-500 px-3 py-1.5 rounded-lg mb-1 shadow-2xl z-20 animate-pulse">
           <div className="flex flex-col text-left">
@@ -706,12 +676,6 @@ export default function App() {
             </span>
           </div>
           <div className="flex items-center gap-1.5">
-            <button
-              onClick={() => engineRef.current?.callPunt?.()}
-              className="px-3 py-1 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded font-black text-xs uppercase tracking-wide transition cursor-pointer shadow-md"
-            >
-              🏈 PUNT UNIT
-            </button>
             <button
               onClick={() => handleSelectOffensePlay('SHORT_PASS')}
               className="px-2 py-1 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 border border-neutral-600 rounded font-bold text-[0.62rem] transition cursor-pointer"
@@ -906,6 +870,31 @@ export default function App() {
             : 'Tap Defenders to Toggle • Swipe to Shift • Tap QB to Start'}
         </span>
       </footer>
+
+      {showPuntAction && (
+        <div className="pointer-events-none fixed inset-x-0 bottom-3 z-[80] flex justify-center px-3 pb-[env(safe-area-inset-bottom)]">
+          <div className="pointer-events-auto flex w-full max-w-[420px] gap-2">
+            <button
+              type="button"
+              onClick={() => p1OffPlayState === 'PUNT'
+                ? engineRef.current?.punt?.(kickMeterPower)
+                : engineRef.current?.callPunt?.()}
+              className="flex-1 rounded-lg border-2 border-cyan-300 bg-gradient-to-r from-cyan-600 to-blue-600 px-4 py-3 text-sm font-black uppercase text-white shadow-xl transition hover:from-cyan-500 hover:to-blue-500 active:scale-[0.98]"
+            >
+              {p1OffPlayState === 'PUNT' ? 'BOOT PUNT' : 'PUNT'}
+            </button>
+            {p1OffPlayState === 'PUNT' && (
+              <button
+                type="button"
+                onClick={() => handleSelectOffensePlay('SHORT_PASS')}
+                className="rounded-lg border border-neutral-500 bg-neutral-900 px-4 py-3 text-sm font-bold text-neutral-100 shadow-xl transition hover:bg-neutral-800 active:scale-[0.98]"
+              >
+                Audible
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Game Manual / Help Modal */}
       {showHelp && (

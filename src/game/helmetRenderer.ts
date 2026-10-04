@@ -14,9 +14,10 @@ export function drawHelmetSprite(
   ctx: HelmetDrawingContext,
   entity: Pick<Entity, 'x' | 'y' | 'radius' | 'vx' | 'vy'>,
   design: HelmetDesign,
-  forwardDirection: number
+  forwardDirection: number,
+  sizeScale = 1
 ) {
-  const radius = entity.radius * 1.16;
+  const radius = entity.radius * 1.16 * sizeScale;
   const velocityX = entity.vx || 0;
   const velocityY = entity.vy || 0;
   const moving = Math.hypot(velocityX, velocityY) > 0.5;

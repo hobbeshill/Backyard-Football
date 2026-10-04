@@ -40,6 +40,72 @@ export function alignDefenderAcrossFromRunningBack(
   defender.vy = 0;
 }
 
+export function alignDefenderAcrossFromReceiver(
+  defender: Entity,
+  receiver: Entity,
+  lineOfScrimmageY: number,
+  attackDirection: number,
+  fieldWidth = 340
+): void {
+  const radius = defender.radius || 10;
+  const targetX = Math.max(radius, Math.min(fieldWidth - radius, receiver.x));
+  const targetY = lineOfScrimmageY + (24 * attackDirection);
+  defender.startX = targetX;
+  defender.startY = targetY;
+  defender.x = targetX;
+  defender.y = targetY;
+  defender.vx = 0;
+  defender.vy = 0;
+}
+
+export function separateDefenderAlignments(defenders: Entity[], fieldWidth = 340, minimumPadding = 10): void {
+  const positioned: Entity[] = [];
+
+  defenders.forEach((defender, index) => {
+    const originalX = defender.startX ?? defender.x;
+    const originalY = defender.startY ?? defender.y;
+    let x = originalX;
+    let y = originalY;
+
+    for (let pass = 0; pass < defenders.length; pass++) {
+      const overlap = positioned.find(other => {
+        const minimumDistance = (defender.radius || 10) + (other.radius || 10) + minimumPadding;
+        return Math.hypot(x - other.x, y - other.y) < minimumDistance;
+      });
+      if (!overlap) break;
+
+      let dx = x - overlap.x;
+      let dy = y - overlap.y;
+      let distance = Math.hypot(dx, dy);
+      if (distance === 0) {
+        dx = index % 2 === 0 ? 1 : -1;
+        distance = 1;
+      }
+
+      const minimumDistance = (defender.radius || 10) + (overlap.radius || 10) + minimumPadding;
+      const separation = minimumDistance - distance;
+      x += (dx / distance) * separation;
+      y += (dy / distance) * separation;
+      x = Math.max(defender.radius || 10, Math.min(fieldWidth - (defender.radius || 10), x));
+      const remainingDistance = Math.hypot(x - overlap.x, y - overlap.y);
+      if (remainingDistance < minimumDistance) {
+        const verticalDistance = Math.sqrt(Math.max(0, minimumDistance ** 2 - (x - overlap.x) ** 2)) + 1;
+        y = overlap.y + (index % 2 === 0 ? verticalDistance : -verticalDistance);
+      }
+    }
+
+    const deltaX = x - originalX;
+    const deltaY = y - originalY;
+    defender.x = x;
+    defender.y = y;
+    defender.startX = x;
+    defender.startY = y;
+    if (defender.zoneX !== undefined) defender.zoneX += deltaX;
+    if (defender.zoneY !== undefined) defender.zoneY += deltaY;
+    positioned.push(defender);
+  });
+}
+
 export function alignDefenders(
   defenders: Entity[],
   playKey: string,

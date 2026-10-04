@@ -1,9 +1,9 @@
 import type { Ball, Entity, FumbleBall } from './types';
 import { defensiveKeys, defensivePlaybook, middleRoutes, offensiveKeys, offensivePlaybook, outsideRoutes, runningBackRoutes, wrRoutes } from './playbook';
-import { alignDefenderAcrossFromRunningBack, alignDefenders, chooseCpuDefensiveAssignments, getBracketCoverageTarget, matchCpuDefendersToReceivers } from './defense';
+import { alignDefenderAcrossFromReceiver, alignDefenderAcrossFromRunningBack, alignDefenders, chooseCpuDefensiveAssignments, getBracketCoverageTarget, matchCpuDefendersToReceivers, separateDefenderAlignments } from './defense';
 import { evaluateCpuOffensiveAudibles, evaluateCpuBallCarrierMoves, isCpuPressureRecognized, shouldCpuReleasePass, shouldCpuScramble, scoreRunBlockTarget } from './ai';
 import { createFumbleBall } from './fumbles';
-import { canEngagePassBlock, distToSegment, GAME_SPEED_SCALE, getBallCarrierRunSpeed, getReturnPursuitSpeed, getReturnTeamBlockers, moveToward, resolveCollisions, shouldApplyRunBlockStun, updateRouteMovement } from './movement';
+import { canEngagePassBlock, distToSegment, GAME_SPEED_SCALE, getBallCarrierRunSpeed, getPassBlockHoldFrames, getReturnPursuitSpeed, getReturnTeamBlockers, isRusherActivelyBlocked, moveToward, resolveCollisions, shouldApplyRunBlockStun, shouldHoldPassBlock, updateRouteMovement } from './movement';
 import { resolvePlayResult, calculateBrokenTackleChance, calculateYardsToGo, getDriveStartY, getSnapBallPosition, getPassArcHeight, getPassArcMaxHeight, getPassFlightFrames, findTappedPassReceiver, shouldReleaseUserPass, getPassLeadTarget, getRoutePassLeadTarget, canDefenderDeflectPass, canTackleQuarterback, resolveCatchContestOutcome, evaluateQbThrowAccuracy, calculateKickoffFlight, calculatePuntFlight, getTouchbackYardLineY, getKickoffLineY, isPlayerOutOfBounds } from './rules';
 import { sounds } from './sound';
 import { evaluateDirtSwipeGesture, drawDirtSwipeGesture } from './chalkMenu';
@@ -110,6 +110,12 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   } = callbacks;
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
+  const touchOptimized = typeof window !== 'undefined' && (
+    (typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0) ||
+    (typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches)
+  );
+  const touchHitPadding = touchOptimized ? 30 : 18;
+  const receiverHitPadding = touchOptimized ? 30 : 20;
 
   const fieldWidth = 340;
   const fieldHeight = 1200;
@@ -468,7 +474,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       } else {
         defenseOverrides.set(defenderIndex, value as 'BLITZ' | 'MAN' | 'ZONE' | 'QB_SPY' | 'RB_SPY');
       }
-      applyDefensiveAlignment(true, false);
+      applyDefensiveAlignment(true, false, true);
       sounds.playJuke();
       if (activeOffense === 'P2') {
         triggerCpuOffensiveAudible(false);
@@ -569,6 +575,32 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       if (!override) return;
       defender.passRusher = assignment === 'BLITZ';
       defender.assignedReceiver = undefined;
+      if (assignment === 'BLITZ') {
+        const rushX = defender.startX ?? defender.x;
+        const rushY = lineOfScrimmageY + (24 * attackDirection);
+        defender.startX = rushX;
+        defender.startY = rushY;
+        defender.x = rushX;
+        defender.y = rushY;
+        defender.zoneX = undefined;
+        defender.zoneY = undefined;
+      } else if (assignment === 'ZONE' && (defender.zoneX === undefined || defender.zoneY === undefined)) {
+        const zoneDepth = defender.type === 'FS' || defender.type === 'SS'
+          ? 210
+          : defender.type === 'CB'
+            ? 125
+            : defender.type === 'DL'
+              ? 85
+              : 105;
+        const zoneX = defender.startX ?? defender.x;
+        const zoneY = lineOfScrimmageY + (zoneDepth * attackDirection);
+        defender.startX = zoneX;
+        defender.startY = lineOfScrimmageY + ((zoneDepth - 30) * attackDirection);
+        defender.zoneX = zoneX;
+        defender.zoneY = zoneY;
+        defender.x = defender.startX;
+        defender.y = defender.startY;
+      }
     });
 
     const eligibleReceivers = [...receivers, centerReceiver, rb]
@@ -591,6 +623,9 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           Math.hypot(first.x - defender.x, first.y - defender.y) -
           Math.hypot(second.x - defender.x, second.y - defender.y)
         )[0];
+      if (defender.assignedReceiver) {
+        alignDefenderAcrossFromReceiver(defender, defender.assignedReceiver, lineOfScrimmageY, attackDirection, fieldWidth);
+      }
     });
     if (activeDefense === 'P2') {
       matchCpuDefendersToReceivers(defenders, [...receivers, centerReceiver, rb].filter((receiver): receiver is Entity => receiver !== null), {
@@ -1064,7 +1099,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     }
   }
 
-  function applyDefensiveAlignment(preservePositions = false, assignRBDefender = true) {
+  function applyDefensiveAlignment(preservePositions = false, assignRBDefender = true, animate = false) {
     const activeDefKey = (activeDefense === 'P1') ? p1DefPlay : p2DefPlay;
     const previousPositions = preservePositions
       ? defenders.map(({ x, y }) => ({ x, y }))
@@ -1087,13 +1122,16 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       );
     }
     applyDefenseOverrides();
+    if (assignRBDefender) positionRBDefender();
+    separateDefenderAlignments(defenders, fieldWidth, touchOptimized ? 20 : 10);
     if (previousPositions) {
+      const alignedPositions = defenders.map(({ x, y }) => ({ x, y }));
       defenders.forEach((defender, index) => {
         defender.x = previousPositions[index].x;
         defender.y = previousPositions[index].y;
       });
+      if (animate) startFormationTransition(defenders, previousPositions, alignedPositions);
     }
-    if (assignRBDefender) positionRBDefender();
   }
 
   function swapPossession() {
@@ -1458,7 +1496,11 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     scheduleDrillReset();
   }
 
-  function startFormationTransition(entities: Entity[], fromPositions: Array<{ x: number; y: number }>) {
+  function startFormationTransition(
+    entities: Entity[],
+    fromPositions: Array<{ x: number; y: number }>,
+    toPositions = entities.map(({ x, y }) => ({ x, y }))
+  ) {
     formationTransitions = [];
     if (entities.length !== fromPositions.length) return;
     formationTransitionFrame = 0;
@@ -1466,8 +1508,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       entity,
       fromX: fromPositions[index].x,
       fromY: fromPositions[index].y,
-      toX: entity.x,
-      toY: entity.y
+      toX: toPositions[index].x,
+      toY: toPositions[index].y
     }));
     formationTransitions.forEach(({ entity, fromX, fromY }) => {
       entity.x = fromX;
@@ -2159,7 +2201,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       // 1. If on offense, check if user tapped/dragged an interactive player (RB, WR, Center) FIRST!
       if (activeOffense === 'P1') {
         // RB tap / line gesture: Checked FIRST to guarantee tapping RB never starts the play!
-        if (rb && Math.hypot(rb.x - px, rb.y - py) < rb.radius + 20) {
+        if (rb && Math.hypot(rb.x - px, rb.y - py) < rb.radius + receiverHitPadding) {
           gestureEntity = rb;
           gestureRole = 'RB';
           gestureStartX = rb.x;
@@ -2173,7 +2215,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         }
 
         // Center tap / line gesture
-        if (centerReceiver && Math.hypot(centerReceiver.x - px, centerReceiver.y - py) < centerReceiver.radius + 20) {
+        if (centerReceiver && Math.hypot(centerReceiver.x - px, centerReceiver.y - py) < centerReceiver.radius + receiverHitPadding) {
           gestureEntity = centerReceiver;
           gestureRole = 'WR';
           gestureStartX = centerReceiver.x;
@@ -2187,7 +2229,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         }
 
         // Outside & Slot Receivers tap / line gesture
-        const eligibleWr = receivers.find(r => r && Math.hypot(r.x - px, r.y - py) < r.radius + 20);
+        const eligibleWr = receivers.find(r => r && Math.hypot(r.x - px, r.y - py) < r.radius + receiverHitPadding);
         if (eligibleWr) {
           gestureEntity = eligibleWr;
           gestureRole = 'WR';
@@ -2211,7 +2253,10 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         touchScreenStartY = e.clientY;
 
         // User taps a defender: select to toggle assignment or flick
-        const hitDefender = defenders.find(d => Math.hypot(d.x - px, d.y - py) < (d.radius || 10) + 18);
+        const hitDefender = defenders
+          .map(defender => ({ defender, distance: Math.hypot(defender.x - px, defender.y - py) }))
+          .filter(({ defender, distance }) => distance < (defender.radius || 10) + touchHitPadding)
+          .sort((first, second) => first.distance - second.distance)[0]?.defender;
         if (hitDefender) {
           gestureEntity = hitDefender;
           gestureRole = 'DEFENDER';
@@ -3419,25 +3464,21 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       const hasExtraBlitzer = passRushers.length >= 2;
       const offTeam = activeOffense === 'P1' ? p1Team : p2Team;
       const defTeam = activeDefense === 'P1' ? p1Team : p2Team;
+      const baseBlockHoldFrames = hasExtraBlitzer ? 75 : 135;
+      const blockHoldFrames = getPassBlockHoldFrames(
+        baseBlockHoldFrames,
+        offTeam.ratings.passProtection || 1,
+        defTeam.ratings.passRush || 1
+      );
 
       // Extra blockers assigned to pass protection (RB, Center)
       const extraPassBlockers = [rb, centerReceiver].filter((b): b is Entity => Boolean(b && (b.isBlocker || b.routeType === 'BLOCK')));
 
       linemen.forEach((l) => {
-        l.blockTimer = (l.blockTimer || 0) + 1;
-        // Requirement: "give the QB(AI and User ) more time in the pocket unless there is an extra blitzer coming."
-        // Standard 1-on-1 rush: 310 frames (~5.0 seconds) clean pocket time!
-        // Extra blitzer coming: 140 frames (~2.3 seconds) on interior, and extra rushers shoot free unless extra blocker steps up!
-        const baseHoldTime = hasExtraBlitzer ? 140 : 310;
-        const blockHoldTime = Math.round(baseHoldTime * (offTeam.ratings.passProtection || 1.0) / (defTeam.ratings.passRush || 1.0));
-
-        if (passRushers.length > 0 && canEngagePassBlock(l, passRushers[0])) {
+        if (phase === 'QB_DROP') l.blockTimer = (l.blockTimer || 0) + 1;
+        if (passRushers.length > 0) {
           const interiorRusher = passRushers[0];
-          if ((l.blockTimer || 0) <= blockHoldTime) {
-            interiorRusher.isEngagedWithBlocker = true;
-            interiorRusher.vx = 0;
-            interiorRusher.vy = 0;
-          } else {
+          if (!shouldHoldPassBlock(l, interiorRusher, blockHoldFrames)) {
             const rushSpeed = (hasExtraBlitzer ? 1.20 : 0.88) * (defTeam.ratings.passRush || 1.0);
             moveToward(interiorRusher, qb.x, qb.y, 0.26, rushSpeed);
           }
@@ -3448,13 +3489,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       if (phase === 'QB_DROP' && passRushers.length > 1) {
         passRushers.slice(1).forEach((extraRusher, idx) => {
           const matchingBlocker = extraPassBlockers[idx];
-          if (matchingBlocker && canEngagePassBlock(matchingBlocker, extraRusher)) {
-            // Extra blocker meets and stones the extra blitzer!
-            extraRusher.isEngagedWithBlocker = true;
-            extraRusher.vx = 0;
-            extraRusher.vy = 0;
-          } else {
-            // UNBLOCKED BLITZER: Intense pressure collapses the pocket!
+          if (!matchingBlocker || !shouldHoldPassBlock(matchingBlocker, extraRusher, blockHoldFrames)) {
             const rushSpeed = 1.35 * (defTeam.ratings.passRush || 1.0);
             moveToward(extraRusher, qb.x, qb.y, 0.32, rushSpeed);
           }
@@ -3624,6 +3659,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     ].filter((e): e is Entity => Boolean(e && (e.isBlocker || e.routeType === 'BLOCK')));
 
     if (phase === 'QB_DROP') {
+      const protectionRating = activeOffense === 'P1' ? p1Team.ratings.passProtection || 1 : p2Team.ratings.passProtection || 1;
+      const rushRating = activeDefense === 'P1' ? p1Team.ratings.passRush || 1 : p2Team.ratings.passRush || 1;
       passBlockers.forEach(blocker => {
         blocker.timer = (blocker.timer || 0) + 1;
         const defaultBlockX = blocker.startX ?? blocker.x;
@@ -3646,12 +3683,14 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
         if (targetRusher) {
           moveToward(blocker, (targetRusher as Entity).x, (targetRusher as Entity).y, 0.42, 2.1);
-          if (canEngagePassBlock(blocker, targetRusher as Entity)) {
-            // Engage pass protection block: stop the rusher
-            (targetRusher as Entity).isEngagedWithBlocker = true;
-            (targetRusher as Entity).blockEngagedTimer = ((targetRusher as Entity).blockEngagedTimer || 0) + 1;
-            (targetRusher as Entity).vx = 0;
-            (targetRusher as Entity).vy = 0;
+          const target = targetRusher as Entity;
+          const isPassRusher = target.passRusher || target.defenseAssignment === 'BLITZ';
+          const holdFrames = isPassRusher
+            ? getPassBlockHoldFrames(85, protectionRating, rushRating)
+            : Infinity;
+          if (isPassRusher && shouldHoldPassBlock(blocker, target, holdFrames)) {
+            blocker.blockingDefender = target;
+            blocker.isEngagedWithBlocker = true;
           }
         } else {
           moveToward(blocker, defaultBlockX, defaultBlockY, 0.28, 1.4);
@@ -3986,10 +4025,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         const contactDist = (qb.radius || 10) + (d.radius || 10) + 4;
         if (dist < contactDist) {
           // If a pass protection blocker is actively engaged on this defender, protect the QB
-          const isBlocked = passBlockers.some(blocker => {
-            const distBlockerToDef = Math.hypot(blocker.x - d.x, blocker.y - d.y);
-            return distBlockerToDef < (blocker.radius || 10) + (d.radius || 10) + 6;
-          });
+          const isBlocked = isRusherActivelyBlocked(d, [...passBlockers, ...linemen]);
           if (isBlocked) return;
 
           // Defender reached the QB! SACK!
@@ -4678,7 +4714,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   }
 
   function drawHelmet(entity: Entity, design: HelmetDesign, forwardDirection: number) {
-    drawHelmetSprite(ctx!, entity, design, forwardDirection);
+    drawHelmetSprite(ctx!, entity, design, forwardDirection, touchOptimized ? 1.14 : 1);
   }
 
   function drawFootball(x: number, y: number, rotation: number, size = 8) {
