@@ -1423,6 +1423,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       isAiming = false;
       playEnding = true;
       if (tutorialStep === 6) {
+        screenShakeTimer = 0;
+        screenShakeStrength = 4;
         activeOffense = 'P2';
         activeDefense = 'P1';
         attackDirection = 1;
