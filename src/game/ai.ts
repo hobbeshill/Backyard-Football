@@ -9,6 +9,23 @@ export interface CpuOffensiveAudibleResult {
   newPlayKey?: string;
 }
 
+export interface CpuFourthDownSituation {
+  distanceToEndzoneYards: number;
+  yardsToGo: number;
+  quarter: number;
+  secondsRemaining: number;
+  scoreDifferential: number;
+}
+
+export function shouldCpuGoForItOnFourthDown(situation: CpuFourthDownSituation): boolean {
+  const isTrailingLate = situation.scoreDifferential < 0 &&
+    situation.quarter === 4 && situation.secondsRemaining <= 45;
+  const isGoalLineOpportunity = situation.distanceToEndzoneYards <= 15 && situation.yardsToGo <= 3;
+  const isShortInScoringRange = situation.distanceToEndzoneYards <= 35 && situation.yardsToGo <= 2;
+  const isShortNearMidfield = situation.distanceToEndzoneYards <= 50 && situation.yardsToGo <= 1;
+  return isTrailingLate || isGoalLineOpportunity || isShortInScoringRange || isShortNearMidfield;
+}
+
 export interface CpuCarrierMoveResult {
   moveType?: 'JUKE' | 'TRUCK';
   announcement?: string;
@@ -94,6 +111,8 @@ export function evaluateCpuOffensiveAudibles(
   const result: CpuOffensiveAudibleResult = {
     blockersAssigned: []
   };
+
+  if (playType === 'PUNT') return result;
 
   // Read RB attention from the defender's position, not hidden assignment flags.
   const rbSpies = defenders.filter(d => d && !d.passRusher && rb &&

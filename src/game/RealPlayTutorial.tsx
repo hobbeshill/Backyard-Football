@@ -3,18 +3,19 @@ import { ArrowRight, Play, RefreshCw, X } from 'lucide-react';
 import { mountFootballGame, type GameEngineHandle } from './engine';
 
 const steps = [
-  ['Offense', 'Change the alignment', 'Swipe horizontally on empty grass to change your formation.'],
-  ['Offense', 'Move the running back', 'Double-tap empty grass on the opposite side of the RB to move him there.'],
-  ['Offense', 'Change a receiver route', 'Drag the highlighted WR horizontally to give him a crossing route.'],
-  ['Offense', 'Create a blocker', 'Tap the highlighted center once. His route changes to BLOCK.'],
-  ['Offense', 'Snap the ball', 'Tap READY to start the play. Your formation, RB position, route, and blocker are now set.'],
-  ['Offense', 'Throw the ball', 'Tap a WR for a quick pass, or drag backward from the QB and release to throw forward.'],
-  ['Offense', 'Watch your play finish', 'Your pass uses the real ball physics, receivers, defenders, and tackle rules.'],
-  ['Defense', 'Change the defensive alignment', 'Swipe horizontally on empty grass to change the defense.'],
-  ['Defense', 'Change an assignment', 'Tap the highlighted defender to cycle Blitz, Man, RB Spy, and Zone, or swipe him horizontally for Man.'],
-  ['Defense', 'Start the defensive play', 'Tap READY to start. Your defensive changes carry into the play.'],
-  ['Defense', 'Make the stop', 'Use the joystick to control the highlighted defender. Tap or quickly swipe the field to dive-tackle.'],
-  ['Complete', 'Both plays completed', 'You set up and played both sides using the same controls as a regular game.']
+  ['Offense', 'Set the formation', 'Swipe horizontally on empty field space to cycle your offensive formation.'],
+  ['Offense', 'Set the running back side', 'Double-tap empty field space on the side you want the RB to line up.'],
+  ['Offense', 'Draw a receiver route', 'Drag the highlighted receiver horizontally to assign a crossing route.'],
+  ['Offense', 'Assign a blocker', 'Tap the highlighted center to switch him to BLOCK.'],
+  ['Offense', 'Snap the ball', 'Tap the highlighted QB. READY is not used on offense.'],
+  ['Offense', 'Throw the ball', 'Tap an eligible receiver, or drag back from the QB and release to throw.'],
+  ['Offense', 'Finish the play', 'Your pass, receivers, defenders, and tackle rules resolve the play.'],
+  ['Defense', 'Choose a defensive alignment', 'Swipe horizontally on empty field space to cycle defensive schemes.'],
+  ['Defense', 'Change teammate assignments', 'Tap an assignment-controlled defender to cycle MAN, ZONE, BLITZ, and RB SPY. A horizontal swipe assigns MAN.'],
+  ['Defense', 'Move the free defender', 'Drag the yellow-ringed player with the red arrow. Only this unassigned defender can be repositioned; keep him on your side of the line.'],
+  ['Defense', 'Start the defensive play', 'Tap READY to start. Your alignment, assignments, and free defender position carry into the play.'],
+  ['Defense', 'Control the free defender', 'Use the joystick to move the highlighted defender. Tap or quickly swipe the field to dive-tackle.'],
+  ['Complete', 'Both sides played', 'You set up offense, made a defensive call, moved the free defender, and played both sides.']
 ];
 
 export function RealPlayTutorial({ onFinish }: { onFinish: () => void }) {
@@ -42,13 +43,13 @@ export function RealPlayTutorial({ onFinish }: { onFinish: () => void }) {
     }, { tutorial: true });
   }, [attempt]);
 
-  const [side, title, instruction] = steps[step] || steps[11];
+  const [side, title, instruction] = steps[step] || steps[12];
   return (
     <section role="dialog" aria-modal="true" aria-labelledby="real-tutorial-title" className="fixed inset-0 z-[140] flex items-center justify-center overflow-hidden bg-[#07110a] text-white">
       <canvas ref={canvasRef} aria-label="Live tutorial football field" className="block h-auto! w-[min(95vw,71dvh,600px)]! touch-none border-2 border-white" style={{ aspectRatio: '340 / 450' }} />
       <div className="pointer-events-none absolute inset-x-0 top-0 z-10 mx-auto w-full max-w-xl bg-white/95 text-[#1b3026] shadow-lg">
         <header className="flex items-center justify-between gap-3 px-3 py-1">
-          <span className="text-xs font-bold text-[#246344]">Tutorial · {side} · {Math.min(step + 1, 12)}/12</span>
+          <span className="text-xs font-bold text-[#246344]">Tutorial · {side} · {Math.min(step + 1, steps.length)}/{steps.length}</span>
           <div className="flex gap-2">
             <button onClick={() => setAttempt(value => value + 1)} aria-label="Restart tutorial" title="Restart tutorial" className="pointer-events-auto rounded p-2 hover:bg-black/10"><RefreshCw size={18} /></button>
             <button onClick={onFinish} aria-label="Exit tutorial" title="Exit tutorial" className="pointer-events-auto rounded p-2 hover:bg-black/10"><X size={20} /></button>
@@ -63,10 +64,10 @@ export function RealPlayTutorial({ onFinish }: { onFinish: () => void }) {
           <span className="min-w-0 truncate">{result}</span>
         </div>
       </div>
-      {step === 11 && (
+      {step === 12 && (
         <button onClick={onFinish} className="absolute bottom-4 flex items-center gap-2 rounded-md bg-emerald-600 px-5 py-3 text-sm font-bold hover:bg-emerald-500">Finish tutorial <ArrowRight size={18} /></button>
       )}
-      {(step === 4 || step === 9) && (
+      {step === 10 && (
         <button
           type="button"
           onClick={() => engineRef.current?.startPlay?.()}

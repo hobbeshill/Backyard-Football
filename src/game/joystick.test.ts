@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mountFootballGame, type GameEngineHandle } from './engine';
+import { getDesignedRunLateralBias } from './movement';
 
 function createMockCanvas(): HTMLCanvasElement {
   const listeners = new Map<string, EventListener>();
@@ -44,6 +45,13 @@ function createMockCanvas(): HTMLCanvasElement {
   return canvas;
 }
 
+test('Sweep lane bias steers outside on either side while ISO keeps its inside path', () => {
+  assert.equal(getDesignedRunLateralBias('SWEEP', 220, 'right'), 1.15);
+  assert.equal(getDesignedRunLateralBias('SWEEP', 120, 'left'), -1.15);
+  assert.equal(getDesignedRunLateralBias('SWEEP', 255, 'right'), 0);
+  assert.equal(getDesignedRunLateralBias('ISO', 220, 'right'), 0);
+});
+
 test('relative joystick controls QB in pocket and does not interfere with tapping receiver to pass', () => {
   const canvas = createMockCanvas();
   let engine: GameEngineHandle | null = null;
@@ -76,10 +84,6 @@ test('relative joystick controls QB in pocket and does not interfere with tappin
 
     downHandler({ clientX: 170, clientY: 273, pointerId: 1 } as PointerEvent);
     upHandler({ clientX: 170, clientY: 273, pointerId: 1 } as PointerEvent);
-    assert.equal(game.phase, 'PRE_SNAP', 'Tapping the QB must not start the play');
-
-    // Ready starts the snap; tapping the QB is no longer a start control.
-    game.startPlay?.();
     assert.equal(game.phase, 'QB_DROP');
 
     // 2. Relative Joystick touch starts on left side of field (pointerId: 10)
@@ -253,7 +257,8 @@ test('controlled player speed matches teammate speed scale', () => {
     const moveHandler = (canvas as any)._listeners.get('pointermove');
     const upHandler = (canvas as any)._listeners.get('pointerup');
 
-    game.startPlay?.();
+    downHandler({ clientX: 170, clientY: 273, pointerId: 1 } as PointerEvent);
+    upHandler({ clientX: 170, clientY: 273, pointerId: 1 } as PointerEvent);
     assert.equal(game.phase, 'QB_DROP');
 
     // Move joystick
@@ -535,7 +540,7 @@ test('user cannot pull defensive sprite across the line of scrimmage (illegal of
   }
 });
 
-test('Ready starts play on both offense and defense', () => {
+test('Ready starts user defense while QB tap starts user offense', () => {
   const canvas = createMockCanvas();
   let engine: GameEngineHandle | null = null;
   const cleanup = mountFootballGame(canvas, {
@@ -559,15 +564,21 @@ test('Ready starts play on both offense and defense', () => {
     game.resetDrill();
     assert.equal(game.phase, 'PRE_SNAP');
 
+    const downHandler = (canvas as any)._listeners.get('pointerdown');
+    const upHandler = (canvas as any)._listeners.get('pointerup');
+    downHandler({ clientX: 170, clientY: 200, pointerId: 1 } as PointerEvent);
+    upHandler({ clientX: 170, clientY: 200, pointerId: 1 } as PointerEvent);
+    assert.equal(game.phase, 'PRE_SNAP', 'Defensive play starts from READY, not a QB tap');
+
     game.startPlay?.();
     assert.notEqual(game.phase, 'PRE_SNAP');
 
-    // Ready also starts the user offense snap.
+    // The offense starts by tapping the QB instead.
     game.setPossessionForTest?.('P1');
     game.resetDrill();
     assert.equal(game.phase, 'PRE_SNAP');
-    const handle = engine as GameEngineHandle;
-    handle.startPlay?.();
+    downHandler({ clientX: 170, clientY: 273, pointerId: 2 } as PointerEvent);
+    upHandler({ clientX: 170, clientY: 273, pointerId: 2 } as PointerEvent);
     assert.ok(game.phase === 'QB_DROP' || game.phase === 'HANDOFF');
   } finally {
     cleanup?.();

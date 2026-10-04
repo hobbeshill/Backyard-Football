@@ -6,6 +6,12 @@ export function getBallCarrierRunSpeed(isReturner: boolean, isBoosted: boolean):
   return isBoosted ? 2.65 : 1.84;
 }
 
+export function getDesignedRunLateralBias(playType: string, currentX: number, side: 'left' | 'right', fieldWidth = 340): number {
+  if (playType !== 'SWEEP') return 0;
+  const targetX = side === 'right' ? fieldWidth - 85 : 85;
+  return Math.max(-1.15, Math.min(1.15, (targetX - currentX) * 0.12));
+}
+
 export function shouldApplyRunBlockStun(blocker: Entity, target: Entity): boolean {
   return !blocker.isEngagedWithBlocker || blocker.blockingDefender !== target;
 }

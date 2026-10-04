@@ -527,8 +527,9 @@ export default function App() {
   const canContinueSeason = gameMode === 'SEASON' && Boolean(
     seasonProgress && seasonProgress.results.length < seasonProgress.opponentIds.length
   );
-  const showPuntAction = !isKickoffActive && activeOffenseState === 'P1' && is4thDown;
-  const showRunPlayActions = hasKickedOff && engineRef.current?.phase === 'PRE_SNAP' && !isKickoffActive && activeOffenseState === 'P1' &&
+  const isReadyPhase = hasKickedOff && engineRef.current?.phase === 'PRE_SNAP' && !engineRef.current.isKickoffActive();
+  const showPuntAction = isReadyPhase && activeOffenseState === 'P1' && is4thDown;
+  const showRunPlayActions = isReadyPhase && activeOffenseState === 'P1' &&
     p1OffPlayState !== 'PUNT' && !showPauseMenu && !finishedGame;
 
   return (
@@ -868,13 +869,13 @@ export default function App() {
         <span className="font-bold opacity-90">v2.8.6 • 7v7 Football Sandbox</span>
         <span className="text-neutral-300">
           {activeOffenseState === 'P1'
-            ? 'Draw Routes • Double-tap field to flip RB • Ready to Start'
+            ? 'Draw Routes • Double-tap field to flip RB • Tap QB to Snap'
             : 'Move Highlighted Defender • Ready to Start'}
         </span>
       </footer>
 
-      {/* Shared Ready button for offense and defense */}
-      {hasKickedOff && !isKickoffActive && (activeOffenseState === 'P1' || activeOffenseState === 'P2') && (phaseState === 'PRE_SNAP' || engineRef.current?.phase === 'PRE_SNAP') && !showPauseMenu && !finishedGame && (
+      {/* Ready button for user defense */}
+      {isReadyPhase && activeOffenseState === 'P2' && !showPauseMenu && !finishedGame && (
         <div className="fixed bottom-3 right-3 z-[85]">
           <button
             type="button"
@@ -882,7 +883,7 @@ export default function App() {
               engineRef.current?.startPlay?.();
             }}
             className="flex items-center gap-1.5 px-4 py-2.5 bg-gradient-to-r from-emerald-600 via-emerald-500 to-green-500 hover:from-emerald-500 hover:to-green-400 active:scale-95 text-white font-black text-xs uppercase rounded-xl border-2 border-emerald-300 shadow-2xl transition cursor-pointer tracking-wider animate-pulse"
-            title="Start Play"
+            title="Start Defensive Play"
           >
             <Play size={14} className="fill-white" /> READY
           </button>
@@ -891,7 +892,7 @@ export default function App() {
 
       {(showPuntAction || showRunPlayActions) && (
         <div className="pointer-events-none fixed inset-x-0 bottom-3 z-[80] flex justify-center px-3 pb-[env(safe-area-inset-bottom)]">
-          <div className="pointer-events-auto flex w-full max-w-[420px] gap-2 pr-28">
+          <div className="pointer-events-auto grid w-full max-w-[420px] grid-cols-2 gap-2 pr-28 sm:grid-cols-3">
             {showRunPlayActions && (
               <>
                 <button
@@ -899,7 +900,7 @@ export default function App() {
                   aria-pressed={p1OffPlayState === 'ISO'}
                   title="Double-tap the left or right field side to flip the running back"
                   onClick={() => handleSelectOffensePlay('ISO')}
-                  className={`flex-1 rounded-lg border px-3 py-3 text-sm font-black uppercase shadow-xl transition active:scale-[0.98] ${p1OffPlayState === 'ISO' ? 'border-emerald-300 bg-emerald-700 text-white' : 'border-emerald-700 bg-emerald-950 text-emerald-100 hover:bg-emerald-900'}`}
+                  className={`min-w-0 w-full whitespace-nowrap rounded-lg border px-1.5 py-2 text-xs font-black uppercase shadow-xl transition active:scale-[0.98] sm:px-3 sm:py-3 sm:text-sm ${p1OffPlayState === 'ISO' ? 'border-emerald-300 bg-emerald-700 text-white' : 'border-emerald-700 bg-emerald-950 text-emerald-100 hover:bg-emerald-900'}`}
                 >
                   ISO Run
                 </button>
@@ -908,7 +909,7 @@ export default function App() {
                   aria-pressed={p1OffPlayState === 'SWEEP'}
                   title="Double-tap the left or right field side to flip the running back"
                   onClick={() => handleSelectOffensePlay('SWEEP')}
-                  className={`flex-1 rounded-lg border px-3 py-3 text-sm font-black uppercase shadow-xl transition active:scale-[0.98] ${p1OffPlayState === 'SWEEP' ? 'border-emerald-300 bg-emerald-700 text-white' : 'border-emerald-700 bg-emerald-950 text-emerald-100 hover:bg-emerald-900'}`}
+                  className={`min-w-0 w-full whitespace-nowrap rounded-lg border px-1.5 py-2 text-xs font-black uppercase shadow-xl transition active:scale-[0.98] sm:px-3 sm:py-3 sm:text-sm ${p1OffPlayState === 'SWEEP' ? 'border-emerald-300 bg-emerald-700 text-white' : 'border-emerald-700 bg-emerald-950 text-emerald-100 hover:bg-emerald-900'}`}
                 >
                   Sweep
                 </button>
@@ -920,7 +921,7 @@ export default function App() {
                 onClick={() => p1OffPlayState === 'PUNT'
                   ? engineRef.current?.punt?.(kickMeterPower)
                   : engineRef.current?.callPunt?.()}
-                className="flex-1 rounded-lg border-2 border-cyan-300 bg-gradient-to-r from-cyan-600 to-blue-600 px-4 py-3 text-sm font-black uppercase text-white shadow-xl transition hover:from-cyan-500 hover:to-blue-500 active:scale-[0.98]"
+                className="min-w-0 w-full whitespace-nowrap rounded-lg border-2 border-cyan-300 bg-gradient-to-r from-cyan-600 to-blue-600 px-1.5 py-2 text-xs font-black uppercase text-white shadow-xl transition hover:from-cyan-500 hover:to-blue-500 active:scale-[0.98] sm:px-4 sm:py-3 sm:text-sm"
               >
                 {p1OffPlayState === 'PUNT' ? 'BOOT PUNT' : 'PUNT'}
               </button>
@@ -929,7 +930,7 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => handleSelectOffensePlay('SHORT_PASS')}
-                className="rounded-lg border border-neutral-500 bg-neutral-900 px-4 py-3 text-sm font-bold text-neutral-100 shadow-xl transition hover:bg-neutral-800 active:scale-[0.98]"
+                className="w-full whitespace-nowrap rounded-lg border border-neutral-500 bg-neutral-900 px-1.5 py-2 text-xs font-bold text-neutral-100 shadow-xl transition hover:bg-neutral-800 active:scale-[0.98] sm:px-4 sm:py-3 sm:text-sm"
               >
                 Audible
               </button>
@@ -965,7 +966,7 @@ export default function App() {
                     </ul>
                   </li>
                   <li><b className="text-white">Single Tap for Run Blocking:</b> Simply tap any player (WR, Center, or RB) to assign them to <b>RUN BLOCKING</b>! A white block bar appears across them and they lead-block for the runner! Tap again to toggle back to route.</li>
-                  <li><b className="text-white">Snap the Ball:</b> Tap the QB (yellow circle) to snap. On defense, tap the QB to start the play! Tap defenders to toggle blitz, man, RB spy, and zone.</li>
+                  <li><b className="text-white">Start the Play:</b> Tap the QB on offense or READY on defense. Tap assignment-controlled defenders to cycle blitz, man, RB spy, and zone.</li>
                   <li><b className="text-white">Flip Running Back:</b> Quick double-tap left or right of center to shift the RB side.</li>
                 </ul>
               </div>

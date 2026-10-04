@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { calculateBrokenTackleChance, calculateKickoffFlight, calculatePuntFlight, getKickoffLineY, getTouchbackYardLineY, isPlayerOutOfBounds } from './rules';
 import { offensivePlaybook } from './playbook';
-import { scoreRunBlockTarget } from './ai';
+import { evaluateCpuOffensiveAudibles, scoreRunBlockTarget, shouldCpuGoForItOnFourthDown } from './ai';
 import { mountFootballGame, type GameEngineHandle } from './engine';
 import { getBallCarrierRunSpeed, getReturnPursuitSpeed, getReturnTeamBlockers, shouldApplyRunBlockStun } from './movement';
 
@@ -81,7 +81,7 @@ test('fourth-down Go For It waits for a deliberate pass after the snap', (contex
       assert.ok(handler);
       handler({ clientX: x, clientY: y } as PointerEvent);
     };
-    game.startPlay?.();
+    send('pointerdown', 170, 273);
     assert.equal(game.phase, 'QB_DROP');
     send('pointermove', 170, 333);
     send('pointerup', 170, 333);
@@ -90,7 +90,8 @@ test('fourth-down Go For It waits for a deliberate pass after the snap', (contex
     send('pointerup', 170, 333);
     assert.equal(game.phase, 'THROWN', 'A deliberate pull should still throw');
     game.resetDrill();
-    game.startPlay?.();
+    send('pointerdown', 170, 273);
+    send('pointerup', 170, 333);
     assert.equal(game.phase, 'QB_DROP');
     send('pointerdown', 50, 225);
     send('pointerup', 50, 225);
@@ -100,6 +101,32 @@ test('fourth-down Go For It waits for a deliberate pass after the snap', (contex
     globalThis.requestAnimationFrame = originalRequest;
     globalThis.cancelAnimationFrame = originalCancel;
   }
+});
+
+test('CPU punts by default but goes for it in short, scoring, and late-trailing situations', () => {
+  const routineFourthDown = {
+    distanceToEndzoneYards: 80,
+    yardsToGo: 8,
+    quarter: 2,
+    secondsRemaining: 90,
+    scoreDifferential: 0
+  };
+  assert.equal(shouldCpuGoForItOnFourthDown(routineFourthDown), false);
+  assert.equal(shouldCpuGoForItOnFourthDown({ ...routineFourthDown, distanceToEndzoneYards: 35, yardsToGo: 2 }), true);
+  assert.equal(shouldCpuGoForItOnFourthDown({ ...routineFourthDown, distanceToEndzoneYards: 15, yardsToGo: 3 }), true);
+  assert.equal(shouldCpuGoForItOnFourthDown({ ...routineFourthDown, distanceToEndzoneYards: 80, yardsToGo: 10, quarter: 4, secondsRemaining: 45, scoreDifferential: -1 }), true);
+  assert.equal(shouldCpuGoForItOnFourthDown({ ...routineFourthDown, distanceToEndzoneYards: 80, yardsToGo: 1, quarter: 4, secondsRemaining: 45, scoreDifferential: 1 }), false);
+});
+
+test('CPU defensive audibles do not replace a selected punt', () => {
+  const rb = { x: 220, y: 400, radius: 10, side: 'right' as const };
+  const defenders = [
+    { x: 220, y: 405, radius: 10, passRusher: false },
+    { x: 220, y: 420, radius: 10, passRusher: false }
+  ];
+  const result = evaluateCpuOffensiveAudibles('PUNT', [], null, rb, defenders, 4, 8, 400, -1);
+  assert.equal(result.newPlayKey, undefined);
+  assert.deepEqual(result.blockersAssigned, []);
 });
 
 test('kickoff line calculation correctly places kicking team at 35-yard line', () => {
@@ -112,7 +139,7 @@ test('kickoff line calculation correctly places kicking team at 35-yard line', (
   assert.equal(getKickoffLineY(fieldHeight, endZoneHeight, 1, 35), 450);
 });
 
-test('real tutorial advances through offensive setup, throw, and defensive setup gestures', (context) => {
+test('real tutorial follows offense snaps, free-defender setup, defense Ready, and live play', (context) => {
   let timestamp = 1000;
   context.mock.method(Date, 'now', () => timestamp);
   context.mock.method(Math, 'random', () => 0.5);
@@ -187,7 +214,7 @@ test('real tutorial advances through offensive setup, throw, and defensive setup
     assert.equal(step, 3);
     tap(250, 225);
     assert.equal(step, 4);
-    game.startPlay?.();
+    tap(170, 273);
     assert.equal(step, 5);
     assert.equal(game.phase, 'QB_DROP');
     settle();
@@ -208,13 +235,18 @@ test('real tutorial advances through offensive setup, throw, and defensive setup
     tap(highlight.x, highlight.y);
     assert.equal(step, 9);
     settle();
-    game.startPlay?.();
+    send('pointerdown', highlight.x, highlight.y);
+    send('pointermove', highlight.x + 40, highlight.y);
+    send('pointerup', highlight.x + 40, highlight.y);
     assert.equal(step, 10);
-    for (let count = 0; count < 2000 && step === 10; count++) {
+    settle();
+    game.startPlay?.();
+    assert.equal(step, 11);
+    for (let count = 0; count < 2000 && step === 11; count++) {
       timestamp += 16;
       frame(timestamp);
     }
-    assert.equal(step, 11, 'The real defensive play must finish');
+    assert.equal(step, 12, 'The real defensive play must finish');
   } finally {
     cleanup?.();
     globalThis.requestAnimationFrame = originalRequest;
