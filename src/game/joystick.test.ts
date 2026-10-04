@@ -74,9 +74,12 @@ test('relative joystick controls QB in pocket and does not interfere with tappin
     const upHandler = (canvas as any)._listeners.get('pointerup');
     assert.ok(downHandler && moveHandler && upHandler);
 
-    // 1. Snap to QB
     downHandler({ clientX: 170, clientY: 273, pointerId: 1 } as PointerEvent);
     upHandler({ clientX: 170, clientY: 273, pointerId: 1 } as PointerEvent);
+    assert.equal(game.phase, 'PRE_SNAP', 'Tapping the QB must not start the play');
+
+    // Ready starts the snap; tapping the QB is no longer a start control.
+    game.startPlay?.();
     assert.equal(game.phase, 'QB_DROP');
 
     // 2. Relative Joystick touch starts on left side of field (pointerId: 10)
@@ -99,7 +102,7 @@ test('relative joystick controls QB in pocket and does not interfere with tappin
   }
 });
 
-test('relative joystick controls Edge Rusher when user is on defense', () => {
+test('relative joystick controls the unassigned defender when user is on defense', () => {
   const canvas = createMockCanvas();
   let engine: GameEngineHandle | null = null;
   const cleanup = mountFootballGame(canvas, {
@@ -127,9 +130,8 @@ test('relative joystick controls Edge Rusher when user is on defense', () => {
     const moveHandler = (canvas as any)._listeners.get('pointermove');
     const upHandler = (canvas as any)._listeners.get('pointerup');
 
-    // Tap QB to start play on defense
-    downHandler({ clientX: 170, clientY: 200, pointerId: 1 } as PointerEvent);
-    upHandler({ clientX: 170, clientY: 200, pointerId: 1 } as PointerEvent);
+    // Ready starts the CPU play while the user is on defense.
+    game.startPlay?.();
     assert.ok((game.phase as string) === 'QB_DROP' || (game.phase as string) === 'HANDOFF');
 
     // Engage joystick on defense
@@ -251,9 +253,7 @@ test('controlled player speed matches teammate speed scale', () => {
     const moveHandler = (canvas as any)._listeners.get('pointermove');
     const upHandler = (canvas as any)._listeners.get('pointerup');
 
-    // Tap QB to snap
-    downHandler({ clientX: 170, clientY: 273, pointerId: 1 } as PointerEvent);
-    upHandler({ clientX: 170, clientY: 273, pointerId: 1 } as PointerEvent);
+    game.startPlay?.();
     assert.equal(game.phase, 'QB_DROP');
 
     // Move joystick
@@ -291,12 +291,7 @@ test('human AI QB scans progressions with human dwell and does not fire in 1ms',
     game.resetDrill();
     assert.equal(game.phase, 'PRE_SNAP');
 
-    const downHandler = (canvas as any)._listeners.get('pointerdown');
-    const upHandler = (canvas as any)._listeners.get('pointerup');
-
-    // Tap QB to start play
-    downHandler({ clientX: 170, clientY: 200, pointerId: 1 } as PointerEvent);
-    upHandler({ clientX: 170, clientY: 200, pointerId: 1 } as PointerEvent);
+    game.startPlay?.();
 
     // Initial phase should be QB_DROP or HANDOFF, never instant THROWN on frame 0
     assert.ok(game.phase === 'QB_DROP' || game.phase === 'HANDOFF');
@@ -305,7 +300,7 @@ test('human AI QB scans progressions with human dwell and does not fire in 1ms',
   }
 });
 
-test('user controls defensive player regardless of assignment (ZONE, MAN, RB_SPY, BLITZ)', () => {
+test('only the unassigned first defender is user-controlled', () => {
   const canvas = createMockCanvas();
   let engine: GameEngineHandle | null = null;
   const cleanup = mountFootballGame(canvas, {
@@ -337,15 +332,67 @@ test('user controls defensive player regardless of assignment (ZONE, MAN, RB_SPY
     assert.equal(zoneCb.type, 'CB');
     assert.ok(zoneCb.defenseAssignment === 'ZONE' || zoneCb.zoneX !== undefined);
 
-    // Select this zone defender
+    const freeDefender = defenders[0];
+    assert.equal(freeDefender.defenseAssignment, 'USER');
+
+    // Selecting another defender must not transfer user control or clear its assignment.
     game.selectDefenderForTest?.(1);
     const controlled = game.getControlledDefender?.();
-    assert.equal(controlled, zoneCb, 'User should control the selected defender even with ZONE assignment');
+    assert.equal(controlled, freeDefender);
+    assert.equal(zoneCb.defenseAssignment, 'ZONE');
 
-    // Defender 3 is an LB
+    // The same restriction applies to every other assignment-controlled defender.
     game.selectDefenderForTest?.(3);
     const controlledLb = game.getControlledDefender?.();
-    assert.equal(controlledLb, defenders[3], 'User should control the selected defender regardless of assignment');
+    assert.equal(controlledLb, freeDefender);
+    assert.notEqual(defenders[3].defenseAssignment, 'USER');
+  } finally {
+    cleanup?.();
+  }
+});
+
+test('assignment defenders can cycle coverage but cannot be moved or controlled', () => {
+  const canvas = createMockCanvas();
+  let engine: GameEngineHandle | null = null;
+  const cleanup = mountFootballGame(canvas, {
+    setP2OffPlayState: () => {},
+    setP2DefPlayState: () => {},
+    setDownDistanceText: () => {},
+    setActiveOffenseState: () => {},
+    setUserScore: () => {},
+    setCpuScore: () => {},
+    setP1DefPlayState: () => {},
+    setMomentumState: () => {},
+    setGameClockState: () => {},
+    showAnnouncement: () => {},
+    onEngineReady: value => { engine = value; }
+  });
+
+  try {
+    assert.ok(engine);
+    const game = engine as GameEngineHandle;
+    game.setPossessionForTest?.('P2');
+    game.resetDrill();
+
+    const defenders = game.getDefenders?.();
+    assert.ok(defenders);
+    const teammate = defenders[1];
+    const initialPosition = { x: teammate.x, y: teammate.y };
+    const downHandler = (canvas as any)._listeners.get('pointerdown');
+    const moveHandler = (canvas as any)._listeners.get('pointermove');
+    const upHandler = (canvas as any)._listeners.get('pointerup');
+
+    downHandler({ clientX: teammate.x, clientY: teammate.y, pointerId: 1 } as PointerEvent);
+    upHandler({ clientX: teammate.x, clientY: teammate.y, pointerId: 1 } as PointerEvent);
+    assert.equal(teammate.defenseAssignment, 'BLITZ');
+    assert.equal(game.getControlledDefender?.(), defenders[0]);
+
+    downHandler({ clientX: teammate.x, clientY: teammate.y, pointerId: 2 } as PointerEvent);
+    moveHandler({ clientX: teammate.x + 50, clientY: teammate.y + 35, pointerId: 2 } as PointerEvent);
+    upHandler({ clientX: teammate.x + 50, clientY: teammate.y + 35, pointerId: 2 } as PointerEvent);
+    assert.deepEqual({ x: teammate.x, y: teammate.y }, initialPosition);
+    assert.equal(teammate.defenseAssignment, 'BLITZ');
+    assert.equal(game.getControlledDefender?.(), defenders[0]);
   } finally {
     cleanup?.();
   }
@@ -488,7 +535,7 @@ test('user cannot pull defensive sprite across the line of scrimmage (illegal of
   }
 });
 
-test('ready button in bottom-left starts defensive play', () => {
+test('Ready starts play on both offense and defense', () => {
   const canvas = createMockCanvas();
   let engine: GameEngineHandle | null = null;
   const cleanup = mountFootballGame(canvas, {
@@ -512,22 +559,16 @@ test('ready button in bottom-left starts defensive play', () => {
     game.resetDrill();
     assert.equal(game.phase, 'PRE_SNAP');
 
-    // Tap in the bottom-left corner of the canvas / screen (ready button position: x=30, y=canvas.height - 30)
-    const downHandler = (canvas as any)._listeners.get('pointerdown');
-    const upHandler = (canvas as any)._listeners.get('pointerup');
-
-    downHandler({ clientX: 30, clientY: (canvas.height || 500) - 30, pointerId: 12 } as PointerEvent);
-    upHandler({ clientX: 30, clientY: (canvas.height || 500) - 30, pointerId: 12 } as PointerEvent);
-
-    // Play should have started (transitioned past PRE_SNAP)
+    game.startPlay?.();
     assert.notEqual(game.phase, 'PRE_SNAP');
 
-    // Also verify startDefensePlay method on engineHandle
+    // Ready also starts the user offense snap.
+    game.setPossessionForTest?.('P1');
     game.resetDrill();
     assert.equal(game.phase, 'PRE_SNAP');
     const handle = engine as GameEngineHandle;
-    handle.startDefensePlay?.();
-    assert.notEqual(game.phase, 'PRE_SNAP');
+    handle.startPlay?.();
+    assert.ok(game.phase === 'QB_DROP' || game.phase === 'HANDOFF');
   } finally {
     cleanup?.();
   }

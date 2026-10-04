@@ -868,21 +868,21 @@ export default function App() {
         <span className="font-bold opacity-90">v2.8.6 • 7v7 Football Sandbox</span>
         <span className="text-neutral-300">
           {activeOffenseState === 'P1'
-            ? 'Draw Routes • Double-tap field to flip RB • Tap QB to Snap'
-            : 'Pull Defender to Reposition • Ready Button to Start'}
+            ? 'Draw Routes • Double-tap field to flip RB • Ready to Start'
+            : 'Move Highlighted Defender • Ready to Start'}
         </span>
       </footer>
 
-      {/* Defense Ready Button in bottom left of screen */}
-      {hasKickedOff && !isKickoffActive && activeOffenseState === 'P2' && (phaseState === 'PRE_SNAP' || engineRef.current?.phase === 'PRE_SNAP') && !showPauseMenu && !finishedGame && (
+      {/* Shared Ready button for offense and defense */}
+      {hasKickedOff && !isKickoffActive && (activeOffenseState === 'P1' || activeOffenseState === 'P2') && (phaseState === 'PRE_SNAP' || engineRef.current?.phase === 'PRE_SNAP') && !showPauseMenu && !finishedGame && (
         <div className="fixed bottom-3 left-3 z-[85]">
           <button
             type="button"
             onClick={() => {
-              engineRef.current?.startDefensePlay?.();
+              engineRef.current?.startPlay?.();
             }}
             className="flex items-center gap-1.5 px-4 py-2.5 bg-gradient-to-r from-emerald-600 via-emerald-500 to-green-500 hover:from-emerald-500 hover:to-green-400 active:scale-95 text-white font-black text-xs uppercase rounded-xl border-2 border-emerald-300 shadow-2xl transition cursor-pointer tracking-wider animate-pulse"
-            title="Start Play (Defense Ready)"
+            title="Start Play"
           >
             <Play size={14} className="fill-white" /> READY
           </button>
@@ -891,7 +891,7 @@ export default function App() {
 
       {(showPuntAction || showRunPlayActions) && (
         <div className="pointer-events-none fixed inset-x-0 bottom-3 z-[80] flex justify-center px-3 pb-[env(safe-area-inset-bottom)]">
-          <div className="pointer-events-auto flex w-full max-w-[420px] gap-2">
+          <div className="pointer-events-auto flex w-full max-w-[420px] gap-2 pl-28">
             {showRunPlayActions && (
               <>
                 <button

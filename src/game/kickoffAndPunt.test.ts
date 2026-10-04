@@ -81,7 +81,7 @@ test('fourth-down Go For It waits for a deliberate pass after the snap', (contex
       assert.ok(handler);
       handler({ clientX: x, clientY: y } as PointerEvent);
     };
-    send('pointerdown', 170, 273);
+    game.startPlay?.();
     assert.equal(game.phase, 'QB_DROP');
     send('pointermove', 170, 333);
     send('pointerup', 170, 333);
@@ -90,8 +90,7 @@ test('fourth-down Go For It waits for a deliberate pass after the snap', (contex
     send('pointerup', 170, 333);
     assert.equal(game.phase, 'THROWN', 'A deliberate pull should still throw');
     game.resetDrill();
-    send('pointerdown', 170, 273);
-    send('pointerup', 170, 333);
+    game.startPlay?.();
     assert.equal(game.phase, 'QB_DROP');
     send('pointerdown', 50, 225);
     send('pointerup', 50, 225);
@@ -188,7 +187,7 @@ test('real tutorial advances through offensive setup, throw, and defensive setup
     assert.equal(step, 3);
     tap(250, 225);
     assert.equal(step, 4);
-    tap(170, 273);
+    game.startPlay?.();
     assert.equal(step, 5);
     assert.equal(game.phase, 'QB_DROP');
     settle();
@@ -209,7 +208,7 @@ test('real tutorial advances through offensive setup, throw, and defensive setup
     tap(highlight.x, highlight.y);
     assert.equal(step, 9);
     settle();
-    tap(highlight.x, highlight.y);
+    game.startPlay?.();
     assert.equal(step, 10);
     for (let count = 0; count < 2000 && step === 10; count++) {
       timestamp += 16;

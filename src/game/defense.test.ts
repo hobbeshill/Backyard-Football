@@ -1361,7 +1361,7 @@ test('Open deep receiver possibility on GO routes with RB Flat baiting', () => {
   assert.ok(minDefDist > 65, 'WR should have significant separation (65+ px) down the boundary');
 });
 
-test('A user on defense starts the play ONLY by tapping the QB, no other taps start the play', () => {
+test('Tapping any player or open field does not start the defensive play', () => {
   const qb = { x: 170, y: 948, radius: 12 };
   const defenders: Entity[] = [
     { x: 170, y: 876, radius: 10 },
@@ -1377,12 +1377,6 @@ test('A user on defense starts the play ONLY by tapping the QB, no other taps st
     if (hitDefender) {
       selectedDefender = true;
       return { playStarted: false, selectedDefender: true };
-    }
-
-    const distToQb = Math.hypot(qb.x - px, qb.y - py);
-    if (distToQb < (qb.radius || 12) + 24) {
-      playStarted = true;
-      return { playStarted: true, selectedDefender: false };
     }
 
     // Open field turf tap
@@ -1405,7 +1399,7 @@ test('A user on defense starts the play ONLY by tapping the QB, no other taps st
 
   // 4. Tapping directly on the QB
   const qbTap = evaluatePreSnapDefenseTap(170, 948);
-  assert.equal(qbTap.playStarted, true, 'ONLY tapping QB starts the play when on defense');
+  assert.equal(qbTap.playStarted, false, 'Tapping QB must not bypass the Ready action');
 });
 
 test('AI pre-snap shifts defenders toward the RB side', () => {

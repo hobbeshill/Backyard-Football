@@ -45,6 +45,7 @@ export interface GameEngineHandle {
   getDefenders?: () => Entity[];
   getControlledDefender?: () => Entity | null;
   selectDefenderForTest?: (index: number) => void;
+  startPlay?: () => void;
   startDefensePlay?: () => void;
   repositionDefender?: (index: number, x: number, y: number) => void;
 }
@@ -264,7 +265,6 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   let p1DefPlay = 'COVER2';
   let p2OffPlay = 'SHORT_PASS';
   let p2DefPlay = 'COVER2';
-  let userControlledDefenderIndex = 0;
   let cpuPreSnapTimer = 0;
   let isAllBlocking = false;
 
@@ -482,6 +482,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   let gestureRole: 'WR' | 'RB' | 'DEFENDER' = 'WR';
   let gestureStartX = 0;
   let gestureStartY = 0;
+  let gestureGrabOffsetX = 0;
+  let gestureGrabOffsetY = 0;
   let gestureCurrentX = 0;
   let gestureCurrentY = 0;
   let gestureTouchStartX = 0;
@@ -535,7 +537,6 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     const defenderIndex = defenders.indexOf(defender);
     if (defenderIndex !== -1) {
       defenseOverrides.set(defenderIndex, 'USER');
-      userControlledDefenderIndex = defenderIndex;
     }
   }
 
@@ -566,6 +567,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       }
     } else if (role === 'DEFENDER') {
       const defenderIndex = defenders.indexOf(target);
+      if (defenderIndex === 0) return;
       if (value === 'DEFAULT') {
         defenseOverrides.delete(defenderIndex);
       } else {
@@ -1225,7 +1227,6 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     separateDefenderAlignments(defenders, fieldWidth, touchOptimized ? 20 : 10);
     constrainDefendersToFieldSide(defenders, lineOfScrimmageY, attackDirection, fieldHeight, fieldWidth);
     if (activeDefense === 'P1' && defenders[0]) {
-      userControlledDefenderIndex = 0;
       const centerDef = defenders[0];
       centerDef.defenseAssignment = 'USER';
       centerDef.assignedReceiver = null;
@@ -2223,24 +2224,14 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     },
     getDefenders: () => defenders,
     getControlledDefender: () => getControlledDefender(),
-    selectDefenderForTest: (index: number) => {
-      if (index >= 0 && index < defenders.length) {
-        userControlledDefenderIndex = index;
-        if (activeDefense === 'P1') {
-          defenders[index].defenseAssignment = 'USER';
-          defenseOverrides.set(index, 'USER');
-        }
-      }
+    selectDefenderForTest: (_index: number) => {
+      // Defensive user control is always reserved for the unassigned first defender.
     },
-    startDefensePlay: () => {
-      if (activeDefense === 'P1' && phase === 'PRE_SNAP') {
-        startCpuPlay();
-      }
-    },
+    startPlay: startReadyPlay,
+    startDefensePlay: startReadyPlay,
     repositionDefender: (index: number, x: number, y: number) => {
       // The user should only be able to reposition the center player (index 0)
       if (index === 0 && defenders[0]) {
-        userControlledDefenderIndex = 0;
         repositionUserDefender(defenders[0], x, y);
       }
     }
@@ -2332,6 +2323,35 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     }
   }
 
+  function startReadyPlay(): void {
+    if (phase !== 'PRE_SNAP') return;
+    if (activeDefense === 'P1') {
+      startCpuPlay();
+      return;
+    }
+    if (activeOffense !== 'P1') return;
+
+    const play = offensivePlaybook[p1OffPlay];
+    if (play?.type === 'PUNT') {
+      if (currentDown === 4 && !isKickoffPhase) {
+        snapToQuarterback();
+        executePunt('P1', attackDirection, kickMeterPower);
+      }
+      return;
+    }
+
+    snapToQuarterback();
+    if (play?.type === 'PASS') {
+      phase = 'QB_DROP';
+      isAiming = false;
+      qb.dropStepTimer = 28;
+    } else {
+      if (rb) rb.hasBall = false;
+      activeEntity = rb || qb;
+      phase = 'HANDOFF';
+    }
+  }
+
   const keysDown = {
     up: false,
     down: false,
@@ -2411,10 +2431,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
   function getControlledDefender(): Entity | null {
     if (activeDefense !== 'P1') return null;
-    if (userControlledDefenderIndex >= 0 && userControlledDefenderIndex < defenders.length && defenders[userControlledDefenderIndex]) {
-      return defenders[userControlledDefenderIndex];
-    }
-    return defenders.find(d => d && (d.passRusher || d.defenseAssignment === 'BLITZ')) || defenders[0] || null;
+    return defenders[0] || null;
   }
 
   function getTappedReceiver(screenX: number, screenY: number, worldX: number, worldY: number): Entity | null {
@@ -2608,14 +2625,6 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
       // 2. If on defense (activeDefense === 'P1', activeOffense === 'P2')
       if (activeDefense === 'P1') {
-        const cPos = getCanvasCoords(e.clientX, e.clientY);
-        // Requirement: Ready button in bottom left of the screen to start the play
-        if (cPos.x < 115 && cPos.y > (canvas?.height || 500) - 60) {
-          startCpuPlay();
-          isSnapGestureActive = true;
-          return;
-        }
-
         // Record start position for open field / bottom of screen formation swiping
         preSnapFieldSwipeStartX = px;
         preSnapFieldSwipeStartY = py;
@@ -2630,21 +2639,10 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         if (hitDefender) {
           gestureEntity = hitDefender;
           gestureRole = 'DEFENDER';
-          const hitIdx = defenders.indexOf(hitDefender);
-          if (hitIdx !== -1) {
-            userControlledDefenderIndex = hitIdx;
-            // Clear assignment immediately: user will not have an assignment and decides how to use him
-            hitDefender.defenseAssignment = 'USER';
-            hitDefender.assignedReceiver = null;
-            hitDefender.assignedCenter = undefined;
-            hitDefender.zoneX = undefined;
-            hitDefender.zoneY = undefined;
-            hitDefender.passRusher = false;
-            hitDefender.isQbSpy = false;
-            defenseOverrides.set(hitIdx, 'USER');
-          }
-          gestureStartX = hitDefender.x;
-          gestureStartY = hitDefender.y;
+          gestureStartX = px;
+          gestureStartY = py;
+          gestureGrabOffsetX = hitDefender.x - px;
+          gestureGrabOffsetY = hitDefender.y - py;
           gestureCurrentX = px;
           gestureCurrentY = py;
           gestureTouchStartX = px;
@@ -2654,49 +2652,10 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           return;
         }
 
-        // Also allow touching the QB to start the play
-        const distToQb = Math.hypot(qb.x - px, qb.y - py);
-        if (distToQb < (qb.radius || 12) + 24) {
-          startCpuPlay();
-          isSnapGestureActive = true;
-          return;
-        }
-
-        // NO OTHER TAPS START THE PLAY!
         return;
       }
 
-      // 3. User is on offense: Check if user explicitly tapped QB to snap the ball
-      // Must NOT be touching RB, and strictly within QB direct radius (32px)
-      const distToQb = Math.hypot(qb.x - px, qb.y - py);
-      const distToRb = rb ? Math.hypot(rb.x - px, rb.y - py) : 999;
-      if (distToQb < 32 && distToQb < distToRb - 10) {
-        touchStartX = px;
-        touchStartY = py;
-        const play = offensivePlaybook[p1OffPlay];
-        if (play.type === 'PUNT') {
-          if (currentDown === 4 && !isKickoffPhase) {
-            snapToQuarterback();
-            executePunt('P1', attackDirection, kickMeterPower);
-            isSnapGestureActive = true;
-          }
-        } else if (play.type === 'PASS') {
-          snapToQuarterback();
-          phase = 'QB_DROP';
-          isAiming = false;
-          qb.dropStepTimer = 28;
-          isSnapGestureActive = true;
-        } else {
-          snapToQuarterback();
-          if (rb) rb.hasBall = false;
-          activeEntity = rb || qb;
-          phase = 'HANDOFF';
-          isSnapGestureActive = true;
-        }
-        return;
-      }
-
-      // 4. Open grass touch: Record start position for field swipe formation change!
+      // 3. Open grass touch: Record start position for field swipe formation change!
       preSnapFieldSwipeStartX = px;
       preSnapFieldSwipeStartY = py;
       touchScreenStartX = e.clientX;
@@ -2732,24 +2691,9 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       }
     }
 
-    // Live play: Tap defender to switch active control directly to that player
-    if (activeDefense === 'P1' && (phase === 'QB_DROP' || phase === 'HANDOFF' || phase === 'RUNNING' || phase === 'THROWN')) {
-      const tappedDefender = defenders.find(d => d && Math.hypot(d.x - px, d.y - py) < (d.radius || 10) + 16);
-      if (tappedDefender) {
-        const hitIdx = defenders.indexOf(tappedDefender);
-        if (hitIdx !== -1) {
-          userControlledDefenderIndex = hitIdx;
-          sounds.playJuke();
-          return;
-        }
-      }
-    }
-
     // Defensive dive-tackle tap check
     if (phase === 'RUNNING' && activeDefense === 'P1' && activeEntity) {
-      const validDefenders = isInterceptionReturn || isSpecialTeamsReturn
-        ? [qb, rb, centerReceiver, ...receivers, ...linemen].filter((player): player is Entity => Boolean(player))
-        : defenders;
+      const validDefenders = [getControlledDefender()].filter((player): player is Entity => player !== null);
       if (validDefenders.length > 0) {
         let bestDef = validDefenders[0];
         let minDist = Infinity;
@@ -2859,7 +2803,9 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       if (gestureRole === 'DEFENDER') {
         if (dragDist > 6 || isPullingDefender) {
           isPullingDefender = true;
-          repositionUserDefender(gestureEntity, curX, curY);
+          if (gestureEntity === defenders[0]) {
+            repositionUserDefender(gestureEntity, curX + gestureGrabOffsetX, curY + gestureGrabOffsetY);
+          }
         }
         return;
       }
@@ -2915,15 +2861,20 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
         if (gestureRole === 'DEFENDER') {
           if (isPullingDefender || dragDist > 6) {
-            repositionUserDefender(gestureEntity, curX, curY);
-            sounds.playJuke();
+            if (gestureEntity === defenders[0]) {
+              repositionUserDefender(gestureEntity, curX + gestureGrabOffsetX, curY + gestureGrabOffsetY);
+              sounds.playJuke();
+            }
             gestureEntity = null;
             isPullingDefender = false;
             return;
           }
 
-          const hitIdx = defenders.indexOf(gestureEntity);
-          if (hitIdx !== -1) userControlledDefenderIndex = hitIdx;
+          if (gestureEntity === defenders[0]) {
+            gestureEntity = null;
+            isDirtGestureActive = false;
+            return;
+          }
           const dx = gestureCurrentX - gestureStartX;
           const dy = gestureCurrentY - gestureStartY;
           const lateralDist = Math.abs(dx);
@@ -2932,10 +2883,10 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           if (lateralDist > 16 && lateralDist > Math.abs(dy) * 0.75) {
             applyChalkRoute(gestureEntity, 'DEFENDER', 'MAN');
           } else {
-            // Cycle assignments on tap
+            // Cycle assignment-controlled teammates; the free defender has no assignment.
             const defenderIndex = defenders.indexOf(gestureEntity);
-            const currentAssignment = defenseOverrides.get(defenderIndex) || gestureEntity.defenseAssignment || 'USER';
-            const toggleCycle: Array<'USER' | 'BLITZ' | 'MAN' | 'RB_SPY' | 'ZONE'> = ['USER', 'BLITZ', 'MAN', 'RB_SPY', 'ZONE'];
+            const currentAssignment = defenseOverrides.get(defenderIndex) || gestureEntity.defenseAssignment || 'MAN';
+            const toggleCycle: Array<'BLITZ' | 'MAN' | 'RB_SPY' | 'ZONE'> = ['MAN', 'ZONE', 'BLITZ', 'RB_SPY'];
             const currentIdx = toggleCycle.indexOf(currentAssignment as any);
             const nextAssignment = toggleCycle[(currentIdx + 1 + toggleCycle.length) % toggleCycle.length];
             applyChalkRoute(gestureEntity, 'DEFENDER', nextAssignment);
@@ -5507,25 +5458,6 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       ctx.arc(qb.x, qb.y, qb.radius + 3, 0, Math.PI * 2);
       ctx.stroke();
     }
-    // When user is on defense: "A user on defense starts the play by tapping the QB, no other taps should start the play."
-    if (phase === 'PRE_SNAP' && activeDefense === 'P1') {
-      const pulse = (Math.sin(Date.now() / 180) + 1) / 2;
-      ctx.save();
-      ctx.strokeStyle = `rgba(0, 255, 255, ${0.45 + pulse * 0.45})`;
-      ctx.lineWidth = 2.5 / cameraScale;
-      ctx.setLineDash([4, 3]);
-      ctx.beginPath();
-      ctx.arc(qb.x, qb.y, qb.radius + 12 + pulse * 4, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.setLineDash([]);
-
-      ctx.fillStyle = '#00ffff';
-      ctx.font = `bold ${Math.round(11 / cameraScale)}px Courier New, monospace`;
-      ctx.textAlign = 'center';
-      ctx.fillText('TAP QB TO START 🏈', qb.x, qb.y + (attackDirection === 1 ? -24 : 30) / cameraScale);
-      ctx.restore();
-    }
-
     // Tap-to-Throw target reticles & badges above eligible receivers
     if (phase === 'QB_DROP' && activeOffense === 'P1') {
       const eligible = [...receivers, centerReceiver, rb].filter(
@@ -5573,12 +5505,24 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       ctx.save();
       const pulse = Math.sin(Date.now() * 0.008) * 1.5;
       const isDef = activeDefense === 'P1';
-      const ringColor = isDef ? '#ff4444' : '#00ffff';
+      const ringColor = isDef ? '#ffcc00' : '#00ffff';
       ctx.strokeStyle = ringColor;
       ctx.lineWidth = 2.2 / cameraScale;
       ctx.beginPath();
       ctx.arc(controlledPlayer.x, controlledPlayer.y, (controlledPlayer.radius || 10) + 5 + pulse, 0, Math.PI * 2);
       ctx.stroke();
+
+      if (isDef) {
+        const arrowTipY = controlledPlayer.y - (controlledPlayer.radius || 10) - 7;
+        const arrowBaseY = arrowTipY - 12;
+        ctx.fillStyle = '#ff3333';
+        ctx.beginPath();
+        ctx.moveTo(controlledPlayer.x, arrowTipY);
+        ctx.lineTo(controlledPlayer.x - 5, arrowBaseY);
+        ctx.lineTo(controlledPlayer.x + 5, arrowBaseY);
+        ctx.closePath();
+        ctx.fill();
+      }
 
       const joyInput = getEffectiveJoystickInput();
       if (joyInput.active && (joyInput.x !== 0 || joyInput.y !== 0)) {
@@ -6168,37 +6112,6 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       ctx.font = 'bold 10px monospace';
       ctx.textAlign = 'center';
       ctx.fillText('🏈 4TH DOWN • PUNT OPTION', canvas.width / 2, tagY + 15);
-      ctx.restore();
-    }
-
-    // Bottom-left "READY" button badge when user is on defense pre-snap
-    if (activeDefense === 'P1' && phase === 'PRE_SNAP') {
-      ctx.save();
-      const btnX = 14;
-      const btnY = canvas.height - 48;
-      const btnW = 92;
-      const btnH = 34;
-
-      const grad = ctx.createLinearGradient(btnX, btnY, btnX, btnY + btnH);
-      grad.addColorStop(0, '#059669');
-      grad.addColorStop(1, '#10b981');
-      ctx.fillStyle = grad;
-      ctx.strokeStyle = '#6ee7b7';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.roundRect(btnX, btnY, btnW, btnH, 8);
-      ctx.fill();
-      ctx.stroke();
-
-      ctx.fillStyle = '#ffffff';
-      ctx.font = 'bold 11px monospace';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('▶ READY', btnX + btnW / 2, btnY + 12);
-
-      ctx.fillStyle = '#d1fae5';
-      ctx.font = 'bold 8px monospace';
-      ctx.fillText('START PLAY', btnX + btnW / 2, btnY + 24);
       ctx.restore();
     }
 

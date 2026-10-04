@@ -1,24 +1,25 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowRight, RefreshCw, X } from 'lucide-react';
-import { mountFootballGame } from './engine';
+import { ArrowRight, Play, RefreshCw, X } from 'lucide-react';
+import { mountFootballGame, type GameEngineHandle } from './engine';
 
 const steps = [
   ['Offense', 'Change the alignment', 'Swipe horizontally on empty grass to change your formation.'],
   ['Offense', 'Move the running back', 'Double-tap empty grass on the opposite side of the RB to move him there.'],
   ['Offense', 'Change a receiver route', 'Drag the highlighted WR horizontally to give him a crossing route.'],
   ['Offense', 'Create a blocker', 'Tap the highlighted center once. His route changes to BLOCK.'],
-  ['Offense', 'Snap the ball', 'Tap the highlighted QB. Your formation, RB position, route, and blocker are now set.'],
+  ['Offense', 'Snap the ball', 'Tap READY to start the play. Your formation, RB position, route, and blocker are now set.'],
   ['Offense', 'Throw the ball', 'Tap a WR for a quick pass, or drag backward from the QB and release to throw forward.'],
   ['Offense', 'Watch your play finish', 'Your pass uses the real ball physics, receivers, defenders, and tackle rules.'],
   ['Defense', 'Change the defensive alignment', 'Swipe horizontally on empty grass to change the defense.'],
   ['Defense', 'Change an assignment', 'Tap the highlighted defender to cycle Blitz, Man, RB Spy, and Zone, or swipe him horizontally for Man.'],
-  ['Defense', 'Start the defensive play', 'Tap the opposing QB to start. Your defensive changes carry into the play.'],
-  ['Defense', 'Make the stop', 'Watch the defense react. When the opponent runs, tap or quickly swipe the field to dive-tackle.'],
+  ['Defense', 'Start the defensive play', 'Tap READY to start. Your defensive changes carry into the play.'],
+  ['Defense', 'Make the stop', 'Use the joystick to control the highlighted defender. Tap or quickly swipe the field to dive-tackle.'],
   ['Complete', 'Both plays completed', 'You set up and played both sides using the same controls as a regular game.']
 ];
 
 export function RealPlayTutorial({ onFinish }: { onFinish: () => void }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const engineRef = useRef<GameEngineHandle | null>(null);
   const [step, setStep] = useState(0);
   const [attempt, setAttempt] = useState(0);
   const [formation, setFormation] = useState('SPREAD');
@@ -35,7 +36,7 @@ export function RealPlayTutorial({ onFinish }: { onFinish: () => void }) {
       setDownDistanceText: () => {}, setActiveOffenseState: () => {},
       setUserScore: () => {}, setCpuScore: () => {}, setP1DefPlayState: setDefense,
       setP1OffFormationState: setFormation, setMomentumState: () => {},
-      setGameClockState: () => {}, onEngineReady: () => {},
+      setGameClockState: () => {}, onEngineReady: value => { engineRef.current = value; },
       showAnnouncement: text => setResult(text),
       onTutorialStep: setStep
     }, { tutorial: true });
@@ -64,6 +65,15 @@ export function RealPlayTutorial({ onFinish }: { onFinish: () => void }) {
       </div>
       {step === 11 && (
         <button onClick={onFinish} className="absolute bottom-4 flex items-center gap-2 rounded-md bg-emerald-600 px-5 py-3 text-sm font-bold hover:bg-emerald-500">Finish tutorial <ArrowRight size={18} /></button>
+      )}
+      {(step === 4 || step === 9) && (
+        <button
+          type="button"
+          onClick={() => engineRef.current?.startPlay?.()}
+          className="absolute bottom-3 left-3 z-20 flex items-center gap-1.5 rounded-lg border-2 border-emerald-300 bg-emerald-600 px-4 py-2.5 text-xs font-black uppercase text-white shadow-xl"
+        >
+          <Play size={14} className="fill-white" /> READY
+        </button>
       )}
     </section>
   );
