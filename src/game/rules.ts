@@ -314,6 +314,7 @@ export interface QbAccuracyInput {
   isUnderPressure: boolean;
   isDeepShot: boolean;
   isHitAsThrown?: boolean;
+  isCpuThrow?: boolean;
   passProtectionRating?: number;
   roll?: number;
 }
@@ -334,7 +335,8 @@ export function evaluateQbThrowAccuracy(input: QbAccuracyInput, attackDirection:
   // - If QB is hit as he throws:
   if (input.isHitAsThrown) {
     const hitRoll = input.roll !== undefined ? input.roll : Math.random();
-    if (hitRoll < 0.85) {
+    const hitOffTargetChance = input.isCpuThrow ? 0.35 : 0.55;
+    if (hitRoll < hitOffTargetChance) {
       return {
         isOffTarget: true,
         mistakeType: 'HIT_AS_THROWN',

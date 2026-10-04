@@ -394,11 +394,10 @@ export default function App() {
 
   // Handlers for user changing offensive/defensive plays (user only controls their own side)
   const handleSelectOffensePlay = (key: string) => {
-    if (activeOffenseState === 'P1') {
+    if (activeOffenseState === 'P1' && engineRef.current?.phase === 'PRE_SNAP' &&
+      !engineRef.current.isKickoffActive() && (key !== 'PUNT' || is4thDown)) {
       setP1OffPlayState(key);
-      if (engineRef.current) {
-        engineRef.current.selectOffense(key);
-      }
+      engineRef.current.selectOffense(key);
     }
   };
 
@@ -526,8 +525,9 @@ export default function App() {
   const canContinueSeason = gameMode === 'SEASON' && Boolean(
     seasonProgress && seasonProgress.results.length < seasonProgress.opponentIds.length
   );
-  const showPuntAction = !isKickoffActive && activeOffenseState === 'P1' &&
-    (is4thDown || p1OffPlayState === 'PUNT');
+  const showPuntAction = !isKickoffActive && activeOffenseState === 'P1' && is4thDown;
+  const showRunPlayActions = hasKickedOff && engineRef.current?.phase === 'PRE_SNAP' && !isKickoffActive && activeOffenseState === 'P1' &&
+    p1OffPlayState !== 'PUNT' && !showPauseMenu && !finishedGame;
 
   return (
     <div className="relative w-screen h-screen overflow-hidden flex flex-col items-center justify-center bg-[#030704] text-white font-mono select-none">
@@ -866,23 +866,47 @@ export default function App() {
         <span className="font-bold opacity-90">v2.8.6 • 7v7 Football Sandbox</span>
         <span className="text-neutral-300">
           {activeOffenseState === 'P1'
-            ? 'Draw Route Lines • Tap for Run Blocking • Tap QB to Snap'
+            ? 'Draw Routes • Double-tap field to flip RB • Tap QB to Snap'
             : 'Tap Defenders to Toggle • Swipe to Shift • Tap QB to Start'}
         </span>
       </footer>
 
-      {showPuntAction && (
+      {(showPuntAction || showRunPlayActions) && (
         <div className="pointer-events-none fixed inset-x-0 bottom-3 z-[80] flex justify-center px-3 pb-[env(safe-area-inset-bottom)]">
           <div className="pointer-events-auto flex w-full max-w-[420px] gap-2">
-            <button
-              type="button"
-              onClick={() => p1OffPlayState === 'PUNT'
-                ? engineRef.current?.punt?.(kickMeterPower)
-                : engineRef.current?.callPunt?.()}
-              className="flex-1 rounded-lg border-2 border-cyan-300 bg-gradient-to-r from-cyan-600 to-blue-600 px-4 py-3 text-sm font-black uppercase text-white shadow-xl transition hover:from-cyan-500 hover:to-blue-500 active:scale-[0.98]"
-            >
-              {p1OffPlayState === 'PUNT' ? 'BOOT PUNT' : 'PUNT'}
-            </button>
+            {showRunPlayActions && (
+              <>
+                <button
+                  type="button"
+                  aria-pressed={p1OffPlayState === 'ISO'}
+                  title="Double-tap the left or right field side to flip the running back"
+                  onClick={() => handleSelectOffensePlay('ISO')}
+                  className={`flex-1 rounded-lg border px-3 py-3 text-sm font-black uppercase shadow-xl transition active:scale-[0.98] ${p1OffPlayState === 'ISO' ? 'border-emerald-300 bg-emerald-700 text-white' : 'border-emerald-700 bg-emerald-950 text-emerald-100 hover:bg-emerald-900'}`}
+                >
+                  ISO Run
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={p1OffPlayState === 'SWEEP'}
+                  title="Double-tap the left or right field side to flip the running back"
+                  onClick={() => handleSelectOffensePlay('SWEEP')}
+                  className={`flex-1 rounded-lg border px-3 py-3 text-sm font-black uppercase shadow-xl transition active:scale-[0.98] ${p1OffPlayState === 'SWEEP' ? 'border-emerald-300 bg-emerald-700 text-white' : 'border-emerald-700 bg-emerald-950 text-emerald-100 hover:bg-emerald-900'}`}
+                >
+                  Sweep
+                </button>
+              </>
+            )}
+            {showPuntAction && (
+              <button
+                type="button"
+                onClick={() => p1OffPlayState === 'PUNT'
+                  ? engineRef.current?.punt?.(kickMeterPower)
+                  : engineRef.current?.callPunt?.()}
+                className="flex-1 rounded-lg border-2 border-cyan-300 bg-gradient-to-r from-cyan-600 to-blue-600 px-4 py-3 text-sm font-black uppercase text-white shadow-xl transition hover:from-cyan-500 hover:to-blue-500 active:scale-[0.98]"
+              >
+                {p1OffPlayState === 'PUNT' ? 'BOOT PUNT' : 'PUNT'}
+              </button>
+            )}
             {p1OffPlayState === 'PUNT' && (
               <button
                 type="button"

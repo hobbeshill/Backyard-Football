@@ -50,12 +50,14 @@ test('fourth-down Go For It waits for a deliberate pass after the snap', (contex
   canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 340, height: 450 } as DOMRect);
   canvas.addEventListener = ((name: string, handler: EventListener) => handlers.set(name, handler)) as typeof canvas.addEventListener;
   let engine: GameEngineHandle | null = null;
+  let selectedPlay = '';
   const cleanup = mountFootballGame(canvas, {
     setP2OffPlayState: () => {}, setP2DefPlayState: () => {},
     setDownDistanceText: () => {}, setActiveOffenseState: () => {},
     setUserScore: () => {}, setCpuScore: () => {}, setP1DefPlayState: () => {},
     setMomentumState: () => {}, setGameClockState: () => {}, showAnnouncement: () => {},
-    onEngineReady: value => { engine = value; }
+    onEngineReady: value => { engine = value; },
+    setP1OffPlayState: play => { selectedPlay = play; }
   });
   try {
     assert.ok(engine);
@@ -68,6 +70,7 @@ test('fourth-down Go For It waits for a deliberate pass after the snap', (contex
     }
     assert.equal(game.is4thDown(), true);
     game.callPunt();
+    assert.equal(selectedPlay, 'PUNT');
     game.selectOffense('SHORT_PASS');
     game.resetDrill();
     assert.equal(game.phase, 'PRE_SNAP');
@@ -357,7 +360,7 @@ test('game engine mounts with kickoff active at the beginning of the game', () =
   if (cleanup) cleanup();
 });
 
-test('4th down allows calling PUNT which switches play to PUNT and notifies UI', () => {
+test('PUNT calls are ignored before 4th down', () => {
   let engineInstance: GameEngineHandle | null = null;
   let p1OffPlay = '';
   let announcement = '';
@@ -384,10 +387,13 @@ test('4th down allows calling PUNT which switches play to PUNT and notifies UI',
 
   assert.ok(engineInstance);
   const engine = engineInstance as GameEngineHandle;
-  // Call special teams punt unit
+  engine.setPossessionForTest?.('P1');
+  engine.selectOffense('PUNT');
   engine.callPunt();
-  assert.equal(p1OffPlay, 'PUNT');
-  assert.ok(announcement.includes('SPECIAL TEAMS PUNT UNIT'));
+  engine.punt(0.95);
+  assert.equal(p1OffPlay, '');
+  assert.equal(engine.phase, 'PRE_SNAP');
+  assert.ok(!announcement.includes('SPECIAL TEAMS PUNT UNIT'));
 
   if (cleanup) cleanup();
 });

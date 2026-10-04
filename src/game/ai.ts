@@ -20,6 +20,7 @@ export interface CpuPassReleaseSituation {
   isDeepShotOpportunity: boolean;
   hasOpenBreak: boolean;
   isUnderHeavyPressure: boolean;
+  pressureFrames?: number;
   playClock: number;
   bestScore: number;
   isVerticalPlay?: boolean;
@@ -29,17 +30,18 @@ export interface CpuPassReleaseSituation {
 
 export function shouldCpuReleasePass(situation: CpuPassReleaseSituation): boolean {
   if (!situation.hasTarget) return false;
+  const pressureReactionComplete = situation.isUnderHeavyPressure && (situation.pressureFrames ?? 0) >= 10;
   if (situation.isVerticalPlay) {
-    if (situation.isUnderHeavyPressure && situation.playClock >= 10) return true;
+    if (pressureReactionComplete) return true;
     const hasDevelopedTarget = (situation.targetDepthYards ?? 0) >= 15 &&
       (situation.targetSeparation ?? 0) >= 14 && situation.bestScore > 35;
-    return (situation.playClock >= 48 && hasDevelopedTarget) || situation.playClock >= 240;
+    return (situation.playClock >= 48 && hasDevelopedTarget) || situation.playClock >= 200;
   }
   return situation.isDeepShotOpportunity ||
-    (situation.hasOpenBreak && situation.playClock >= 16) ||
-    (situation.isUnderHeavyPressure && situation.playClock >= 10) ||
-    (situation.playClock >= 22 && situation.bestScore > -10) ||
-    situation.playClock >= 35;
+    (situation.hasOpenBreak && situation.playClock >= 22) ||
+    pressureReactionComplete ||
+    (situation.playClock >= 28 && situation.bestScore > 15) ||
+    situation.playClock >= 42;
 }
 
 export function isCpuPressureRecognized(isUnderHeavyPressure: boolean, playClock: number): boolean {

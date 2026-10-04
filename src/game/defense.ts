@@ -22,6 +22,14 @@ export interface CpuDefenseSituation {
   }>;
 }
 
+function getDefensiveLineDepth(radius = 10): number {
+  return Math.ceil(radius * 1.95) + 4;
+}
+
+export function getDefensiveLineAlignmentY(lineOfScrimmageY: number, attackDirection: number, radius = 10): number {
+  return lineOfScrimmageY + (getDefensiveLineDepth(radius) * attackDirection);
+}
+
 export function alignDefenderAcrossFromRunningBack(
   defender: Entity,
   runningBack: Entity,
@@ -31,7 +39,7 @@ export function alignDefenderAcrossFromRunningBack(
 ): void {
   const radius = defender.radius || 10;
   const targetX = Math.max(radius, Math.min(fieldWidth - radius, runningBack.x));
-  const targetY = lineOfScrimmageY + (24 * attackDirection);
+  const targetY = getDefensiveLineAlignmentY(lineOfScrimmageY, attackDirection, radius);
   defender.startX = targetX;
   defender.startY = targetY;
   defender.x = targetX;
@@ -49,15 +57,31 @@ export function alignDefenderAcrossFromReceiver(
 ): void {
   const radius = defender.radius || 10;
   const targetX = Math.max(radius, Math.min(fieldWidth - radius, receiver.x));
-  const shellDepth = defender.startY === undefined
-    ? 24
-    : (defender.startY - lineOfScrimmageY) * attackDirection;
-  const coverageDepth = Math.max(24, Math.min(180, shellDepth));
-  const targetY = lineOfScrimmageY + (coverageDepth * attackDirection);
+  const targetY = getDefensiveLineAlignmentY(lineOfScrimmageY, attackDirection, radius);
   defender.startX = targetX;
   defender.startY = targetY;
   defender.x = targetX;
   defender.y = targetY;
+  defender.vx = 0;
+  defender.vy = 0;
+}
+
+export function alignDefenderToZone(defender: Entity, lineOfScrimmageY: number, attackDirection: number): void {
+  if (defender.zoneX === undefined || defender.zoneY === undefined) {
+    const zoneDepth = defender.type === 'FS' || defender.type === 'SS'
+      ? 210
+      : defender.type === 'CB'
+        ? 125
+        : defender.type === 'DL'
+          ? 85
+          : 105;
+    defender.zoneX = defender.startX ?? defender.x;
+    defender.zoneY = lineOfScrimmageY + (zoneDepth * attackDirection);
+  }
+  defender.startX = defender.zoneX;
+  defender.startY = defender.zoneY;
+  defender.x = defender.zoneX;
+  defender.y = defender.zoneY;
   defender.vx = 0;
   defender.vy = 0;
 }
@@ -107,6 +131,48 @@ export function separateDefenderAlignments(defenders: Entity[], fieldWidth = 340
     if (defender.zoneX !== undefined) defender.zoneX += deltaX;
     if (defender.zoneY !== undefined) defender.zoneY += deltaY;
     positioned.push(defender);
+  });
+}
+
+export function getBlitzAlignmentY(_defenderY: number, lineOfScrimmageY: number, attackDirection: number, radius = 10): number {
+  return getDefensiveLineAlignmentY(lineOfScrimmageY, attackDirection, radius);
+}
+
+export function constrainDefendersToFieldSide(
+  defenders: Entity[],
+  lineOfScrimmageY: number,
+  attackDirection: number,
+  fieldHeight = 1200,
+  fieldWidth = 340
+): void {
+  defenders.forEach(defender => {
+    const radius = defender.radius || 10;
+    const visualMargin = Math.ceil(radius * 1.95);
+    const minimumDepth = getDefensiveLineDepth(radius);
+    const minimumX = radius;
+    const maximumX = fieldWidth - radius;
+    const minimumY = visualMargin;
+    const maximumY = fieldHeight - visualMargin;
+    const x = Math.max(minimumX, Math.min(maximumX, defender.startX ?? defender.x));
+    let y = Math.max(minimumY, Math.min(maximumY, defender.startY ?? defender.y));
+    const defenseSideDepth = (y - lineOfScrimmageY) * attackDirection;
+    if (defenseSideDepth < minimumDepth) {
+      y = lineOfScrimmageY + (minimumDepth * attackDirection);
+    }
+    y = Math.max(minimumY, Math.min(maximumY, y));
+    defender.x = x;
+    defender.startX = x;
+    defender.y = y;
+    defender.startY = y;
+    if (defender.zoneX !== undefined) {
+      defender.zoneX = Math.max(minimumX, Math.min(maximumX, defender.zoneX));
+    }
+    if (defender.zoneY !== undefined) {
+      let zoneY = Math.max(minimumY, Math.min(maximumY, defender.zoneY));
+      const zoneDepth = (zoneY - lineOfScrimmageY) * attackDirection;
+      if (zoneDepth < minimumDepth) zoneY = lineOfScrimmageY + (minimumDepth * attackDirection);
+      defender.zoneY = Math.max(minimumY, Math.min(maximumY, zoneY));
+    }
   });
 }
 
@@ -440,7 +506,15 @@ export function matchCpuDefendersToReceivers(defenders: Entity[], eligibleReceiv
     defender.assignedReceiver = candidates.slice().sort((first, second) =>
       Math.hypot(first.x - defender.x, first.y - defender.y) - Math.hypot(second.x - defender.x, second.y - defender.y)
     )[0];
-    if (defender.assignedReceiver) matched.add(defender.assignedReceiver);
+    if (defender.assignedReceiver) {
+      matched.add(defender.assignedReceiver);
+      alignDefenderAcrossFromReceiver(
+        defender,
+        defender.assignedReceiver,
+        situation.lineOfScrimmageY,
+        situation.attackDirection
+      );
+    }
   });
 
   if (threats.length !== 1 || eligibleReceivers.length - threats.length < 2 || defenders.length < 7) return;

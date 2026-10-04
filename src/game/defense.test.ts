@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { isCpuPressureRecognized, scoreRunBlockTarget, shouldCpuReleasePass, shouldCpuScramble } from './ai';
-import { alignDefenderAcrossFromReceiver, alignDefenderAcrossFromRunningBack, alignDefenders, chooseCpuDefensiveAssignments, getBracketCoverageTarget, matchCpuDefendersToReceivers, separateDefenderAlignments } from './defense';
+import { alignDefenderAcrossFromReceiver, alignDefenderAcrossFromRunningBack, alignDefenderToZone, alignDefenders, chooseCpuDefensiveAssignments, constrainDefendersToFieldSide, getBlitzAlignmentY, getBracketCoverageTarget, getDefensiveLineAlignmentY, matchCpuDefendersToReceivers, separateDefenderAlignments } from './defense';
 import { calculateYardsToGo, canDefenderDeflectPass, canTackleQuarterback, findTappedPassReceiver, getDefenderPassReachHeight, getDriveStartY, getSnapBallPosition, getPassArcHeight, getPassArcMaxHeight, getPassFlightFrames, getPassLeadTarget, getRoutePassLeadTarget, resolvePlayResult } from './rules';
-import { canEngagePassBlock, getPassBlockHoldFrames, isRusherActivelyBlocked, moveToward, shouldHoldPassBlock, updateRouteMovement } from './movement';
+import { canEngagePassBlock, clampPlayerToFieldY, getPassBlockHoldFrames, isRusherActivelyBlocked, moveToward, shouldHoldPassBlock, updateRouteMovement } from './movement';
 import type { Entity } from './types';
 
 test('deep blitzers must run to a blocker before pass protection can engage them', () => {
@@ -214,8 +214,10 @@ test('CPU releases open, pressured, and overdue passes before scrambling', () =>
     bestScore: 0
   };
 
-  assert.equal(shouldCpuReleasePass({ ...situation, hasOpenBreak: true, playClock: 32 }), true);
-  assert.equal(shouldCpuReleasePass({ ...situation, isUnderHeavyPressure: true, playClock: 26 }), true);
+  assert.equal(shouldCpuReleasePass({ ...situation, hasOpenBreak: true, playClock: 21 }), false);
+  assert.equal(shouldCpuReleasePass({ ...situation, hasOpenBreak: true, playClock: 22 }), true);
+  assert.equal(shouldCpuReleasePass({ ...situation, isUnderHeavyPressure: true, playClock: 26, pressureFrames: 9 }), false);
+  assert.equal(shouldCpuReleasePass({ ...situation, isUnderHeavyPressure: true, playClock: 35, pressureFrames: 10 }), true);
   assert.equal(shouldCpuReleasePass({ ...situation, playClock: 58 }), true);
   assert.equal(shouldCpuReleasePass({ ...situation, hasTarget: false, playClock: 58 }), false);
 });
@@ -242,10 +244,11 @@ test('CPU vertical calls wait for downfield windows but escape pressure and even
   assert.equal(shouldCpuReleasePass({ ...situation, playClock: 60 }), false);
   assert.equal(shouldCpuReleasePass({ ...situation, playClock: 48, targetDepthYards: 18 }), true);
   assert.equal(shouldCpuReleasePass({ ...situation, playClock: 48, targetDepthYards: 18, targetSeparation: 8 }), false);
-  assert.equal(shouldCpuReleasePass({ ...situation, isUnderHeavyPressure: true, playClock: 10 }), true);
+  assert.equal(shouldCpuReleasePass({ ...situation, isUnderHeavyPressure: true, playClock: 35, pressureFrames: 10 }), true);
   assert.equal(shouldCpuReleasePass({ ...situation, playClock: 100 }), false);
-  assert.equal(shouldCpuReleasePass({ ...situation, playClock: 240 }), true);
-  assert.equal(shouldCpuReleasePass({ ...situation, hasTarget: false, playClock: 240 }), false);
+  assert.equal(shouldCpuReleasePass({ ...situation, playClock: 160 }), false);
+  assert.equal(shouldCpuReleasePass({ ...situation, playClock: 200 }), true);
+  assert.equal(shouldCpuReleasePass({ ...situation, hasTarget: false, playClock: 200 }), false);
 });
 
 test('protected CPU vertical passes reach deep catch windows with real route speeds', (context) => {
@@ -354,6 +357,64 @@ test('the four defensive schemes align the requested rush and coverage groups', 
   }
 });
 
+test('all defensive shells stay behind the LOS and inside both end lines', () => {
+  for (const attackDirection of [-1, 1]) {
+    for (const playKey of ['COVER2', 'ZONE34', 'ZONE232', 'ZONE151']) {
+      const defenders: Entity[] = Array.from({ length: 7 }, () => ({ x: 170, y: 500, radius: 10 }));
+      const receivers: Entity[] = [
+        { x: 50, y: 500, radius: 10 },
+        { x: 290, y: 500, radius: 10 }
+      ];
+      const centerReceiver: Entity = { x: 170, y: 500, radius: 10 };
+      alignDefenders(defenders, playKey, attackDirection, 500, receivers, centerReceiver);
+      separateDefenderAlignments(defenders);
+      constrainDefendersToFieldSide(defenders, 500, attackDirection, 1200);
+
+      defenders.forEach(defender => {
+        assert.ok((defender.y - 500) * attackDirection >= (defender.radius || 10) + 6, `${playKey} crosses LOS`);
+        assert.ok(defender.y >= defender.radius && defender.y <= 1200 - defender.radius, `${playKey} crosses endline`);
+      });
+    }
+  }
+});
+
+test('manual assignments cannot place a defender across the LOS into the offense side', () => {
+  for (const attackDirection of [-1, 1]) {
+    const defender: Entity = {
+      x: 170,
+      y: 500 - (30 * attackDirection),
+      startY: 500 - (30 * attackDirection),
+      radius: 10
+    };
+
+    constrainDefendersToFieldSide([defender], 500, attackDirection, 1200);
+
+    assert.ok((defender.y - 500) * attackDirection >= 16);
+  }
+});
+
+test('assignment alignment clamps defender and zone targets inside all field boundaries', () => {
+  const defender: Entity = {
+    x: 400,
+    y: 1210,
+    startX: 400,
+    startY: 1210,
+    zoneX: 400,
+    zoneY: 1210,
+    radius: 10
+  };
+
+  alignDefenderToZone(defender, 500, 1);
+  constrainDefendersToFieldSide([defender], 500, 1, 1200, 340);
+
+  assert.equal(defender.x, 330);
+  assert.equal(defender.startX, 330);
+  assert.equal(defender.zoneX, 330);
+  assert.equal(defender.y, 1180);
+  assert.equal(defender.startY, 1180);
+  assert.equal(defender.zoneY, 1180);
+});
+
 test('CPU adds randomized box pressure on short-yardage situations without blitzing the deep safety', () => {
   const { defenders, eligibleReceivers } = createAlignedDefense('ZONE34');
   const assignments = chooseCpuDefensiveAssignments(
@@ -439,6 +500,30 @@ test('CPU adapts to repeated hot routes across different plays and formations', 
   );
 
   assert.equal([...assignments.values()].filter(assignment => assignment === 'MAN').length, 3);
+});
+
+test('CPU MAN assignments align at the LOS while ZONE landmarks stay deeper', () => {
+  const { defenders, eligibleReceivers } = createAlignedDefense('COVER2');
+  const lineOfScrimmageY = 500;
+  const attackDirection = -1;
+  const manDefender = defenders[1];
+  const zoneDefender = defenders[6];
+  const zoneDepth = ((zoneDefender.zoneY || 0) - lineOfScrimmageY) * attackDirection;
+  defenders.forEach(defender => { defender.defenseAssignment = 'ZONE'; });
+  manDefender.defenseAssignment = 'MAN';
+
+  matchCpuDefendersToReceivers(defenders, eligibleReceivers, {
+    down: 2,
+    yardsToGo: 8,
+    lineOfScrimmageY,
+    attackDirection,
+    recentPlays: []
+  });
+
+  assert.ok(manDefender.assignedReceiver);
+  assert.equal(manDefender.startX, manDefender.assignedReceiver.x);
+  assert.equal(manDefender.startY, getDefensiveLineAlignmentY(lineOfScrimmageY, attackDirection, manDefender.radius));
+  assert.ok(zoneDepth > (manDefender.startY! - lineOfScrimmageY) * attackDirection);
 });
 
 test('CPU brackets a lone receiving threat instead of defending blockers or sitting in deep zones', () => {
@@ -585,11 +670,32 @@ test('MAN coverage aligns directly across the line from its assigned receiver', 
     alignDefenderAcrossFromReceiver(defender, receiver, 500, attackDirection);
 
     assert.equal(defender.x, receiver.x);
-    assert.equal(defender.y, 500 + (65 * attackDirection));
+    assert.equal(defender.y, 500 + (24 * attackDirection));
     assert.equal(defender.startX, defender.x);
     assert.equal(defender.startY, defender.y);
     assert.ok(Math.hypot(defender.x - receiver.x, defender.y - receiver.y) >= 20);
   }
+});
+
+test('ZONE assignment returns a front-aligned defender to the deeper zone landmark', () => {
+  const lineOfScrimmageY = 500;
+  const attackDirection = -1;
+  const defender: Entity = {
+    x: 100,
+    y: getDefensiveLineAlignmentY(lineOfScrimmageY, attackDirection),
+    startX: 100,
+    startY: getDefensiveLineAlignmentY(lineOfScrimmageY, attackDirection),
+    zoneX: 120,
+    zoneY: 380,
+    radius: 10
+  };
+
+  alignDefenderToZone(defender, lineOfScrimmageY, attackDirection);
+
+  assert.equal(defender.x, 120);
+  assert.equal(defender.y, 380);
+  assert.equal(defender.startX, 120);
+  assert.equal(defender.startY, 380);
 });
 
 test('defender alignments separate stacked players before they can be tapped', () => {
@@ -602,6 +708,30 @@ test('defender alignments separate stacked players before they can be tapped', (
       assert.ok(Math.hypot(defender.x - other.x, defender.y - other.y) >= 30);
     }
   });
+});
+
+test('manual blitz staging moves defenders to the legal defensive front', () => {
+  for (const attackDirection of [-1, 1]) {
+    const lineOfScrimmageY = 500;
+    const stagedY = [42, 70, 185].map(depth =>
+      getBlitzAlignmentY(lineOfScrimmageY + (depth * attackDirection), lineOfScrimmageY, attackDirection)
+    );
+
+    assert.deepEqual(stagedY.map(y => (y - lineOfScrimmageY) * attackDirection), [24, 24, 24]);
+  }
+});
+
+test('players stay inside the back boundary lines of the field', () => {
+  const fieldHeight = 1200;
+  const radius = 10;
+  const beyondTop: Entity = { x: 100, y: -15, radius };
+  const beyondBottom: Entity = { x: 200, y: fieldHeight + 15, radius };
+
+  clampPlayerToFieldY(beyondTop, fieldHeight);
+  clampPlayerToFieldY(beyondBottom, fieldHeight);
+
+  assert.equal(beyondTop.y, 20);
+  assert.equal(beyondBottom.y, fieldHeight - 20);
 });
 
 test('all WRs have all routes available in their route tree, while RB keeps the two assigned routes plus BLOCK', async () => {
@@ -1287,10 +1417,10 @@ test('AI pre-snap shifts defenders toward the RB side', () => {
   const rb = { x: 240, y: 948 };
   const targetSideX = rb.x > 170 ? Math.min(270, rb.x + 25) : Math.max(70, rb.x - 25);
   defender.startX = targetSideX;
-  defender.startY = lineOfScrimmageY + (16 * attackDirection);
+  defender.startY = getDefensiveLineAlignmentY(lineOfScrimmageY, attackDirection, defender.radius);
 
   assert.equal(defender.startX, 265, 'AI pre-snap shift aligns defender outside RB');
-  assert.equal(defender.startY, 884, 'AI pre-snap shift positions defender at line');
+  assert.equal(defender.startY, 876, 'AI pre-snap shift places defender on the legal defensive front');
 });
 
 test('AI defense assigns RB_SPY and stops user spamming passes to the RB in the flat', () => {
@@ -1793,6 +1923,24 @@ test('Real life football mistakes: sideline boundary out of bounds and QB throw 
 
   assert.equal(hitThrow.isOffTarget, true);
   assert.ok(hitThrow.announcement?.includes('HIT AS HE THROWS'));
+
+  const humanHitThrow = evaluateQbThrowAccuracy({
+    throwDist: 120,
+    isUnderPressure: true,
+    isDeepShot: false,
+    isHitAsThrown: true,
+    roll: 0.5
+  }, -1);
+  const cpuHitThrow = evaluateQbThrowAccuracy({
+    throwDist: 120,
+    isUnderPressure: true,
+    isDeepShot: false,
+    isHitAsThrown: true,
+    isCpuThrow: true,
+    roll: 0.5
+  }, -1);
+  assert.equal(humanHitThrow.mistakeType, 'HIT_AS_THROWN');
+  assert.equal(cpuHitThrow.mistakeType, undefined);
 });
 
 test('CPU aim uncertainty increases with throw distance and pressure', async () => {
@@ -1841,7 +1989,7 @@ test('AI QB throws decisively on rhythm and under pressure without freezing in t
     isDeepShotOpportunity: false,
     hasOpenBreak: true,
     isUnderHeavyPressure: false,
-    playClock: 18,
+    playClock: 22,
     bestScore: 25
   });
   assert.equal(breakRelease, true, 'AI QB releases quickly on receiver break');
@@ -1852,7 +2000,8 @@ test('AI QB throws decisively on rhythm and under pressure without freezing in t
     isDeepShotOpportunity: false,
     hasOpenBreak: false,
     isUnderHeavyPressure: true,
-    playClock: 14,
+    playClock: 35,
+    pressureFrames: 10,
     bestScore: 10
   });
   assert.equal(pressureRelease, true, 'AI QB releases pass to escape sack under heavy pressure');
@@ -1863,10 +2012,10 @@ test('AI QB throws decisively on rhythm and under pressure without freezing in t
     isDeepShotOpportunity: false,
     hasOpenBreak: false,
     isUnderHeavyPressure: false,
-    playClock: 24,
-    bestScore: 15
+    playClock: 28,
+    bestScore: 20
   });
-  assert.equal(rhythmRelease, true, 'AI QB throws on rhythm at frame 24');
+  assert.equal(rhythmRelease, true, 'AI QB releases a strong read at frame 28');
 
   // Situation 4: Quick release under rush pressure at frame 10
   const earlyPressureRelease = shouldCpuReleasePass({
@@ -1875,9 +2024,10 @@ test('AI QB throws decisively on rhythm and under pressure without freezing in t
     hasOpenBreak: false,
     isUnderHeavyPressure: true,
     playClock: 10,
+    pressureFrames: 2,
     bestScore: 5
   });
-  assert.equal(earlyPressureRelease, true, 'AI QB gets ball out at frame 10 under rush pressure');
+  assert.equal(earlyPressureRelease, false, 'AI QB has a reaction window when pressure first arrives');
 
   // Situation 5: Progression release at frame 35 even if target score is modest
   const progressionRelease = shouldCpuReleasePass({
@@ -1885,10 +2035,10 @@ test('AI QB throws decisively on rhythm and under pressure without freezing in t
     isDeepShotOpportunity: false,
     hasOpenBreak: false,
     isUnderHeavyPressure: false,
-    playClock: 35,
+    playClock: 42,
     bestScore: -5
   });
-  assert.equal(progressionRelease, true, 'AI QB releases pass by frame 35 to prevent freeze/sack');
+  assert.equal(progressionRelease, true, 'AI QB releases by frame 42 to prevent freezing indefinitely');
 });
 
 test('Passes in flight overhead do not trigger catch contests or bat-downs at the line of scrimmage', () => {

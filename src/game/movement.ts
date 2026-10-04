@@ -46,6 +46,11 @@ export function isRusherActivelyBlocked(rusher: Entity, blockers: Entity[]): boo
   return Boolean(rusher.isEngagedWithBlocker && blockers.some(blocker => canEngagePassBlock(blocker, rusher)));
 }
 
+export function clampPlayerToFieldY(player: Entity, fieldHeight: number): void {
+  const visualMargin = Math.ceil((player.radius || 10) * 1.95);
+  player.y = Math.max(visualMargin, Math.min(fieldHeight - visualMargin, player.y));
+}
+
 export function distToSegment(
   p1: { x: number; y: number },
   p2: { x: number; y: number },
