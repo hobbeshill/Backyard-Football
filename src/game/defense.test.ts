@@ -580,12 +580,12 @@ test('RB coverage aligns across the line on the RB side for either attack direct
 test('MAN coverage aligns directly across the line from its assigned receiver', () => {
   for (const attackDirection of [-1, 1]) {
     const receiver: Entity = { x: 72, y: 500, radius: 10 };
-    const defender: Entity = { x: 250, y: 620, radius: 10 };
+    const defender: Entity = { x: 250, y: 565, startY: 500 + (65 * attackDirection), radius: 10 };
 
     alignDefenderAcrossFromReceiver(defender, receiver, 500, attackDirection);
 
     assert.equal(defender.x, receiver.x);
-    assert.equal(defender.y, 500 + (24 * attackDirection));
+    assert.equal(defender.y, 500 + (65 * attackDirection));
     assert.equal(defender.startX, defender.x);
     assert.equal(defender.startY, defender.y);
     assert.ok(Math.hypot(defender.x - receiver.x, defender.y - receiver.y) >= 20);
@@ -1793,6 +1793,14 @@ test('Real life football mistakes: sideline boundary out of bounds and QB throw 
 
   assert.equal(hitThrow.isOffTarget, true);
   assert.ok(hitThrow.announcement?.includes('HIT AS HE THROWS'));
+});
+
+test('CPU aim uncertainty increases with throw distance and pressure', async () => {
+  const { getCpuThrowAimVariance } = await import('./rules');
+
+  assert.equal(getCpuThrowAimVariance(90, false), 4);
+  assert.equal(getCpuThrowAimVariance(180, false), 6);
+  assert.equal(getCpuThrowAimVariance(300, true), 13.5);
 });
 
 test('Passes cleanly clear the line of scrimmage and cannot be easily batted down at the line', async () => {

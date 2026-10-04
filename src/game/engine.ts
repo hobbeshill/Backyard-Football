@@ -4,7 +4,7 @@ import { alignDefenderAcrossFromReceiver, alignDefenderAcrossFromRunningBack, al
 import { evaluateCpuOffensiveAudibles, evaluateCpuBallCarrierMoves, isCpuPressureRecognized, shouldCpuReleasePass, shouldCpuScramble, scoreRunBlockTarget } from './ai';
 import { createFumbleBall } from './fumbles';
 import { canEngagePassBlock, distToSegment, GAME_SPEED_SCALE, getBallCarrierRunSpeed, getPassBlockHoldFrames, getReturnPursuitSpeed, getReturnTeamBlockers, isRusherActivelyBlocked, moveToward, resolveCollisions, shouldApplyRunBlockStun, shouldHoldPassBlock, updateRouteMovement } from './movement';
-import { resolvePlayResult, calculateBrokenTackleChance, calculateYardsToGo, getDriveStartY, getSnapBallPosition, getPassArcHeight, getPassArcMaxHeight, getPassFlightFrames, findTappedPassReceiver, shouldReleaseUserPass, getPassLeadTarget, getRoutePassLeadTarget, canDefenderDeflectPass, canTackleQuarterback, resolveCatchContestOutcome, evaluateQbThrowAccuracy, calculateKickoffFlight, calculatePuntFlight, getTouchbackYardLineY, getKickoffLineY, isPlayerOutOfBounds } from './rules';
+import { resolvePlayResult, calculateBrokenTackleChance, calculateYardsToGo, getDriveStartY, getSnapBallPosition, getPassArcHeight, getPassArcMaxHeight, getPassFlightFrames, findTappedPassReceiver, shouldReleaseUserPass, getPassLeadTarget, getRoutePassLeadTarget, canDefenderDeflectPass, canTackleQuarterback, resolveCatchContestOutcome, evaluateQbThrowAccuracy, getCpuThrowAimVariance, calculateKickoffFlight, calculatePuntFlight, getTouchbackYardLineY, getKickoffLineY, isPlayerOutOfBounds } from './rules';
 import { sounds } from './sound';
 import { evaluateDirtSwipeGesture, drawDirtSwipeGesture } from './chalkMenu';
 import { getHelmetDesign, type HelmetDesign } from './helmetDesigns';
@@ -2920,8 +2920,9 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     const defTeam = activeDefense === 'P1' ? p1Team : p2Team;
     if (phase === 'QB_DROP' && !coverageMistakeEvaluated && playClock >= 26 && offensivePlaybook[activeOffName]?.type === 'PASS') {
       coverageMistakeEvaluated = true;
-      // ~28% chance of a coverage mistake on pass plays, modulated by team mistake rating
-      const mistakeChance = 0.28 * (defTeam.ratings.mistakeChance || 1.0);
+      // Keep human-play coverage mistakes unchanged; reduce free openings for CPU drives.
+      const baseMistakeChance = activeOffense === 'P2' ? 0.16 : 0.28;
+      const mistakeChance = baseMistakeChance * (defTeam.ratings.mistakeChance || 1.0);
       if (Math.random() < mistakeChance) {
         const eligibleDefenders = defenders.filter(d =>
           !d.passRusher &&
@@ -3034,12 +3035,12 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         );
 
         if (hasCoverageMistake) {
-          score += 140;
+          score += 70;
         }
 
         // Coverage Mismatch Exploitation: DL or LB covering a WR/TE in MAN coverage
         if (coveringDef && coveringDef.defenseAssignment === 'MAN' && (coveringDef.type === 'DL' || coveringDef.type === 'LB')) {
-          score += 65; // Heavily exploit the physical speed/agility mismatch!
+          score += 32;
         }
 
         // 2. Route break window anticipation bonus:
@@ -3051,47 +3052,47 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           const rTime = t.timer || 0;
           // Slant break window (frames 32 - 55)
           if ((t.routeType === 'SLANT-L' || t.routeType === 'SLANT-R') && rTime >= 32 && rTime <= 55 && nearestDefDist >= 14) {
-            score += 65;
+            score += 32;
             isBreakOpen = true;
           }
           // Comeback/Curl break window (frames 48 - 68)
           else if (t.routeType === 'COMEBACK' && rTime >= 48 && rTime <= 68 && nearestDefDist >= 14) {
-            score += 70;
+            score += 35;
             isBreakOpen = true;
           }
           // Crosser across field (frames 40 - 75)
           else if ((t.routeType === 'CROSS-L' || t.routeType === 'CROSS-R') && rTime >= 40 && rTime <= 75 && nearestDefDist >= 15) {
-            score += 60;
+            score += 30;
             isBreakOpen = true;
           }
           // Go route streaking deep behind CB (frame 34+)
           else if (t.routeType === 'GO' && (rTime >= 34 || hasCoverageMistake) && nearestDefDist >= 14 && depthYards > 6) {
-            score += 75;
+            score += 38;
             isBreakOpen = true;
           }
           // Out/Flag route break (frames 40 - 70)
           else if ((t.routeType === 'FLAG-L' || t.routeType === 'FLAG-R') && rTime >= 40 && rTime <= 70 && nearestDefDist >= 14) {
-            score += 65;
+            score += 32;
             isBreakOpen = true;
           }
           // Post route break (frames 40 - 72)
           else if ((t.routeType === 'POST-L' || t.routeType === 'POST-R') && rTime >= 40 && rTime <= 72 && nearestDefDist >= 14) {
-            score += 75;
+            score += 38;
             isBreakOpen = true;
           }
           // Hitch timing stop (frames 30 - 56)
           else if (t.routeType === 'HITCH' && rTime >= 30 && rTime <= 56 && nearestDefDist >= 13) {
-            score += 65;
+            score += 32;
             isBreakOpen = true;
           }
           // Wheel sideline route (frames 32 - 80)
           else if (t.routeType === 'WHEEL' && rTime >= 32 && rTime <= 80 && nearestDefDist >= 14) {
-            score += 75;
+            score += 38;
             isBreakOpen = true;
           }
           // Flat route (RB)
           else if (t.routeType === 'FLAT' && nearestDefDist >= 16) {
-            score += 50;
+            score += 25;
             isBreakOpen = true;
           }
         }
@@ -3110,7 +3111,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
         // 6. Playbook specific bonus
         if (isVerticalPlay && isDeepRoute && depthYards >= 15 && nearestDefDist >= 14) {
-          score += 90;
+          score += 45;
         }
 
         // 7. Passing lane obstruction deduction
@@ -3124,12 +3125,12 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         // If evaluating downfield receivers: Recognize that defense wasted defenders spying the RB!
         if (!isCheckdown) {
           if (rbSpyCount >= 2) {
-            score += 150; // 2 defenders dedicated to the RB -> downfield receivers have single coverage / wide open grass!
+            score += 75;
             if (nearestDefDist >= 12) {
               isBreakOpen = true; // Recognize the open downfield man!
             }
           } else if (rbSpyCount === 1) {
-            score += 75;
+            score += 38;
             if (nearestDefDist >= 14) {
               isBreakOpen = true;
             }
@@ -3290,6 +3291,10 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
             showAnnouncement(cpuAccCheck.announcement, '#ffcc00');
           }
         }
+
+        const cpuAimVariance = getCpuThrowAimVariance(targetDist, cpuRusherThreat);
+        leadX = Math.max(20, Math.min(fieldWidth - 20, leadX + (Math.random() - 0.5) * 2 * cpuAimVariance));
+        leadY += (Math.random() - 0.5) * 2 * cpuAimVariance;
 
         const dx = leadX - qb.x;
         const dy = leadY - qb.y;
@@ -5470,7 +5475,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       const meterW = 200;
       const meterH = 46;
       const meterX = (canvas.width - meterW) / 2;
-      const meterY = canvas.height - 70;
+      const meterY = canvas.height - 145;
 
       ctx.fillStyle = 'rgba(0, 0, 0, 0.88)';
       ctx.strokeStyle = '#00ffff';
@@ -5483,7 +5488,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       ctx.fillStyle = '#00ffff';
       ctx.font = 'bold 10px monospace';
       ctx.textAlign = 'center';
-      ctx.fillText('🏈 PUNT • TAP QB OR PUNT BUTTON', canvas.width / 2, meterY + 14);
+      ctx.fillText('🏈 PUNT • TAP BOTTOM BUTTON', canvas.width / 2, meterY + 14);
 
       const barX = meterX + 15;
       const barY = meterY + 22;

@@ -49,7 +49,11 @@ export function alignDefenderAcrossFromReceiver(
 ): void {
   const radius = defender.radius || 10;
   const targetX = Math.max(radius, Math.min(fieldWidth - radius, receiver.x));
-  const targetY = lineOfScrimmageY + (24 * attackDirection);
+  const shellDepth = defender.startY === undefined
+    ? 24
+    : (defender.startY - lineOfScrimmageY) * attackDirection;
+  const coverageDepth = Math.max(24, Math.min(180, shellDepth));
+  const targetY = lineOfScrimmageY + (coverageDepth * attackDirection);
   defender.startX = targetX;
   defender.startY = targetY;
   defender.x = targetX;

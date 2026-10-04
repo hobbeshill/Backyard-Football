@@ -381,6 +381,11 @@ export function evaluateQbThrowAccuracy(input: QbAccuracyInput, attackDirection:
   }
 }
 
+export function getCpuThrowAimVariance(throwDist: number, isUnderPressure: boolean): number {
+  const distanceVariance = throwDist > 240 ? 9 : throwDist > 140 ? 6 : 4;
+  return distanceVariance * (isUnderPressure ? 1.5 : 1);
+}
+
 export interface KickPhysicsResult {
   distanceYards: number;
   flightFrames: number;
