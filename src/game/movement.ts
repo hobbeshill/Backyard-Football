@@ -9,18 +9,22 @@ export function updatePlayerStamina(stamina: number, distance: number, endurance
   return Math.max(0, Math.min(100, stamina - distance * 0.06 / endurance + recovery));
 }
 
+export function updateReceiverTargetStamina(stamina: number, wasTargeted: boolean): number {
+  return Math.max(0, Math.min(100, stamina + (wasTargeted ? -100 / 3 : 50)));
+}
+
 export function createSimulationClock() {
   let lastTimestamp: number | null = null;
   let accumulatedTime = 0;
   const stepMilliseconds = 1000 / 60;
-  return (timestamp: number, paused: boolean, pace = 1): number => {
+  return (timestamp: number, paused: boolean): number => {
     const elapsed = lastTimestamp === null ? 0 : Math.max(0, timestamp - lastTimestamp);
     lastTimestamp = timestamp;
     if (paused) {
       accumulatedTime = 0;
       return 0;
     }
-    accumulatedTime += Math.min(elapsed, stepMilliseconds * 5) * pace;
+    accumulatedTime += Math.min(elapsed, stepMilliseconds * 5);
     const steps = Math.floor((accumulatedTime + 0.000001) / stepMilliseconds);
     accumulatedTime = Math.max(0, accumulatedTime - steps * stepMilliseconds);
     return steps;

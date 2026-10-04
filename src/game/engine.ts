@@ -3,7 +3,7 @@ import { defensiveKeys, defensivePlaybook, middleRoutes, offensiveKeys, offensiv
 import { alignDefenderAcrossFromReceiver, alignDefenderAcrossFromRunningBack, alignDefenderToZone, alignDefenders, chooseCpuDefensiveAssignments, constrainDefendersToFieldSide, getBlitzAlignmentY, getBracketCoverageTarget, getDefensiveLineAlignmentY, matchCpuDefendersToReceivers, separateDefenderAlignments } from './defense';
 import { evaluateCpuOffensiveAudibles, evaluateCpuBallCarrierMoves, isCpuPressureRecognized, shouldCpuGoForItOnFourthDown, shouldCpuReleasePass, shouldCpuScramble, scoreRunBlockTarget } from './ai';
 import { createFumbleBall } from './fumbles';
-import { canEngagePassBlock, clampPlayerToFieldY, createSimulationClock, distToSegment, GAME_SPEED_SCALE, getBallCarrierRunSpeed, getDesignedRunLateralBias, getFatigueSpeedMultiplier, getPassBlockHoldFrames, getReturnPursuitSpeed, getReturnTeamBlockers, isRusherActivelyBlocked, moveToward, resolveCollisions, shouldApplyRunBlockStun, shouldHoldPassBlock, updatePlayerStamina, updateRouteMovement } from './movement';
+import { canEngagePassBlock, clampPlayerToFieldY, createSimulationClock, distToSegment, GAME_SPEED_SCALE, getBallCarrierRunSpeed, getDesignedRunLateralBias, getFatigueSpeedMultiplier, getPassBlockHoldFrames, getReturnPursuitSpeed, getReturnTeamBlockers, isRusherActivelyBlocked, moveToward, resolveCollisions, shouldApplyRunBlockStun, shouldHoldPassBlock, updatePlayerStamina, updateReceiverTargetStamina, updateRouteMovement } from './movement';
 import { resolvePlayResult, calculateBrokenTackleChance, calculateYardsToGo, getDriveStartY, getSnapBallPosition, getPassArcHeight, getPassArcMaxHeight, getPassFlightFrames, findTappedPassReceiver, shouldReleaseUserPass, getPassLeadTarget, getRoutePassLeadTarget, canDefenderDeflectPass, canTackleQuarterback, resolveCatchContestOutcome, evaluateQbThrowAccuracy, getCpuThrowAimVariance, calculateKickoffFlight, calculatePuntFlight, getTouchbackYardLineY, getKickoffLineY, getDefenderPassReachHeight, isPlayerOutOfBounds } from './rules';
 import { sounds } from './sound';
 import { evaluateDirtSwipeGesture, drawDirtSwipeGesture } from './chalkMenu';
@@ -49,16 +49,7 @@ export interface GameEngineHandle {
   startDefensePlay?: () => void;
   repositionDefender?: (index: number, x: number, y: number) => void;
   diveTackle: () => void;
-  substituteReceiver: (index: number) => void;
   getReceivers: () => Entity[];
-  setGameSpeed: (speed: 0.8 | 1) => void;
-}
-
-export interface ReceiverStatus {
-  slot: string;
-  stamina: number;
-  reserveStamina: number;
-  isReserve: boolean;
 }
 
 export interface GameEngineCallbacks {
@@ -93,8 +84,6 @@ export interface GameEngineCallbacks {
   setIsKickoffState?: (isKickoff: boolean, kickingTeam: 'P1' | 'P2', receivingTeam: 'P1' | 'P2') => void;
   setIs4thDownState?: (is4thDown: boolean) => void;
   setKickMeterPowerState?: (power: number) => void;
-  setReceiverStatus?: (receivers: ReceiverStatus[]) => void;
-  setGameSpeedState?: (speed: 0.8 | 1) => void;
 }
 
 export interface GameBoxScore {
@@ -312,12 +301,9 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   }
   const userPlayHistory: PlayRecord[] = [];
   const cpuPlayHistory: PlayRecord[] = [];
-  let gameSpeed: 0.8 | 1 = 1;
   const userDefenseHistory: string[] = [];
   let momentum = 0;
   let rosterStamina: Record<string, number> = {};
-  let receiverReserves: Record<string, boolean> = {};
-  let staminaPublishFrame = 0;
   let defenseOverrides = new Map<number, DefensiveAssignment>();
   let coverageMistakeEvaluated = false;
   let playEnding = false;
@@ -381,7 +367,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         ball: ball ? { ...ball, intendedTarget: undefined, intendedTargetId: idFor(ball.intendedTarget) } : null,
         snapBall: snapBall ? { centerId: idFor(snapBall.center), frame: snapBall.frame } : null,
         ballPressureDefenderIds: ballPressureDefenders.map(idFor), fumbleBall, brokenTackleEffect,
-        momentum, rosterStamina, receiverReserves, defenseOverrides: [...defenseOverrides.entries()], coverageMistakeEvaluated,
+        momentum, rosterStamina, defenseOverrides: [...defenseOverrides.entries()], coverageMistakeEvaluated,
         playEnding, isInterceptionReturn, formationTransitionFrame, lastTargetWasRb,
         aiPreSnapShiftTimer,
         formationTransitions: formationTransitions.map(transition => ({
@@ -389,7 +375,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           fromX: transition.fromX, fromY: transition.fromY,
           toX: transition.toX, toY: transition.toY
         })),
-        userPlayHistory, cpuPlayHistory, gameSpeed, userDefenseHistory, playClock, cpuScrambleDecisionMade,
+        userPlayHistory, cpuPlayHistory, userDefenseHistory, playClock, cpuScrambleDecisionMade,
         qbScrambleReactionTimer, cameraY
       };
       window.localStorage.setItem(GAME_SESSION_STORAGE_KEY, JSON.stringify(snapshot));
@@ -459,7 +445,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       snapBall = state.snapBall ? { center: entityFor(state.snapBall.centerId) ?? qb, frame: state.snapBall.frame } : null;
       ballPressureDefenders = state.ballPressureDefenderIds.map((id: string) => entityFor(id)).filter((entity: Entity | null): entity is Entity => Boolean(entity));
       fumbleBall = state.fumbleBall; brokenTackleEffect = state.brokenTackleEffect;
-      momentum = state.momentum; rosterStamina = state.rosterStamina ?? {}; receiverReserves = state.receiverReserves ?? {}; defenseOverrides = new Map(state.defenseOverrides);
+      momentum = state.momentum; rosterStamina = state.rosterStamina ?? {}; defenseOverrides = new Map(state.defenseOverrides);
       coverageMistakeEvaluated = state.coverageMistakeEvaluated; playEnding = state.playEnding;
       isInterceptionReturn = state.isInterceptionReturn; formationTransitionFrame = state.formationTransitionFrame;
       lastTargetWasRb = state.lastTargetWasRb; aiPreSnapShiftTimer = state.aiPreSnapShiftTimer;
@@ -469,14 +455,11 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       }));
       userPlayHistory.splice(0, userPlayHistory.length, ...state.userPlayHistory);
       cpuPlayHistory.splice(0, cpuPlayHistory.length, ...(state.cpuPlayHistory ?? []));
-      gameSpeed = state.gameSpeed === 0.8 ? 0.8 : 1;
-      callbacks.setGameSpeedState?.(gameSpeed);
       userDefenseHistory.splice(0, userDefenseHistory.length, ...state.userDefenseHistory);
       playClock = state.playClock; cpuScrambleDecisionMade = state.cpuScrambleDecisionMade;
       qbScrambleReactionTimer = state.qbScrambleReactionTimer; cameraY = state.cameraY;
       lastClockFrameTime = null;
       isSessionActive = true;
-      publishReceiverStamina();
       if (hasUnsupportedDefense && phase === 'PRE_SNAP' && !isKickoffPhase) {
         applyDefensiveAlignment();
       }
@@ -840,7 +823,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
   function resizeGame() {
     if (!canvas) return;
-    const availableHeight = typeof window !== 'undefined' ? Math.max(180, window.innerHeight - 440) : 600;
+    const availableHeight = typeof window !== 'undefined' ? window.innerHeight - 95 : 600;
     const availableWidth = typeof window !== 'undefined' ? window.innerWidth - 10 : 340;
 
     canvas.width = fieldWidth;
@@ -1139,7 +1122,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       callbacks.onGameOver?.(p1Score, p2Score, false, { p1Quarters: [...p1QuarterScores], p2Quarters: [...p2QuarterScores] });
     } else {
       for (const key of Object.keys(rosterStamina)) {
-        rosterStamina[key] = Math.min(100, rosterStamina[key] + (quarter === 2 ? 35 : 18));
+        if (!key.includes(':wr-')) rosterStamina[key] = Math.min(100, rosterStamina[key] + (quarter === 2 ? 35 : 18));
       }
       getSessionEntities().forEach(([, entity]) => {
         if (entity.rosterKey) entity.stamina = rosterStamina[entity.rosterKey] ?? 100;
@@ -1158,7 +1141,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       return;
     }
 
-    const elapsedMs = Math.max(0, timestamp - lastClockFrameTime) * gameSpeed;
+    const elapsedMs = Math.max(0, timestamp - lastClockFrameTime);
     lastClockFrameTime = timestamp;
 
     if (quarterBreakRemainingMs > 0) {
@@ -1472,6 +1455,12 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     playEnding = true;
     const endedInterceptionReturn = isInterceptionReturn;
     const endedOffense = activeOffense;
+    receivers.forEach(receiver => {
+      if (!receiver.rosterKey) return;
+      receiver.stamina = updateReceiverTargetStamina(receiver.stamina ?? 100, Boolean(receiver.targetedThisPlay));
+      receiver.targetedThisPlay = false;
+      rosterStamina[receiver.rosterKey] = receiver.stamina;
+    });
     const endedSpecialTeamsReturn = isSpecialTeamsReturn;
     const endedSpecialTeamsType = specialTeamsReturnType;
     isSpecialTeamsReturn = false;
@@ -2096,17 +2085,6 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       entity.endurance = entity.archetype === 'SPEEDSTER' ? 0.9 : entity.archetype === 'POSSESSION' ? 1.15 : 1;
       rosterStamina[entity.rosterKey] = entity.stamina;
     });
-    receivers.forEach((receiver, index) => {
-      const key = `${activeOffense}:${offTeam.id}:wr-${index}`;
-      const currentKey = receiverReserves[key] ? `${key}:reserve` : key;
-      const alternateKey = receiverReserves[key] ? key : `${key}:reserve`;
-      if (activeOffense === 'P2' && (rosterStamina[currentKey] ?? 100) < 35 && (rosterStamina[alternateKey] ?? 100) > (rosterStamina[currentKey] ?? 100) + 20) {
-        receiverReserves[key] = !receiverReserves[key];
-      }
-      configureReceiver(receiver, index);
-    });
-    publishReceiverStamina();
-
     defenseOverrides.clear();
     applyDefensiveAlignment();
     if (animateAlignment) {
@@ -2152,34 +2130,6 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     }
   }
 
-  // Expose control hooks to component ref
-  function configureReceiver(receiver: Entity, index: number): void {
-    const team = activeOffense === 'P1' ? p1Team : p2Team;
-    const key = `${activeOffense}:${team.id}:wr-${index}`;
-    const isReserve = Boolean(receiverReserves[key]);
-    receiver.rosterKey = isReserve ? `${key}:reserve` : key;
-    receiver.stamina = rosterStamina[receiver.rosterKey] ?? 100;
-    receiver.speedMultiplier = [1.08, 1.04, 1.02][index] * team.ratings.wrSpeed * (isReserve ? 0.96 : 1);
-    receiver.archetype = isReserve ? 'RESERVE' : ['SPEEDSTER', 'SLOT', 'POSSESSION'][index];
-    receiver.endurance = isReserve ? 1.05 : [0.9, 1, 1.15][index];
-    rosterStamina[key] ??= 100;
-    rosterStamina[`${key}:reserve`] ??= 100;
-  }
-
-  function publishReceiverStamina(): void {
-    const team = activeOffense === 'P1' ? p1Team : p2Team;
-    callbacks.setReceiverStatus?.(receivers.map((receiver, index) => {
-      const key = `${activeOffense}:${team.id}:wr-${index}`;
-      const isReserve = Boolean(receiverReserves[key]);
-      return {
-        slot: ['Left WR', 'Slot WR', 'Right WR'][index],
-        stamina: receiver.stamina ?? 100,
-        reserveStamina: rosterStamina[isReserve ? key : `${key}:reserve`] ?? 100,
-        isReserve
-      };
-    }));
-  }
-
   const engineHandle: GameEngineHandle = {
     p1Score,
     p2Score,
@@ -2194,21 +2144,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     p1Team,
     p2Team,
     getReceivers: () => receivers,
-    setGameSpeed: (speed: 0.8 | 1) => {
-      gameSpeed = speed === 0.8 ? 0.8 : 1;
-      callbacks.setGameSpeedState?.(gameSpeed);
-      lastClockFrameTime = null;
-      saveGameSession();
-    },
     diveTackle,
-    substituteReceiver: (index: number) => {
-      if (isPaused || phase !== 'PRE_SNAP' || activeOffense !== 'P1' || isKickoffPhase || p1OffPlay === 'PUNT' || !Number.isInteger(index) || !receivers[index]) return;
-      const key = `P1:${p1Team.id}:wr-${index}`;
-      receiverReserves[key] = !receiverReserves[key];
-      configureReceiver(receivers[index], index);
-      publishReceiverStamina();
-      saveGameSession();
-    },
     selectP1Team: (teamId: string) => {
       p1Team = getTeam(teamId);
       callbacks.setP1TeamState?.(p1Team);
@@ -2244,7 +2180,6 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       publishGameClock();
       momentum = 0;
       rosterStamina = {};
-      receiverReserves = {};
       userPlayHistory.length = 0;
       cpuPlayHistory.length = 0;
       defenseOverrides.clear();
@@ -2679,6 +2614,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       targetY,
       intendedTarget: tappedReceiver
     };
+    if (receivers.includes(tappedReceiver)) tappedReceiver.targetedThisPlay = true;
 
     qb.hasBall = false;
     phase = 'THROWN';
@@ -3171,17 +3107,16 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       if ((entity.diveCooldownTimer || 0) > 0) entity.diveCooldownTimer!--;
       if (!entity.rosterKey) return;
       activeKeys.add(entity.rosterKey);
+      if (receivers.includes(entity)) {
+        entity.stamina = rosterStamina[entity.rosterKey] ?? entity.stamina ?? 100;
+        return;
+      }
       const distance = livePlay ? Math.hypot(entity.x - positions[index].x, entity.y - positions[index].y) : 0;
       entity.stamina = updatePlayerStamina(entity.stamina ?? 100, Math.min(distance, 5), entity.endurance, livePlay ? 0 : phase === 'DEAD' ? 0.04 : 0.01);
       rosterStamina[entity.rosterKey] = entity.stamina;
     });
     for (const key of Object.keys(rosterStamina)) {
-      if (!activeKeys.has(key)) rosterStamina[key] = updatePlayerStamina(rosterStamina[key], 0, 1, 0.035);
-    }
-    staminaPublishFrame++;
-    if (staminaPublishFrame >= 60) {
-      staminaPublishFrame = 0;
-      publishReceiverStamina();
+      if (!activeKeys.has(key) && !key.includes(':wr-')) rosterStamina[key] = updatePlayerStamina(rosterStamina[key], 0, 1, 0.035);
     }
   }
 
@@ -3673,6 +3608,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           targetY: leadY,
           intendedTarget: chosenTarget
         };
+        if (receivers.includes(chosenTarget)) chosenTarget.targetedThisPlay = true;
         qb.hasBall = false;
         phase = 'THROWN';
         sounds.playThrow();
@@ -6407,7 +6343,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   let animationFrameId: number;
   const simulationClock = createSimulationClock();
   function loop(timestamp: number) {
-    const steps = simulationClock(timestamp, isPaused, gameSpeed);
+    const steps = simulationClock(timestamp, isPaused);
     if (!isPaused) {
       if (!options.tutorial) updateGameClock(timestamp);
       for (let step = 0; step < steps && !isPaused; step++) {

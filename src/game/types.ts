@@ -37,6 +37,7 @@ export interface Entity {
   stamina?: number;
   endurance?: number;
   rosterKey?: string;
+  targetedThisPlay?: boolean;
   archetype?: string;
   radius: number;
   color?: string;

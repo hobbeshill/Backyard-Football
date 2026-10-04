@@ -22,15 +22,6 @@ test('simulation discards paused time and caps catch-up after a stalled frame', 
   assert.equal(clock(20000, false), 5);
 });
 
-test('relaxed pace consistently slows simulation on all displays', () => {
-  for (const refreshRate of [30, 60, 120]) {
-    const clock = createSimulationClock();
-    let updates = 0;
-    for (let frame = 0; frame <= refreshRate * 5; frame++) updates += clock(frame * 1000 / refreshRate, false, 0.8);
-    assert.equal(updates, 240);
-  }
-});
-
 function createMockCanvas(): HTMLCanvasElement {
   const listeners = new Map<string, EventListener>();
   const drawingContext = {
@@ -82,7 +73,7 @@ test('Sweep lane bias steers outside on either side while ISO keeps its inside p
   assert.equal(getDesignedRunLateralBias('ISO', 220, 'right'), 0);
 });
 
-test('receiver fatigue persists across play calls, substitutions and possessions, but resets for a new game', () => {
+test('receiver fatigue persists across play calls and possessions, and resets for a new game', () => {
   const originalRequest = globalThis.requestAnimationFrame;
   const originalCancel = globalThis.cancelAnimationFrame;
   let nextFrame: FrameRequestCallback = () => {};
@@ -102,16 +93,12 @@ test('receiver fatigue persists across play calls, substitutions and possessions
     game.setPossessionForTest?.('P1');
     game.resetDrill();
     const receiver = game.getReceivers()[0];
+    assert.equal('substituteReceiver' in game, false);
     receiver.stamina = 30;
     nextFrame(0);
     nextFrame(1000 / 60);
     const tiredStamina = receiver.stamina;
     game.selectOffense('SHORT_PASS');
-    assert.equal(game.getReceivers()[0].stamina, tiredStamina);
-    game.substituteReceiver(0);
-    assert.equal(game.getReceivers()[0].archetype, 'RESERVE');
-    assert.equal(game.getReceivers()[0].stamina, 100);
-    game.substituteReceiver(0);
     assert.equal(game.getReceivers()[0].stamina, tiredStamina);
     game.setPossessionForTest?.('P2');
     game.resetDrill();
@@ -121,14 +108,50 @@ test('receiver fatigue persists across play calls, substitutions and possessions
     assert.equal(game.getReceivers()[0].stamina, tiredStamina);
     game.startPlay?.();
     const liveReceiver = game.getReceivers()[0];
-    game.substituteReceiver(0);
     assert.equal(game.getReceivers()[0], liveReceiver);
     nextFrame(2000 / 60);
-    assert.ok(liveReceiver.stamina! < tiredStamina);
+    assert.equal(liveReceiver.stamina, tiredStamina);
     game.resetGame();
     game.setPossessionForTest?.('P1');
     game.resetDrill();
     assert.equal(game.getReceivers()[0].stamina, 100);
+  } finally {
+    cleanup?.();
+    globalThis.requestAnimationFrame = originalRequest;
+    globalThis.cancelAnimationFrame = originalCancel;
+  }
+});
+
+test('targeting a WR three times empties its stamina and two untargeted plays refill it', () => {
+  const originalRequest = globalThis.requestAnimationFrame;
+  const originalCancel = globalThis.cancelAnimationFrame;
+  globalThis.requestAnimationFrame = () => 1;
+  globalThis.cancelAnimationFrame = () => {};
+  let engine: GameEngineHandle | null = null;
+  const cleanup = mountFootballGame(createMockCanvas(), {
+    setP2OffPlayState: () => {}, setP2DefPlayState: () => {},
+    setDownDistanceText: () => {}, setActiveOffenseState: () => {},
+    setUserScore: () => {}, setCpuScore: () => {}, setP1DefPlayState: () => {},
+    setMomentumState: () => {}, setGameClockState: () => {}, showAnnouncement: () => {},
+    onEngineReady: value => { engine = value; }
+  });
+  try {
+    assert.ok(engine);
+    const game = engine as GameEngineHandle;
+    assert.equal('setGameSpeed' in game, false);
+    game.setPossessionForTest?.('P1');
+    game.resetDrill();
+    const expectedStamina = [200 / 3, 100 / 3, 0, 50, 100];
+    for (const [index, expected] of expectedStamina.entries()) {
+      const receiver = game.getReceivers()[0];
+      receiver.targetedThisPlay = index < 3;
+      game.triggerPlayEnd?.(receiver.y, 'INCOMPLETE');
+      assert.ok(Math.abs(receiver.stamina! - expected) < 0.0001, `play ${index + 1}: ${receiver.stamina} stamina`);
+      if (index < expectedStamina.length - 1) {
+        game.setPossessionForTest?.('P1');
+        game.resetDrill();
+      }
+    }
   } finally {
     cleanup?.();
     globalThis.requestAnimationFrame = originalRequest;

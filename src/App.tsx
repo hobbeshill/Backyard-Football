@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { Volume2, VolumeX, RefreshCw, HelpCircle, X, Users, Shield, ArrowRight, Search, Pause, Play, Home, Hand, Repeat2, Crosshair, BatteryLow } from 'lucide-react';
+import { Volume2, VolumeX, RefreshCw, HelpCircle, X, Users, Shield, ArrowRight, Search, Pause, Play, Home, Hand, Crosshair } from 'lucide-react';
 import { offensivePlaybook, defensivePlaybook } from './game/playbook';
 import { sounds } from './game/sound';
-import { hasSavedGameSession, mountFootballGame, type GameBoxScore, type GameEngineHandle, type ReceiverStatus } from './game/engine';
+import { hasSavedGameSession, mountFootballGame, type GameBoxScore, type GameEngineHandle } from './game/engine';
 import { HelmetSpritePreview } from './game/HelmetSpritePreview';
 import { RealPlayTutorial } from './game/RealPlayTutorial';
 import { TEAM_KEYS, TEAMS, getAllTeams, getTeam, type TeamProfile } from './game/teams';
@@ -54,8 +54,6 @@ export default function App() {
   const [kickoffSide, setKickoffSide] = useState<{ kicking: 'P1' | 'P2'; receiving: 'P1' | 'P2' }>({ kicking: 'P2', receiving: 'P1' });
   const [is4thDown, setIs4thDown] = useState(false);
   const [phaseState, setPhaseState] = useState('PRE_SNAP');
-  const [receiverStatus, setReceiverStatus] = useState<ReceiverStatus[]>([]);
-  const [gameSpeed, setGameSpeed] = useState<0.8 | 1>(1);
   const [kickMeterPower, setKickMeterPower] = useState(0.55);
   const [momentumState, setMomentumState] = useState(0);
   const [gameClockState, setGameClockState] = useState({ quarter: 1, seconds: 120 });
@@ -344,9 +342,7 @@ export default function App() {
       },
       setIs4thDownState: (val) => setIs4thDown(val),
       setKickMeterPowerState: (power) => setKickMeterPower(power),
-      setP1OffPlayState,
-      setReceiverStatus,
-      setGameSpeedState: setGameSpeed
+      setP1OffPlayState
     });
   }, []);
 
@@ -537,7 +533,7 @@ export default function App() {
     p1OffPlayState !== 'PUNT' && !showPauseMenu && !finishedGame;
 
   return (
-    <div className="relative w-screen h-dvh overflow-hidden flex flex-col items-center justify-center pb-20 bg-[#030704] text-white font-mono select-none">
+    <div className="relative w-screen h-screen overflow-hidden flex flex-col items-center justify-center bg-[#030704] text-white font-mono select-none">
       
       {/* Top Header & Scoreboard */}
       <header className="flex flex-col items-center justify-center z-20 mb-1 w-full max-w-[430px] px-2 pt-1">
@@ -869,26 +865,6 @@ export default function App() {
       </div>
 
       {/* Footer Controls & Info */}
-      {isReadyPhase && !isKickoffActive && p1OffPlayState !== 'PUNT' && activeOffenseState === 'P1' && !showPauseMenu && !finishedGame && (
-        <div className="grid w-full max-w-[420px] grid-cols-3 gap-2 px-2 py-2">
-          {receiverStatus.map((receiver, index) => (
-            <div key={receiver.slot} className="min-w-0 text-xs text-neutral-100">
-              <div className="flex items-center justify-between gap-1">
-                <span className="truncate">{receiver.slot}</span>
-                <button type="button" onClick={() => engineRef.current?.substituteReceiver(index)} title={`Swap ${receiver.slot}: ${Math.round(receiver.reserveStamina)}% stamina on bench`} aria-label={`Substitute ${receiver.slot}`} className="shrink-0 rounded p-2 hover:bg-neutral-700">
-                  <Repeat2 size={16} />
-                </button>
-              </div>
-              <meter aria-label={`${receiver.slot} stamina`} min={0} max={100} low={55} high={75} optimum={100} value={receiver.stamina} className="block h-2 w-full" />
-              <span className="mt-1 flex min-h-4 items-center gap-1 text-[10px]">
-                {receiver.stamina < 55 && <BatteryLow size={12} />}
-                {receiver.isReserve ? 'Reserve' : 'Starter'} · {Math.round(receiver.stamina)}%
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
-
       {phaseState === 'RUNNING' && activeOffenseState === 'P2' && !showPauseMenu && !finishedGame && (
         <button type="button" onClick={() => engineRef.current?.diveTackle()} title="Dive tackle" aria-label="Dive tackle" className="fixed bottom-4 right-4 z-[85] flex h-14 w-14 items-center justify-center rounded-lg border-2 border-cyan-300 bg-neutral-950 text-cyan-200 shadow-xl">
           <Crosshair size={26} />
@@ -1035,7 +1011,7 @@ export default function App() {
                 <ul className="list-disc list-inside space-y-1 text-neutral-300">
                   <li><b className="text-white">Open Receivers:</b> Accurate throws with clear separation remain high-percentage catches.</li>
                   <li><b className="text-white">Contested Catches:</b> Nearby defenders, double coverage, catch angle, receiver hands, and fatigue determine the catch window. Touching players are not wide open.</li>
-                  <li><b className="text-white">Fatigue:</b> Stamina bars turn amber when tired and red when exhausted. Sprinting and contact reduce stamina; resting and quarter breaks restore it. Swap receivers before the snap using the substitution controls.</li>
+                  <li><b className="text-white">Fatigue:</b> Stamina bars under players turn amber when tired and red when exhausted. Each pass target costs a receiver one-third of their stamina; two plays without a target restore it.</li>
                 </ul>
               </div>
 
@@ -1306,16 +1282,6 @@ export default function App() {
             className="w-full max-w-sm rounded-lg border-2 border-[#ffcc00] bg-[#07110a] p-5 text-center shadow-2xl"
           >
             <h2 id="pause-menu-title" className="text-xl font-black uppercase text-[#ffcc00]">Game Paused</h2>
-            <fieldset className="mt-4">
-              <legend className="mb-2 text-xs font-bold text-neutral-200">Game pace</legend>
-              <div className="grid grid-cols-2 rounded border border-neutral-600 p-1">
-                {([{ speed: 0.8, label: 'Relaxed' }, { speed: 1, label: 'Normal' }] as const).map(option => (
-                  <button key={option.speed} type="button" aria-pressed={gameSpeed === option.speed} onClick={() => engineRef.current?.setGameSpeed(option.speed)} className={`rounded px-3 py-2 text-sm font-bold ${gameSpeed === option.speed ? 'bg-neutral-200 text-neutral-950' : 'text-neutral-300 hover:bg-neutral-800'}`}>
-                    {option.label}
-                  </button>
-                ))}
-              </div>
-            </fieldset>
             <div className="mt-5 grid gap-3">
               <button
                 onClick={() => {

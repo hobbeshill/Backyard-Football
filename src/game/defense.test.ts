@@ -3,7 +3,7 @@ import test from 'node:test';
 import { isCpuPressureRecognized, scoreRunBlockTarget, shouldCpuReleasePass, shouldCpuScramble } from './ai';
 import { alignDefenderAcrossFromReceiver, alignDefenderAcrossFromRunningBack, alignDefenderToZone, alignDefenders, chooseCpuDefensiveAssignments, constrainDefendersToFieldSide, getBlitzAlignmentY, getBracketCoverageTarget, getDefensiveLineAlignmentY, matchCpuDefendersToReceivers, separateDefenderAlignments } from './defense';
 import { calculateYardsToGo, canDefenderDeflectPass, canTackleQuarterback, findTappedPassReceiver, getCatchCompletionChance, getDefenderPassReachHeight, getDriveStartY, getSnapBallPosition, getPassArcHeight, getPassArcMaxHeight, getPassFlightFrames, getPassLeadTarget, getRoutePassLeadTarget, resolveCatchContestOutcome, resolvePlayResult } from './rules';
-import { canEngagePassBlock, clampPlayerToFieldY, getFatigueSpeedMultiplier, getPassBlockHoldFrames, isRusherActivelyBlocked, moveToward, shouldHoldPassBlock, updatePlayerStamina, updateRouteMovement } from './movement';
+import { canEngagePassBlock, clampPlayerToFieldY, getFatigueSpeedMultiplier, getPassBlockHoldFrames, isRusherActivelyBlocked, moveToward, shouldHoldPassBlock, updatePlayerStamina, updateReceiverTargetStamina, updateRouteMovement } from './movement';
 import type { Entity } from './types';
 
 test('coverage reduces catches smoothly and touching players are not wide open', () => {
@@ -51,6 +51,20 @@ test('fatigue follows workload and endurance, with bounded recovery and speed pe
   assert.equal(updatePlayerStamina(99, 0, 1, 5), 100);
   assert.equal(getFatigueSpeedMultiplier(100), 1);
   assert.equal(getFatigueSpeedMultiplier(-20), 0.85);
+});
+
+test('three WR targets exhaust stamina and two untargeted plays restore it', () => {
+  let stamina = 100;
+  stamina = updateReceiverTargetStamina(stamina, true);
+  assert.ok(Math.abs(stamina - 200 / 3) < 0.0001);
+  stamina = updateReceiverTargetStamina(stamina, true);
+  assert.ok(Math.abs(stamina - 100 / 3) < 0.0001);
+  stamina = updateReceiverTargetStamina(stamina, true);
+  assert.equal(stamina, 0);
+  stamina = updateReceiverTargetStamina(stamina, false);
+  assert.equal(stamina, 50);
+  stamina = updateReceiverTargetStamina(stamina, false);
+  assert.equal(stamina, 100);
 });
 
 test('deep blitzers must run to a blocker before pass protection can engage them', () => {
