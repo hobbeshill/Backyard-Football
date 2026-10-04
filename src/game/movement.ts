@@ -1,17 +1,6 @@
 import type { Entity } from './types';
 
 export const GAME_SPEED_SCALE = 0.77;
-export function getQbDecisionTimeScale(situation: {
-  enabled: boolean;
-  phase: string;
-  activeOffense: string;
-  isPassingPlay: boolean;
-  tutorial?: boolean;
-}): number {
-  return situation.enabled && !situation.tutorial && situation.phase === 'QB_DROP' &&
-    situation.activeOffense === 'P1' && situation.isPassingPlay ? 0.65 : 1;
-}
-
 export function getBallCarrierRunSpeed(isReturner: boolean, isBoosted: boolean): number {
   if (isReturner) return 1.4 * 1.18 * 0.68;
   return isBoosted ? 2.65 : 1.84;
@@ -19,6 +8,15 @@ export function getBallCarrierRunSpeed(isReturner: boolean, isBoosted: boolean):
 
 export function shouldApplyRunBlockStun(blocker: Entity, target: Entity): boolean {
   return !blocker.isEngagedWithBlocker || blocker.blockingDefender !== target;
+}
+
+export function getReturnTeamBlockers(players: Entity[], returner: Entity | null): Entity[] {
+  return players.filter(player => player !== returner);
+}
+
+export function getReturnPursuitSpeed(returnerHasBall: boolean, pursuitFrames: number, distanceToRunner: number): number {
+  if (!returnerHasBall) return 1.2;
+  return Math.min(3.4, 2.0 + (pursuitFrames * 0.035) + Math.max(0, (distanceToRunner - 30) * 0.006));
 }
 
 export function canEngagePassBlock(blocker: Entity, rusher: Entity): boolean {

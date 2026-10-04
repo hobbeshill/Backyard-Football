@@ -3,20 +3,8 @@ import test from 'node:test';
 import { scoreRunBlockTarget, shouldCpuReleasePass, shouldCpuScramble } from './ai';
 import { alignDefenderAcrossFromRunningBack, alignDefenders, chooseCpuDefensiveAssignments, getBracketCoverageTarget, matchCpuDefendersToReceivers } from './defense';
 import { calculateYardsToGo, canDefenderDeflectPass, canTackleQuarterback, findTappedPassReceiver, getDefenderPassReachHeight, getDriveStartY, getSnapBallPosition, getPassArcHeight, getPassArcMaxHeight, getPassFlightFrames, getPassLeadTarget, getRoutePassLeadTarget, resolvePlayResult } from './rules';
-import { canEngagePassBlock, getQbDecisionTimeScale, moveToward, updateRouteMovement } from './movement';
+import { canEngagePassBlock, moveToward, updateRouteMovement } from './movement';
 import type { Entity } from './types';
-
-test('relaxed QB timing slows only user passing decisions and preserves other gameplay speeds', () => {
-  const situation = { enabled: true, phase: 'QB_DROP', activeOffense: 'P1', isPassingPlay: true };
-  assert.equal(getQbDecisionTimeScale(situation), 0.65);
-  assert.equal(getQbDecisionTimeScale({ ...situation, enabled: false }), 1);
-  assert.equal(getQbDecisionTimeScale({ ...situation, activeOffense: 'P2' }), 1);
-  assert.equal(getQbDecisionTimeScale({ ...situation, isPassingPlay: false }), 1);
-  assert.equal(getQbDecisionTimeScale({ ...situation, tutorial: true }), 1);
-  for (const phase of ['PRE_SNAP', 'HANDOFF', 'THROWN', 'RUNNING', 'KICKOFF', 'PUNT', 'FUMBLE', 'DEAD']) {
-    assert.equal(getQbDecisionTimeScale({ ...situation, phase }), 1);
-  }
-});
 
 test('deep blitzers must run to a blocker before pass protection can engage them', () => {
   for (const attackDirection of [-1, 1]) {
@@ -320,8 +308,28 @@ function createAlignedDefense(playKey: string, formation: 'SPREAD' | 'STACK' | '
   return { defenders, eligibleReceivers: [...receivers, centerReceiver] };
 }
 
+test('the four defensive schemes align the requested rush and coverage groups', async () => {
+  const { defensiveKeys, defensivePlaybook } = await import('./playbook');
+  assert.deepEqual(defensiveKeys, ['COVER2', 'ZONE34', 'ZONE232', 'ZONE151']);
+  assert.deepEqual(Object.keys(defensivePlaybook), defensiveKeys);
+
+  const expected = [
+    { key: 'COVER2', rushers: 1, safeties: 2 },
+    { key: 'ZONE34', rushers: 3, safeties: 2 },
+    { key: 'ZONE232', rushers: 2, safeties: 2 },
+    { key: 'ZONE151', rushers: 1, safeties: 1 }
+  ];
+
+  for (const { key, rushers, safeties } of expected) {
+    const { defenders } = createAlignedDefense(key);
+    assert.equal(defenders.filter(defender => defender.passRusher).length, rushers, key);
+    assert.equal(defenders.filter(defender => defender.type === 'FS' || defender.type === 'SS').length, safeties, key);
+    assert.ok(defenders.every(defender => defender.passRusher || (defender.zoneX !== undefined && defender.zoneY !== undefined)), key);
+  }
+});
+
 test('CPU adds randomized box pressure on short-yardage situations without blitzing the deep safety', () => {
-  const { defenders, eligibleReceivers } = createAlignedDefense('COVER3');
+  const { defenders, eligibleReceivers } = createAlignedDefense('ZONE34');
   const assignments = chooseCpuDefensiveAssignments(
     defenders,
     eligibleReceivers,
@@ -344,7 +352,7 @@ test('CPU adds randomized box pressure on short-yardage situations without blitz
 });
 
 test('CPU keeps deep support against repeated deep passes', () => {
-  const { defenders, eligibleReceivers } = createAlignedDefense('QUARTERS');
+  const { defenders, eligibleReceivers } = createAlignedDefense('ZONE232');
   const assignments = chooseCpuDefensiveAssignments(
     defenders,
     eligibleReceivers,
@@ -364,7 +372,7 @@ test('CPU keeps deep support against repeated deep passes', () => {
 });
 
 test('CPU matches more receivers in man coverage against short-pass tendencies', () => {
-  const { defenders, eligibleReceivers } = createAlignedDefense('COVER3');
+  const { defenders, eligibleReceivers } = createAlignedDefense('COVER2');
   const assignments = chooseCpuDefensiveAssignments(
     defenders,
     eligibleReceivers,
@@ -387,7 +395,7 @@ test('CPU matches more receivers in man coverage against short-pass tendencies',
 });
 
 test('CPU adapts to repeated hot routes across different plays and formations', () => {
-  const { defenders, eligibleReceivers } = createAlignedDefense('COVER3');
+  const { defenders, eligibleReceivers } = createAlignedDefense('COVER2');
   const assignments = chooseCpuDefensiveAssignments(
     defenders,
     eligibleReceivers,
@@ -408,7 +416,7 @@ test('CPU adapts to repeated hot routes across different plays and formations', 
 });
 
 test('CPU brackets a lone receiving threat instead of defending blockers or sitting in deep zones', () => {
-  for (const playKey of ['COVER3', 'QUARTERS', 'BLITZ', 'COVER2MAN']) {
+  for (const playKey of ['COVER2', 'ZONE34', 'ZONE232', 'ZONE151']) {
     for (const randomValue of [0, 1]) {
       const { defenders, eligibleReceivers } = createAlignedDefense(playKey);
       eligibleReceivers.forEach((receiver, index) => {
@@ -433,7 +441,7 @@ test('CPU brackets a lone receiving threat instead of defending blockers or sitt
 test('CPU live matchups bracket only the lone receiver and tighten after repeated routes', () => {
   for (const attackDirection of [-1, 1]) {
     for (const loneIndex of [0, 1, 2]) {
-      const { defenders, eligibleReceivers } = createAlignedDefense('QUARTERS');
+      const { defenders, eligibleReceivers } = createAlignedDefense('ZONE232');
       eligibleReceivers.forEach((receiver, index) => {
         receiver.routeType = index === loneIndex ? 'GO' : 'BLOCK';
         receiver.isBlocker = index !== loneIndex;
@@ -467,7 +475,7 @@ test('CPU live matchups bracket only the lone receiver and tighten after repeate
 });
 
 test('CPU man coverage ignores blockers and releases brackets when more routes are added', () => {
-  const { defenders, eligibleReceivers } = createAlignedDefense('COVER2MAN');
+  const { defenders, eligibleReceivers } = createAlignedDefense('COVER2');
   defenders.forEach(defender => { defender.defenseAssignment = 'MAN'; defender.coverageLeverage = 'INSIDE'; });
   eligibleReceivers[0].isBlocker = true;
   eligibleReceivers[0].routeType = 'BLOCK';
@@ -479,7 +487,7 @@ test('CPU man coverage ignores blockers and releases brackets when more routes a
 });
 
 test('CPU tightens man coverage against a compact receiver formation', () => {
-  const { defenders, eligibleReceivers } = createAlignedDefense('COVER3');
+  const { defenders, eligibleReceivers } = createAlignedDefense('ZONE34');
   eligibleReceivers[0].x = 205;
   eligibleReceivers[1].x = 285;
   eligibleReceivers[2].x = 245;
@@ -501,7 +509,7 @@ test('CPU tightens man coverage against a compact receiver formation', () => {
 });
 
 test('pre-snap coverage defenders keep visible separation from receivers', () => {
-  const playKeys = ['COVER3', 'COVER2MAN', 'TAMPA2', 'BLITZ', 'QUARTERS', 'ROBBER'];
+  const playKeys = ['COVER2', 'ZONE34', 'ZONE232', 'ZONE151'];
   const formations = ['SPREAD', 'STACK', 'TRIPS'] as const;
 
   for (const formation of formations) {
@@ -521,7 +529,7 @@ test('pre-snap coverage defenders keep visible separation from receivers', () =>
 });
 
 test('pre-snap front defender stays clear of the offensive line', () => {
-  const { defenders, eligibleReceivers } = createAlignedDefense('COVER3');
+  const { defenders, eligibleReceivers } = createAlignedDefense('ZONE34');
   const noseDefender = defenders[0];
   const centerReceiver = eligibleReceivers[2];
   const distance = Math.hypot(noseDefender.x - centerReceiver.x, noseDefender.y - centerReceiver.y);
@@ -681,7 +689,7 @@ test('both offense and defense have exactly 7 players on the field (7v7)', async
   const offensePlayers = [qb, rb, ...linemen, ...receivers, centerReceiver];
   assert.equal(offensePlayers.length, 7, 'Offense must have 7 players');
 
-  const { defenders } = createAlignedDefense('COVER3');
+  const { defenders } = createAlignedDefense('ZONE34');
   assert.equal(defenders.length, 7, 'Defense must have 7 players');
 });
 
@@ -755,7 +763,7 @@ test('moveToward applies accessible calibrated speed factor', async () => {
 });
 
 test('CPU defense assigns QB_SPY when opponent has scrambled or run with QB', async () => {
-  const { defenders, eligibleReceivers } = createAlignedDefense('COVER3');
+  const { defenders, eligibleReceivers } = createAlignedDefense('ZONE34');
   const assignments = chooseCpuDefensiveAssignments(
     defenders,
     eligibleReceivers,
@@ -809,7 +817,7 @@ test('CPU offense counters user blitzes by assigning protection and hot-routing 
 });
 
 test('CPU defense assigns both QB_SPY and an edge contain rusher when opponent spams QB runs', async () => {
-  const { defenders, eligibleReceivers } = createAlignedDefense('COVER3');
+  const { defenders, eligibleReceivers } = createAlignedDefense('ZONE34');
   const assignments = chooseCpuDefensiveAssignments(
     defenders,
     eligibleReceivers,
@@ -853,7 +861,7 @@ test('alignDefenders shifts deep safety towards overloaded trips side', () => {
     { x: 215, y: 500, startX: 215, startY: 500, radius: 10 },
     { x: 290, y: 500, startX: 290, startY: 500, radius: 10 }
   ];
-  alignDefenders(defenders, 'COVER3', -1, 500, tripsReceivers, centerReceiver);
+  alignDefenders(defenders, 'ZONE34', -1, 500, tripsReceivers, centerReceiver);
   assert.ok(defenders[6].startX! > 200, 'Deep safety should shift towards the overloaded 3-receiver right side');
 });
 
@@ -1207,7 +1215,7 @@ test('AI pre-snap shifts defenders toward the RB side', () => {
 });
 
 test('AI defense assigns RB_SPY and stops user spamming passes to the RB in the flat', () => {
-  const { defenders, eligibleReceivers } = createAlignedDefense('COVER3');
+  const { defenders, eligibleReceivers } = createAlignedDefense('ZONE34');
 
   // User has targeted RB in flat on recent plays
   const situation = {
@@ -1286,9 +1294,9 @@ test('Game clock stops after every play so user can change alignment, and resume
   assert.equal(gameClockRunning, true, 'Clock is active while play is running');
 });
 
-test('Defensive alignment cycling contains valid defensive schemes', () => {
-  const defKeys = ['COVER3', 'COVER2MAN', 'TAMPA2', 'BLITZ', 'QUARTERS'];
-  let currentDef = 'COVER3';
+test('Defensive alignment cycling contains the four requested defensive schemes', () => {
+  const defKeys = ['COVER2', 'ZONE34', 'ZONE232', 'ZONE151'];
+  let currentDef = 'COVER2';
 
   function cycleDef(direction: number) {
     const idx = defKeys.indexOf(currentDef);
@@ -1296,12 +1304,11 @@ test('Defensive alignment cycling contains valid defensive schemes', () => {
     return currentDef;
   }
 
-  assert.equal(cycleDef(1), 'COVER2MAN');
-  assert.equal(cycleDef(1), 'TAMPA2');
-  assert.equal(cycleDef(1), 'BLITZ');
-  assert.equal(cycleDef(1), 'QUARTERS');
-  assert.equal(cycleDef(1), 'COVER3');
-  assert.equal(cycleDef(-1), 'QUARTERS');
+  assert.equal(cycleDef(1), 'ZONE34');
+  assert.equal(cycleDef(1), 'ZONE232');
+  assert.equal(cycleDef(1), 'ZONE151');
+  assert.equal(cycleDef(1), 'COVER2');
+  assert.equal(cycleDef(-1), 'ZONE151');
 });
 
 test('When ball is intercepted, pursuing team immediately gains speed traits of defense chasing ball carrier', () => {
@@ -1409,7 +1416,7 @@ test('Play started before game clock hits zero plays out until the end of the pl
 });
 
 test('Swiping left or right on a defender assigns MAN coverage and does NOT change alignments', () => {
-  let activeAlignment = 'COVER3';
+  let activeAlignment = 'ZONE34';
   let defenderAssignment = 'ZONE';
 
   function onPointerUpOnDefender(dx: number, dy: number) {
@@ -1426,13 +1433,13 @@ test('Swiping left or right on a defender assigns MAN coverage and does NOT chan
   // Swipe right on defender
   onPointerUpOnDefender(35, 2);
   assert.equal(defenderAssignment, 'MAN', 'Swiping right assigns MAN coverage');
-  assert.equal(activeAlignment, 'COVER3', 'Alignment is unchanged');
+  assert.equal(activeAlignment, 'ZONE34', 'Alignment is unchanged');
 
   // Swipe left on defender
   defenderAssignment = 'ZONE';
   onPointerUpOnDefender(-40, 5);
   assert.equal(defenderAssignment, 'MAN', 'Swiping left assigns MAN coverage');
-  assert.equal(activeAlignment, 'COVER3', 'Alignment is unchanged');
+  assert.equal(activeAlignment, 'ZONE34', 'Alignment is unchanged');
 });
 
 test('Concept Passing Playbook Expansion: MESH, SMASH, POST_WHEEL concepts exist with corresponding route mechanics', async () => {
@@ -1440,15 +1447,15 @@ test('Concept Passing Playbook Expansion: MESH, SMASH, POST_WHEEL concepts exist
   
   assert.ok(offensivePlaybook.MESH, 'MESH concept exists in playbook');
   assert.equal(offensivePlaybook.MESH.type, 'PASS');
-  assert.ok(offensivePlaybook.MESH.bestVs?.includes('COVER2MAN'));
+  assert.ok(offensivePlaybook.MESH.bestVs?.includes('COVER2'));
 
   assert.ok(offensivePlaybook.SMASH, 'SMASH concept exists in playbook');
   assert.equal(offensivePlaybook.SMASH.type, 'PASS');
-  assert.ok(offensivePlaybook.SMASH.bestVs?.includes('TAMPA2'));
+  assert.ok(offensivePlaybook.SMASH.bestVs?.includes('COVER2'));
 
   assert.ok(offensivePlaybook.POST_WHEEL, 'POST_WHEEL concept exists in playbook');
   assert.equal(offensivePlaybook.POST_WHEEL.type, 'PASS');
-  assert.ok(offensivePlaybook.POST_WHEEL.bestVs?.includes('COVER3'));
+  assert.ok(offensivePlaybook.POST_WHEEL.bestVs?.includes('ZONE34'));
 
   assert.ok(allRoutes.includes('POST-L'), 'POST-L route exists');
   assert.ok(allRoutes.includes('POST-R'), 'POST-R route exists');
@@ -1556,19 +1563,19 @@ test('2 RB spies counters RUN play: audibles out of run into passing concept and
 
 test('team identities amplify both strengths and weaknesses while preserving neutral ratings', async () => {
   const { TEAMS } = await import('./teams');
-  assert.equal(TEAMS.FLORIDA.ratings.wrSpeed, 1.3);
-  assert.equal(TEAMS.FLORIDA.ratings.passProtection, 0.875);
-  assert.equal(TEAMS.FLORIDA.ratings.runPower, 0.85);
-  assert.equal(TEAMS.ARKANSAS.ratings.runPower, 1.375);
-  assert.equal(TEAMS.KENTUCKY.ratings.wrSpeed, 0.875);
-  assert.equal(TEAMS.GEORGIA.ratings.passRush, 1.375);
-  assert.equal(TEAMS.GEORGIA.ratings.mistakeChance, 0.65);
-  assert.equal(TEAMS.AUBURN.ratings.mistakeChance, 1.225);
-  assert.equal(TEAMS.VANDERBILT.ratings.passRush, 0.85);
+  assert.equal(TEAMS.FLORIDA.ratings.wrSpeed, 1.42);
+  assert.equal(TEAMS.FLORIDA.ratings.passProtection, 0.825);
+  assert.equal(TEAMS.FLORIDA.ratings.runPower, 0.79);
+  assert.equal(TEAMS.ARKANSAS.ratings.runPower, 1.525);
+  assert.equal(TEAMS.KENTUCKY.ratings.wrSpeed, 0.825);
+  assert.equal(TEAMS.GEORGIA.ratings.passRush, 1.525);
+  assert.equal(TEAMS.GEORGIA.ratings.mistakeChance, 0.51);
+  assert.equal(TEAMS.AUBURN.ratings.mistakeChance, 1.315);
+  assert.equal(TEAMS.VANDERBILT.ratings.passRush, 0.79);
   assert.equal(TEAMS.LSU.ratings.passProtection, 1);
   for (const team of Object.values(TEAMS)) {
     for (const rating of Object.values(team.ratings)) {
-      assert.ok(rating >= 0.6 && rating <= 1.6);
+      assert.ok(rating >= 0.5 && rating <= 1.7);
     }
   }
 });

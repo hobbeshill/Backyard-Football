@@ -32,40 +32,47 @@ test('season setup renders all team choices without a schedule panel', async (co
   }
 });
 
-test('completed games return to the menu or automatically launch the next season matchup', async () => {
+test('completed games retain a box score and save season results for player navigation', async () => {
   const { readFileSync } = await import('node:fs');
   const source = readFileSync(new URL('../App.tsx', import.meta.url), 'utf8');
-  const start = source.indexOf('    if (!finishedGame) return;');
+  const start = source.indexOf('    if (!finishedGame || finishedGameHandledRef.current) return;');
   const end = source.indexOf('  }, [finishedGame]);', start);
   assert.ok(start >= 0 && end > start);
   const complete = new Function(
-    'finishedGame', 'gameModeRef', 'seasonProgressRef', 'setFinishedGame',
-    'handleReturnToMainMenu', 'recordSeasonGame', 'setSeasonProgress', 'saveSeasonProgress', 'handleStartGame',
+    'finishedGame', 'finishedGameHandledRef', 'gameModeRef', 'seasonProgressRef',
+    'recordSeasonGame', 'setSeasonProgress', 'saveSeasonProgress',
     source.slice(start, end)
   );
   const season = createSeason('A', ['A', 'B', 'C', 'D', 'E']);
   const afterFirstGame = recordSeasonGame(season, 14, 7);
   const beforeFinalGame = recordSeasonGame(recordSeasonGame(afterFirstGame, 7, 0), 0, 7);
   const cases = [
-    { mode: 'ONE_GAME', progress: season, restored: false, menu: 1, next: 0, results: 0 },
-    { mode: 'SEASON', progress: season, restored: false, menu: 0, next: 1, results: 1 },
-    { mode: 'SEASON', progress: beforeFinalGame, restored: false, menu: 1, next: 0, results: 4 },
-    { mode: 'SEASON', progress: afterFirstGame, restored: true, menu: 0, next: 1, results: 1 }
+    { mode: 'ONE_GAME', progress: season, restored: false, results: 0, saves: 0, records: 0 },
+    { mode: 'SEASON', progress: season, restored: false, results: 1, saves: 1, records: 1 },
+    { mode: 'SEASON', progress: beforeFinalGame, restored: false, results: 4, saves: 1, records: 1 },
+    { mode: 'SEASON', progress: afterFirstGame, restored: true, results: 1, saves: 1, records: 0 }
   ];
   for (const scenario of cases) {
-    let menuVisits = 0;
-    let nextGames = 0;
+    let saveCount = 0;
+    let recordCount = 0;
+    const recordGame = (progress: typeof season, p1Score: number, p2Score: number) => {
+      recordCount++;
+      return recordSeasonGame(progress, p1Score, p2Score);
+    };
     const progressRef = { current: scenario.progress };
     complete(
-      { p1Score: 14, p2Score: 7, restored: scenario.restored },
-      { current: scenario.mode }, progressRef, () => {},
-      () => { menuVisits++; }, recordSeasonGame, () => {}, () => {},
-      () => { nextGames++; }
+      { p1Score: 14, p2Score: 7, restored: scenario.restored }, { current: false },
+      { current: scenario.mode }, progressRef, recordGame,
+      () => {}, () => { saveCount++; }
     );
-    assert.equal(menuVisits, scenario.menu);
-    assert.equal(nextGames, scenario.next);
+    assert.equal(saveCount, scenario.saves);
+    assert.equal(recordCount, scenario.records);
     assert.equal(progressRef.current.results.length, scenario.results);
   }
+
+  assert.ok(source.includes('aria-labelledby="box-score-title"'));
+  assert.ok(source.includes('Next game'));
+  assert.ok(source.includes('Return to main menu'));
 });
 
 test('season schedule excludes the selected team and contains four opponents', () => {

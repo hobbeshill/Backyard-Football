@@ -22,7 +22,7 @@ export function RealPlayTutorial({ onFinish }: { onFinish: () => void }) {
   const [step, setStep] = useState(0);
   const [attempt, setAttempt] = useState(0);
   const [formation, setFormation] = useState('SPREAD');
-  const [defense, setDefense] = useState('COVER3');
+  const [defense, setDefense] = useState('COVER2');
   const [result, setResult] = useState('');
 
   useEffect(() => {

@@ -3,7 +3,7 @@ import { defensiveKeys, defensivePlaybook, middleRoutes, offensiveKeys, offensiv
 import { alignDefenderAcrossFromRunningBack, alignDefenders, chooseCpuDefensiveAssignments, getBracketCoverageTarget, matchCpuDefendersToReceivers } from './defense';
 import { evaluateCpuOffensiveAudibles, evaluateCpuBallCarrierMoves, shouldCpuReleasePass, shouldCpuScramble, scoreRunBlockTarget } from './ai';
 import { createFumbleBall } from './fumbles';
-import { canEngagePassBlock, distToSegment, GAME_SPEED_SCALE, getBallCarrierRunSpeed, getQbDecisionTimeScale, moveToward, resolveCollisions, shouldApplyRunBlockStun, updateRouteMovement } from './movement';
+import { canEngagePassBlock, distToSegment, GAME_SPEED_SCALE, getBallCarrierRunSpeed, getReturnPursuitSpeed, getReturnTeamBlockers, moveToward, resolveCollisions, shouldApplyRunBlockStun, updateRouteMovement } from './movement';
 import { resolvePlayResult, calculateBrokenTackleChance, calculateYardsToGo, getDriveStartY, getSnapBallPosition, getPassArcHeight, getPassArcMaxHeight, getPassFlightFrames, findTappedPassReceiver, shouldReleaseUserPass, getPassLeadTarget, getRoutePassLeadTarget, canDefenderDeflectPass, canTackleQuarterback, resolveCatchContestOutcome, evaluateQbThrowAccuracy, calculateKickoffFlight, calculatePuntFlight, getTouchbackYardLineY, getKickoffLineY, isPlayerOutOfBounds } from './rules';
 import { sounds } from './sound';
 import { evaluateDirtSwipeGesture, drawDirtSwipeGesture } from './chalkMenu';
@@ -28,7 +28,6 @@ export interface GameEngineHandle {
   resetDrill: () => void;
   resetGame: (announcementText?: string) => void;
   setPaused: (paused: boolean) => void;
-  setRelaxedQbTiming: (enabled: boolean) => void;
   endGame: () => void;
   applyDefensiveAlignment: () => void;
   selectOffense: (key: string) => void;
@@ -69,11 +68,16 @@ export interface GameEngineCallbacks {
     }
   ) => void;
   onEngineReady: (engine: GameEngineHandle | null) => void;
-  onGameOver?: (p1Score: number, p2Score: number, restored?: boolean) => void;
+  onGameOver?: (p1Score: number, p2Score: number, restored?: boolean, boxScore?: GameBoxScore) => void;
   onTutorialStep?: (step: number) => void;
   setIsKickoffState?: (isKickoff: boolean, kickingTeam: 'P1' | 'P2', receivingTeam: 'P1' | 'P2') => void;
   setIs4thDownState?: (is4thDown: boolean) => void;
   setKickMeterPowerState?: (power: number) => void;
+}
+
+export interface GameBoxScore {
+  p1Quarters: number[];
+  p2Quarters: number[];
 }
 
 const GAME_SESSION_STORAGE_KEY = 'backyard-football-game-session-v1';
@@ -87,7 +91,7 @@ export function hasSavedGameSession(): boolean {
   }
 }
 
-export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngineCallbacks, options: { tutorial?: boolean; relaxedQbTiming?: boolean } = {}): (() => void) | undefined {
+export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngineCallbacks, options: { tutorial?: boolean } = {}): (() => void) | undefined {
   const {
     setP2OffPlayState,
     setP2DefPlayState,
@@ -119,13 +123,19 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   let cameraScale = 1.0;
   let cameraOffsetX = 0;
   let screenShakeTimer = 0;
+  let screenShakeStrength = 4;
   let playClock = 0;
-  let relaxedQbTiming = options.relaxedQbTiming ?? true;
-  let simulationFrameRemainder = 0;
   let cpuScrambleDecisionMade = false;
   let qbScrambleReactionTimer = 0;
   let p1Score = 0;
   let p2Score = 0;
+  let p1QuarterScores = [0, 0, 0, 0];
+  let p2QuarterScores = [0, 0, 0, 0];
+
+  function triggerScreenShake(duration: number, strength = 6): void {
+    screenShakeTimer = Math.max(screenShakeTimer, duration);
+    screenShakeStrength = Math.max(screenShakeStrength, strength);
+  }
 
   function screenToWorld(clientX: number, clientY: number): { x: number; y: number } {
     const rect = canvas!.getBoundingClientRect();
@@ -198,9 +208,9 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
   let p1OffPlay = 'SHORT_PASS';
   let p1OffFormation: 'SPREAD' | 'STACK' | 'TRIPS' = 'SPREAD';
-  let p1DefPlay = 'COVER3';
+  let p1DefPlay = 'COVER2';
   let p2OffPlay = 'SHORT_PASS';
-  let p2DefPlay = 'COVER3';
+  let p2DefPlay = 'COVER2';
   let cpuPreSnapTimer = 0;
   let isAllBlocking = false;
 
@@ -287,7 +297,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         rbId: idFor(rb),
         linemanIds: linemen.map(idFor),
         defenderIds: defenders.map(idFor),
-        p1Score, p2Score, lineOfScrimmageY, firstDownMarkerY, attackDirection,
+        p1Score, p2Score, p1QuarterScores, p2QuarterScores, lineOfScrimmageY, firstDownMarkerY, attackDirection,
         currentDown, yardsToGo, quarter, gameClockSeconds, gameClockRemainderMs,
         gameClockRunning, pendingQuarterEnd, quarterBreakRemainingMs,
         halftimeAnnouncementPending, gameOver, phase, activeOffense, activeDefense,
@@ -323,6 +333,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       if (!raw) return false;
       const state = JSON.parse(raw) as Record<string, any>;
       if (state.version !== 1 || !state.entities || !Array.isArray(state.receiverIds)) return false;
+      const hasUnsupportedDefense = !defensivePlaybook[state.p1DefPlay] || !defensivePlaybook[state.p2DefPlay];
 
       const restoredEntities = new Map<string, Entity>();
       Object.entries(state.entities as Record<string, any>).forEach(([id, record]) => {
@@ -346,6 +357,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       activeEntity = entityFor(state.activeEntityId) ?? qb;
 
       p1Score = state.p1Score; p2Score = state.p2Score;
+      p1QuarterScores = Array.from({ length: 4 }, (_, index) => Number(state.p1QuarterScores?.[index] ?? 0));
+      p2QuarterScores = Array.from({ length: 4 }, (_, index) => Number(state.p2QuarterScores?.[index] ?? 0));
       lineOfScrimmageY = state.lineOfScrimmageY; firstDownMarkerY = state.firstDownMarkerY;
       attackDirection = state.attackDirection; currentDown = state.currentDown; yardsToGo = state.yardsToGo;
       quarter = state.quarter; gameClockSeconds = state.gameClockSeconds;
@@ -355,7 +368,9 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       phase = state.phase; activeOffense = state.activeOffense; activeDefense = state.activeDefense;
       p1Team = getTeam(state.p1TeamId); p2Team = getTeam(state.p2TeamId);
       p1OffPlay = state.p1OffPlay; p1OffFormation = state.p1OffFormation;
-      p1DefPlay = state.p1DefPlay; p2OffPlay = state.p2OffPlay; p2DefPlay = state.p2DefPlay;
+      p1DefPlay = defensivePlaybook[state.p1DefPlay] ? state.p1DefPlay : 'COVER2';
+      p2OffPlay = state.p2OffPlay;
+      p2DefPlay = defensivePlaybook[state.p2DefPlay] ? state.p2DefPlay : 'COVER2';
       cpuPreSnapTimer = state.cpuPreSnapTimer; isAllBlocking = state.isAllBlocking;
       openingReceivingTeam = state.openingReceivingTeam; isKickoffPhase = state.isKickoffPhase;
       kickoffKickingTeam = state.kickoffKickingTeam; kickoffReceivingTeam = state.kickoffReceivingTeam;
@@ -385,6 +400,9 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       qbScrambleReactionTimer = state.qbScrambleReactionTimer; cameraY = state.cameraY;
       lastClockFrameTime = null;
       isSessionActive = true;
+      if (hasUnsupportedDefense && phase === 'PRE_SNAP' && !isKickoffPhase) {
+        applyDefensiveAlignment();
+      }
 
       callbacks.setUserScore(p1Score); callbacks.setCpuScore(p2Score);
       callbacks.setP1TeamState?.(p1Team); callbacks.setP2TeamState?.(p2Team);
@@ -396,7 +414,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       setIsKickoffState?.(isKickoffPhase, kickoffKickingTeam, kickoffReceivingTeam);
       setIs4thDownState?.(currentDown === 4 && phase === 'PRE_SNAP');
       setKickMeterPowerState?.(kickMeterPower);
-      if (gameOver) callbacks.onGameOver?.(p1Score, p2Score, true);
+      if (gameOver) callbacks.onGameOver?.(p1Score, p2Score, true, { p1Quarters: [...p1QuarterScores], p2Quarters: [...p2QuarterScores] });
       return true;
     } catch {
       window.localStorage.removeItem(GAME_SESSION_STORAGE_KEY);
@@ -695,17 +713,17 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     // 1. Situational down & distance rules
     // 3rd & Long or 4th & Long (> 6 yards): player must target first down marker
     if ((currentDown === 3 || currentDown === 4) && yardsToGo > 6) {
-      return 'QUARTERS';
+      return 'ZONE232';
     }
 
     // 3rd & Short or 4th & Short (<= 3 yards): short power run or quick slant expected
     if ((currentDown === 3 || currentDown === 4) && yardsToGo <= 3) {
-      return Math.random() < 0.65 ? 'BLITZ' : 'ROBBER';
+      return Math.random() < 0.65 ? 'ZONE34' : 'ZONE151';
     }
 
     // Early down / starting default
     if (totalPlays < 2) {
-      return Math.random() < 0.5 ? 'COVER3' : 'QUARTERS';
+      return Math.random() < 0.5 ? 'COVER2' : 'ZONE232';
     }
 
     // 2. Recent Tendency Analysis (last 4 plays)
@@ -723,33 +741,32 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     );
     if (isSamePlaySpammed) {
       if (lastPlay.play === 'DEEP_SHOT') {
-        return 'QUARTERS';
+        return 'ZONE232';
       }
       if (lastPlay.play === 'SHORT_PASS') {
-        return 'ROBBER';
+        return 'ZONE151';
       }
       if (lastPlay.play === 'CONTROL_PASS') {
-        return Math.random() < 0.5 ? 'TAMPA2' : 'COVER2MAN';
+        return Math.random() < 0.5 ? 'ZONE232' : 'COVER2';
       }
       if (!lastPlay.isPass) {
-        return 'BLITZ';
+        return 'ZONE34';
       }
     }
 
     // QB Run / Scramble Tendency: User is scrambling or running with the QB!
     const recentQbRuns = recentPlays.filter(p => p.isQbRun).length;
     if (recentQbRuns >= 2) {
-      // User is repeatedly scrambling or running with the QB: call zero blitz contain with spy
-      return 'BLITZ';
+      // Use the three-man front and adaptive QB spy to contain repeated runs.
+      return 'ZONE34';
     } else if (recentQbRuns >= 1) {
-      // Call Cover 2 Man or Robber with an adaptive QB Spy
-      return Math.random() < 0.5 ? 'COVER2MAN' : 'ROBBER';
+      return Math.random() < 0.5 ? 'COVER2' : 'ZONE151';
     }
 
     // RB Pass & Flat Tendency: User is targeting or spamming passes to the RB in the flat!
     const recentRbPassCount = recentPlays.filter(p => p.targetWasRb || p.isFlatPass || p.routes?.rb === 'FLAT').length;
     if (recentRbPassCount >= 2) {
-      return Math.random() < 0.5 ? 'COVER2MAN' : 'ROBBER';
+      return Math.random() < 0.5 ? 'COVER2' : 'ZONE151';
     }
 
     // Formation Tendency
@@ -757,25 +774,25 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     const tripsCount = recentFormations.filter(f => f === 'TRIPS').length;
     const stackCount = recentFormations.filter(f => f === 'STACK').length;
     if (tripsCount >= 2) {
-      return 'QUARTERS';
+      return 'ZONE232';
     }
     if (stackCount >= 2) {
-      return Math.random() < 0.5 ? 'TAMPA2' : 'COVER2MAN';
+      return Math.random() < 0.5 ? 'COVER2' : 'ZONE151';
     }
 
     // Deep Shot Tendency (> 40% of recent plays)
     if (recentDeepCount >= 2 || (recentDeepCount / recentPlays.length) >= 0.4) {
-      return 'QUARTERS';
+      return 'ZONE232';
     }
 
     // Ground-and-Pound Tendency (> 50% runs)
     if (recentRunCount >= 2 || (recentRunCount / recentPlays.length) >= 0.5) {
-      return Math.random() < 0.65 ? 'BLITZ' : 'COVER3';
+      return Math.random() < 0.65 ? 'ZONE34' : 'COVER2';
     }
 
     // Short Pass / Slant-heavy
     if (recentShortPassCount >= 2) {
-      return 'ROBBER';
+      return 'ZONE151';
     }
 
     // 3. Overall Career Tendency
@@ -783,12 +800,12 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     const passRatio = totalPass / totalPlays;
 
     if (passRatio > 0.75) {
-      return Math.random() < 0.6 ? 'QUARTERS' : 'TAMPA2';
+      return Math.random() < 0.6 ? 'ZONE232' : 'COVER2';
     } else if (passRatio < 0.35) {
-      return Math.random() < 0.6 ? 'BLITZ' : 'COVER3';
+      return Math.random() < 0.6 ? 'ZONE34' : 'COVER2';
     }
 
-    const balancedOptions = ['COVER3', 'TAMPA2', 'COVER2MAN', 'QUARTERS'];
+    const balancedOptions = defensiveKeys;
     return balancedOptions[Math.floor(Math.random() * balancedOptions.length)];
   }
 
@@ -806,29 +823,23 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       let counterPlays: string[];
 
       if ((currentDown === 3 || currentDown === 4) && yardsToGo > 7) {
-        counterPlays = repeatedDefense === 'COVER3' || repeatedDefense === 'QUARTERS'
+        counterPlays = repeatedDefense === 'ZONE34' || repeatedDefense === 'ZONE232'
           ? ['POST_WHEEL', 'SMASH', 'CONTROL_PASS', 'SHORT_PASS']
           : ['POST_WHEEL', 'DEEP_SHOT', 'CONTROL_PASS'];
       } else if ((currentDown === 3 || currentDown === 4) && yardsToGo <= 3) {
         counterPlays = ['MESH', 'SHORT_PASS', 'CONTROL_PASS', 'POWER'];
       } else {
         switch (repeatedDefense) {
-          case 'COVER3':
+          case 'COVER2':
             counterPlays = ['POST_WHEEL', 'SMASH', 'CONTROL_PASS', 'SHORT_PASS'];
             break;
-          case 'QUARTERS':
+          case 'ZONE34':
             counterPlays = ['POST_WHEEL', 'SMASH', 'SHORT_PASS', 'CONTROL_PASS'];
             break;
-          case 'COVER2MAN':
+          case 'ZONE232':
             counterPlays = ['MESH', 'SHORT_PASS', 'SMASH', 'POWER'];
             break;
-          case 'TAMPA2':
-            counterPlays = ['SMASH', 'CONTROL_PASS', 'POST_WHEEL'];
-            break;
-          case 'BLITZ':
-            counterPlays = ['MESH', 'SHORT_PASS', 'POWER', 'ISO'];
-            break;
-          case 'ROBBER':
+          case 'ZONE151':
             counterPlays = ['POST_WHEEL', 'SMASH', 'DEEP_SHOT', 'CONTROL_PASS'];
             break;
           default:
@@ -962,7 +973,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     if (quarter === 4) {
       gameOver = true;
       showAnnouncement('END OF 4TH QUARTER - FINAL', '#ffcc00');
-      callbacks.onGameOver?.(p1Score, p2Score);
+      callbacks.onGameOver?.(p1Score, p2Score, false, { p1Quarters: [...p1QuarterScores], p2Quarters: [...p2QuarterScores] });
     } else {
       quarterBreakRemainingMs = quarter === 2 ? 5600 : 2800;
       halftimeAnnouncementPending = quarter === 2;
@@ -970,16 +981,6 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       showAnnouncement(`END OF ${ordinal} QUARTER`, '#ffcc00');
     }
     publishGameClock();
-  }
-
-  function getDecisionTimeScale(): number {
-    return getQbDecisionTimeScale({
-      enabled: relaxedQbTiming,
-      phase,
-      activeOffense,
-      isPassingPlay: offensivePlaybook[p1OffPlay]?.type === 'PASS',
-      tutorial: options.tutorial
-    });
   }
 
   function updateGameClock(timestamp: number): void {
@@ -1043,7 +1044,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
     gameClockRunning = true;
     const clockMultiplier = 3;
-    gameClockRemainderMs += elapsedMs * clockMultiplier * getDecisionTimeScale();
+    gameClockRemainderMs += elapsedMs * clockMultiplier;
     while (gameClockRemainderMs >= 1000 && gameClockSeconds > 0) {
       gameClockRemainderMs -= 1000;
       gameClockSeconds--;
@@ -1303,6 +1304,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       const receivingTeam: 'P1' | 'P2' = scoringTeam === 'P1' ? 'P2' : 'P1';
       if (scoringTeam === 'P1') {
         p1Score += 7;
+        p1QuarterScores[quarter - 1] += 7;
         setUserScore(p1Score);
         showAnnouncement(
           endedInterceptionReturn
@@ -1321,6 +1323,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         );
       } else {
         p2Score += 7;
+        p2QuarterScores[quarter - 1] += 7;
         setCpuScore(p2Score);
         showAnnouncement(
           endedInterceptionReturn
@@ -1918,6 +1921,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       isSessionActive = true;
       p1Score = 0;
       p2Score = 0;
+      p1QuarterScores = [0, 0, 0, 0];
+      p2QuarterScores = [0, 0, 0, 0];
       quarter = 1;
       gameClockSeconds = 120;
       gameClockRemainderMs = 0;
@@ -1932,7 +1937,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       setMomentumState(0);
       openingReceivingTeam = 'P1';
       callbacks.setP1OffFormationState?.('SPREAD');
-      callbacks.setP1DefPlayState('COVER3');
+      callbacks.setP1DefPlayState('COVER2');
       setupKickoff('P2', 'P1', 'GAME RESET - OPENING KICKOFF 🏈');
       saveGameSession();
     },
@@ -1941,10 +1946,6 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       lastClockFrameTime = null;
       if (paused) saveGameSession();
       else if (phase === 'DEAD' && playEnding && !drillResetTimer) scheduleDrillReset();
-    },
-    setRelaxedQbTiming: (enabled: boolean) => {
-      relaxedQbTiming = enabled;
-      simulationFrameRemainder = 0;
     },
     endGame: () => {
       if (drillResetTimer) clearTimeout(drillResetTimer);
@@ -1973,7 +1974,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       }
     },
     selectDefense: (key: string) => {
-      if (activeDefense === 'P1') {
+      if (activeDefense === 'P1' && defensivePlaybook[key]) {
         lastDefenseSelectTime = Date.now();
         const previousPositions = defenders.map(({ x, y }) => ({ x, y }));
         p1DefPlay = key;
@@ -2042,10 +2043,9 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       sounds.playJuke();
       completeTutorialAction(0);
     } else if (activeDefense === 'P1') {
-      const defKeys = ['COVER3', 'COVER2MAN', 'TAMPA2', 'BLITZ', 'QUARTERS'];
-      const curIdx = defKeys.indexOf(p1DefPlay);
-      const nextIdx = (curIdx + direction + defKeys.length) % defKeys.length;
-      const nextDef = defKeys[nextIdx];
+      const curIdx = defensiveKeys.indexOf(p1DefPlay);
+      const nextIdx = (curIdx + direction + defensiveKeys.length) % defensiveKeys.length;
+      const nextDef = defensiveKeys[nextIdx];
       engineHandle.selectDefense(nextDef);
       sounds.playJuke();
       completeTutorialAction(7);
@@ -2659,7 +2659,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
   function triggerFumble(carrier: Entity) {
     phase = 'FUMBLE';
-    screenShakeTimer = 35;
+    triggerScreenShake(32, 12);
     sounds.playFumble();
     fumbleBall = createFumbleBall(carrier, attackDirection, activeOffense);
     showAnnouncement(
@@ -2998,9 +2998,9 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           score += 65; // Heavily exploit the physical speed/agility mismatch!
         }
 
-        // Exploit user zero-blitz mistake (no deep safety over the top):
+        // Multi-rusher fronts leave fewer defenders available over the top.
         const totalRushers = defenders.filter(d => d && (d.passRusher || d.defenseAssignment === 'BLITZ')).length;
-        if ((activeDefKey === 'BLITZ' || totalRushers >= 2) && isDeepRoute) {
+        if (totalRushers >= 2 && isDeepRoute) {
           score += 115;
         }
 
@@ -3027,7 +3027,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
             isBreakOpen = true;
           }
           // Go route streaking deep behind CB (frame 34+)
-          else if (t.routeType === 'GO' && (rTime >= 34 || hasCoverageMistake || activeDefKey === 'BLITZ' || totalRushers >= 2) && nearestDefDist >= 14 && depthYards > 6) {
+          else if (t.routeType === 'GO' && (rTime >= 34 || hasCoverageMistake || totalRushers >= 2) && nearestDefDist >= 14 && depthYards > 6) {
             score += 75;
             isBreakOpen = true;
           }
@@ -3059,16 +3059,14 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         }
 
         // 3. Scheme-specific weakness exploitation (Tecmo Super Bowl strategic reads)
-        if (activeDefKey === 'QUARTERS' && depthYards <= 14) {
-          score += 35; // Cover 4 concedes everything underneath
-        } else if (activeDefKey === 'COVER3' && (depthYards <= 14 || isCheckdown)) {
-          score += 35; // Cover 3 concedes underneath flats and slants
-        } else if (activeDefKey === 'TAMPA2' && depthYards > 10 && depthYards < 24 && Math.abs(t.x - 170) > 65) {
-          score += 45; // Tampa 2 sideline Honey Hole
-        } else if (activeDefKey === 'BLITZ') {
-          if (isCheckdown || t.routeType === 'SLANT-L' || t.routeType === 'SLANT-R') {
-            score += 50; // Hot read vs Zero Blitz
-          }
+        if (activeDefKey === 'ZONE232' && depthYards <= 14) {
+          score += 35;
+        } else if (activeDefKey === 'ZONE34' && (depthYards <= 14 || isCheckdown)) {
+          score += 35;
+        } else if (activeDefKey === 'COVER2' && depthYards > 10 && depthYards < 24 && Math.abs(t.x - 170) > 65) {
+          score += 45;
+        } else if (activeDefKey === 'ZONE151' && depthYards > 14) {
+          score += 35;
         }
 
         // 4. Downfield progression reward
@@ -3203,7 +3201,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       const totalRushers = defenders.filter(d => d && (d.passRusher || d.defenseAssignment === 'BLITZ')).length;
       const hasCoverageMistakeNow = defenders.some(d => d.coverageMistake && (d.mistakeTimer || 0) > 0);
       const isDeepShotOpportunity = (
-        (activeDefKey === 'BLITZ' || totalRushers >= 2 || hasCoverageMistakeNow) &&
+        (totalRushers >= 2 || hasCoverageMistakeNow) &&
         bestTarget !== null &&
         (bestTarget.routeType === 'GO' || bestTarget.routeType === 'FLAG-L' || bestTarget.routeType === 'FLAG-R' || bestTarget.routeType === 'POST-L' || bestTarget.routeType === 'POST-R' || bestTarget.routeType === 'WHEEL') &&
         playClock >= 32
@@ -3244,7 +3242,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         }
 
         if (isDeepShotOpportunity && activeRbSpies === 0) {
-          if (activeDefKey === 'BLITZ' || totalRushers >= 2) {
+          if (totalRushers >= 2) {
             showAnnouncement("CPU EXPLOITS USER BLITZ! DEEP STRIKE OVER THE TOP! 🏈🚀💥", "#00ffff");
           } else {
             showAnnouncement("CPU EXPLOITS COVERAGE BUST! DEEP PASS LAUNCHED! 🚀🏈", "#00ffff");
@@ -3450,7 +3448,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         });
       }
       const passRushers = defenders.filter(d => d && (d.passRusher || d.defenseAssignment === 'BLITZ'));
-      const hasExtraBlitzer = passRushers.length >= 2 || activeDefKey === 'BLITZ';
+      const hasExtraBlitzer = passRushers.length >= 2;
       const offTeam = activeOffense === 'P1' ? p1Team : p2Team;
       const defTeam = activeDefense === 'P1' ? p1Team : p2Team;
 
@@ -3472,7 +3470,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
             interiorRusher.vx = 0;
             interiorRusher.vy = 0;
           } else {
-            const rushSpeed = ((activeDefKey === 'BLITZ' || hasExtraBlitzer) ? 1.20 : 0.88) * (defTeam.ratings.passRush || 1.0);
+            const rushSpeed = (hasExtraBlitzer ? 1.20 : 0.88) * (defTeam.ratings.passRush || 1.0);
             moveToward(interiorRusher, qb.x, qb.y, 0.26, rushSpeed);
           }
         }
@@ -3501,9 +3499,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       const runner = activeEntity || qb;
       if (isSpecialTeamsReturn) {
         // Special Teams Run Blocking: The receiving team blockers (wedge & upbacks) aggressively run block for the returner!
-        const returnBlockers: Entity[] = defenders.filter(
-          (d): d is Entity => d !== null && d !== undefined && d !== runner
-        );
+        const returnBlockers = getReturnTeamBlockers(defenders, runner);
         const oncomingTacklers: Entity[] = [
           qb,
           rb,
@@ -3533,8 +3529,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
             assignedTacklers.add(target);
             const isNewEngagement = shouldApplyRunBlockStun(blocker, target);
             blocker.blockingDefender = target;
-            const blockSpeed = 1.8;
-            const blockAccel = 0.28;
+            const blockSpeed = 2.4;
+            const blockAccel = 0.42;
             moveToward(blocker, target.x, target.y, blockAccel, blockSpeed);
 
             const contactDist = Math.hypot(blocker.x - target.x, blocker.y - target.y);
@@ -3543,7 +3539,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
                 target.pursuitTimer = 0;
                 target.vx = (target.vx || 0) * 0.5;
                 target.vy = (target.vy || 0) * 0.5;
-                target.brokenTackleStun = Math.max(target.brokenTackleStun || 0, 4);
+                target.brokenTackleStun = Math.max(target.brokenTackleStun || 0, 18);
                 const pushDirX = target.x > runner.x ? 0.5 : -0.5;
                 target.x += pushDirX;
                 target.y += (0.35 * attackDirection);
@@ -3697,7 +3693,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     }
 
     if (rb && !rb.isBlocker && rb.routeType !== 'BLOCK') {
-      if (phase === 'QB_DROP' && activeDefKey === 'BLITZ' && rb.blitzEscaped) {
+      if (phase === 'QB_DROP' && (activeDefKey === 'ZONE34' || activeDefKey === 'ZONE232') && rb.blitzEscaped) {
         rb.timer = (rb.timer || 0) + 1;
         const flatTargetX = (rb.x < 170) ? 35 : 305;
         moveToward(rb, flatTargetX, lineOfScrimmageY + (30 * attackDirection), 0.3, 1.76);
@@ -3785,8 +3781,9 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
             return;
           }
           // Calibrate rush speed so blitz doesn't instantly overwhelm the pocket before the QB drops back
-          const rushSpeed = (activeDefKey === 'BLITZ') ? 1.28 : 1.10;
-          const rushAccel = (activeDefKey === 'BLITZ') ? 0.22 : 0.18;
+          const isMultiRusherScheme = activeDefKey === 'ZONE34' || activeDefKey === 'ZONE232';
+          const rushSpeed = isMultiRusherScheme ? 1.28 : 1.10;
+          const rushAccel = isMultiRusherScheme ? 0.22 : 0.18;
           moveToward(d, qb.x, qb.y, rushAccel, rushSpeed);
           d.x = Math.max(20, Math.min(fieldWidth - 20, d.x));
           d.y = Math.max(30, Math.min(fieldHeight - 30, d.y));
@@ -3883,247 +3880,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         const baseSpeed = 0.88; // base pursuit speed
         const dir = attackDirection;
 
-        if (activeDefKey === 'COVER3') {
-          if (idx === 1) {
-            // Deep Outside 1/3 Left CB
-            const wrLeft = receivers.find(r => r.x < 170 && !r.isBlocker);
-            const isWrGoingDeep = wrLeft && (wrLeft.routeType === 'GO' || wrLeft.routeType === 'FLAG-L');
-            const rbFlatLeft = rb && !rb.isBlocker && rb.routeType === 'FLAT' && (rb.startX! < 170 || rb.side === 'left');
-            if (rbFlatLeft && isWrGoingDeep && (wrLeft?.timer || 0) > 25) {
-              // Corner bites on the RB Flat route underneath! Leaving deep outside WR open!
-              targetX = 80;
-              targetY = lineOfScrimmageY + (70 * dir);
-              moveSpeed = 1.15;
-            } else {
-              targetX = 65;
-              targetY = lineOfScrimmageY + (138 * dir);
-              moveSpeed = 1.40;
-            }
-          } else if (idx === 2) {
-            // Deep Outside 1/3 Right CB
-            const wrRight = receivers.find(r => r.x >= 170 && !r.isBlocker);
-            const isWrGoingDeep = wrRight && (wrRight.routeType === 'GO' || wrRight.routeType === 'FLAG-R');
-            const rbFlatRight = rb && !rb.isBlocker && rb.routeType === 'FLAT' && (rb.startX! >= 170 || rb.side === 'right');
-            if (rbFlatRight && isWrGoingDeep && (wrRight?.timer || 0) > 25) {
-              // Corner bites on the RB Flat route underneath! Leaving deep outside WR open!
-              targetX = 260;
-              targetY = lineOfScrimmageY + (70 * dir);
-              moveSpeed = 1.15;
-            } else {
-              targetX = 275;
-              targetY = lineOfScrimmageY + (138 * dir);
-              moveSpeed = 1.40;
-            }
-          } else if (idx === 6) {
-            // Deep Middle 1/3 Safety: deep centerfield patrol (150px off LOS)
-            targetX = 170;
-            targetY = lineOfScrimmageY + (150 * dir);
-            moveSpeed = 1.50;
-          } else if (idx === 5) {
-            // Underneath Curl Zone: helps bracket any inside crosser/slant crossing the hash
-            if (centerReceiver && centerReceiver.x >= 165 && centerReceiver.x <= 205) {
-              targetX = 185;
-              targetY = centerReceiver.y + (4 * dir);
-              moveSpeed = 1.45;
-              moveAccel = 0.25;
-            } else {
-              targetX = 170;
-              targetY = lineOfScrimmageY + (90 * dir);
-            }
-          } else if (idx === 4) {
-            // Right Hook/Curl LB: reads crossing route breaking into right hash/slant window!
-            if (centerReceiver && centerReceiver.x > 172 && Math.abs(centerReceiver.y - lineOfScrimmageY) < 140) {
-              targetX = Math.min(235, centerReceiver.x + 4);
-              targetY = centerReceiver.y + (5 * dir);
-              moveSpeed = 1.62;
-              moveAccel = 0.28;
-            } else {
-              targetX = d.zoneX!;
-              targetY = d.zoneY!;
-            }
-          } else {
-            // Left Hook/Curl LB (defenders[3])
-            targetX = d.zoneX!;
-            targetY = d.zoneY!;
-          }
-        } else if (activeDefKey === 'COVER2MAN') {
-          if (d.assignedReceiver) {
-            const rec = d.assignedReceiver;
-            const isCenterSlot = (rec === centerReceiver);
-            const routeRepeatCount = getReceiverRouteRepeatCount(rec);
-
-            if (rec.isCutting) {
-              d.reactionTimer = (d.reactionTimer || 0) + 1;
-            } else {
-              d.reactionTimer = 0;
-            }
-            // If the route has been run repeatedly, the defender anticipates with 0 lag and jumps the break!
-            const maxLag = routeRepeatCount >= 1 ? 0 : (isCenterSlot ? 8 : 12);
-            const trailDist = routeRepeatCount >= 1 ? 2 : (isCenterSlot ? 6 : 14);
-            moveSpeed = routeRepeatCount >= 1 ? 1.92 : (isCenterSlot ? 1.76 : 1.70);
-            moveAccel = routeRepeatCount >= 1 ? 0.44 : (isCenterSlot ? 0.34 : 0.28);
-
-            if (d.reactionTimer > 0 && d.reactionTimer < maxLag) {
-              targetX = d.x + (rec.x > d.x ? 1.5 : -1.5);
-              targetY = d.y + (moveSpeed * 0.45 * dir);
-            } else if (rec.routeType === 'COMEBACK' && (rec.timer || 0) >= 50) {
-              targetX = rec.x;
-              targetY = rec.y - (4 * dir);
-            } else if (rec.routeType === 'FLAG-L' || rec.routeType === 'FLAG-R') {
-              const outShade = rec.x >= 170 ? 8 : -8;
-              targetX = rec.x + outShade;
-              targetY = rec.y + (trailDist * dir);
-            } else {
-              // Inside hip pocket leverage on slot slant (shading inside to take away the slant)
-              const shadeOffset = routeRepeatCount >= 1
-                ? (rec.x >= 170 ? -8 : 8)
-                : (isCenterSlot ? (rec.x >= 170 ? 4 : -4) : 0);
-              targetX = rec.x + shadeOffset;
-              targetY = rec.y + (trailDist * dir);
-            }
-          } else if (idx === 5) {
-            targetX = 95; targetY = lineOfScrimmageY + (220 * dir);
-          } else if (idx === 6) {
-            targetX = 245; targetY = lineOfScrimmageY + (220 * dir);
-          } else {
-            targetX = 170; targetY = lineOfScrimmageY + (75 * dir);
-          }
-        } else if (activeDefKey === 'TAMPA2') {
-          if (idx === 1) {
-            // Shallow left flat corner (< 10 yards)
-            targetX = 65; targetY = lineOfScrimmageY + (55 * dir);
-          } else if (idx === 2) {
-            // Shallow right flat corner (< 10 yards)
-            targetX = 275; targetY = lineOfScrimmageY + (55 * dir);
-          } else if (idx === 4) {
-            // Right Hook LB: Drops right into the right slant/curl window and matches depth!
-            if (centerReceiver && centerReceiver.x > 172) {
-              targetX = Math.min(235, Math.max(190, centerReceiver.x + 4));
-              targetY = centerReceiver.y + (4 * dir);
-              moveSpeed = 1.68;
-              moveAccel = 0.30;
-            } else {
-              targetX = 215; targetY = lineOfScrimmageY + (50 * dir);
-            }
-          } else if (idx === 5) {
-            // MLB dropping deep middle hole
-            targetX = 170; targetY = lineOfScrimmageY + (175 * dir);
-          } else if (idx === 6) {
-            // Deep safety
-            targetX = 200; targetY = lineOfScrimmageY + (235 * dir);
-          } else if (d.zoneX !== undefined) {
-            targetX = d.zoneX; targetY = d.zoneY!;
-          }
-        } else if (activeDefKey === 'BLITZ') {
-          if (d.assignedReceiver) {
-            const rec = d.assignedReceiver;
-            const isCenterSlot = (rec === centerReceiver);
-            moveSpeed = isCenterSlot ? 1.74 : 1.68;
-            moveAccel = 0.30;
-            targetX = rec.x + (isCenterSlot ? 4 : 0);
-            targetY = rec.y + ((isCenterSlot ? 6 : 14) * dir);
-          } else {
-            targetX = 170; targetY = lineOfScrimmageY + (75 * dir);
-          }
-        } else if (activeDefKey === 'QUARTERS') {
-          // 4 Backfield Defenders in 4 Deep Quadrants maintaining deep 55-70px cushion
-          if (idx === 1) {
-            // Deep 1/4 Left: maintains cushion, jumps comebacks if cutting
-            const wrLeft = receivers[0];
-            if (wrLeft && wrLeft.routeType === 'COMEBACK' && (wrLeft.timer || 0) >= 50) {
-              targetX = wrLeft.x;
-              targetY = wrLeft.y - (4 * dir);
-              moveSpeed = 1.82;
-              moveAccel = 0.38;
-            } else {
-              targetX = 55;
-              targetY = Math.max(lineOfScrimmageY + (170 * dir), wrLeft.y + (50 * dir));
-            }
-          } else if (idx === 2) {
-            // Deep 1/4 Right: maintains cushion, jumps comebacks if cutting
-            const wrRight = receivers[1];
-            if (wrRight && wrRight.routeType === 'COMEBACK' && (wrRight.timer || 0) >= 50) {
-              targetX = wrRight.x;
-              targetY = wrRight.y - (4 * dir);
-              moveSpeed = 1.82;
-              moveAccel = 0.38;
-            } else {
-              targetX = 285;
-              targetY = Math.max(lineOfScrimmageY + (170 * dir), wrRight.y + (50 * dir));
-            }
-          } else if (idx === 4) {
-            // Underneath Right LB in Quarters: buzzes right hook/flat and squeezes slants
-            if (centerReceiver && centerReceiver.x > 172) {
-              targetX = Math.min(235, centerReceiver.x + 5);
-              targetY = centerReceiver.y + (6 * dir);
-              moveSpeed = 1.62;
-              moveAccel = 0.28;
-            } else {
-              targetX = d.zoneX!;
-              targetY = d.zoneY!;
-            }
-          } else if (idx === 5) {
-            // Deep 1/4 Inside Left FS
-            targetX = 120;
-            targetY = lineOfScrimmageY + (225 * dir);
-          } else if (idx === 6) {
-            // Deep 1/4 Inside Right SS
-            targetX = 220;
-            targetY = lineOfScrimmageY + (225 * dir);
-          } else {
-            // Underneath Left LB
-            targetX = d.zoneX!;
-            targetY = d.zoneY!;
-          }
-        } else if (activeDefKey === 'ROBBER') {
-          if (idx === 5) {
-            // ROBBER SAFETY: Specifically hunts and undercuts intermediate slants & crossers!
-            if (centerReceiver && (centerReceiver.x > 165 || centerReceiver.routeType === 'SLANT-R' || centerReceiver.routeType === 'CROSS-R')) {
-              // Drives hard across the formation downhill to jump the right slant!
-              targetX = Math.min(230, centerReceiver.x + 8);
-              targetY = centerReceiver.y - (3 * dir); // Position between QB and receiver!
-              moveSpeed = 1.88;
-              moveAccel = 0.38;
-            } else {
-              targetX = 170; targetY = lineOfScrimmageY + (65 * dir);
-            }
-          } else if (idx === 6) {
-            // Deep single safety
-            targetX = 170; targetY = lineOfScrimmageY + (250 * dir);
-          } else if (d.assignedReceiver) {
-            const rec = d.assignedReceiver;
-            if (rec.isCutting) {
-              d.reactionTimer = (d.reactionTimer || 0) + 1;
-            } else {
-              d.reactionTimer = 0;
-            }
-            const isCenterSlot = (rec === centerReceiver);
-            const routeRepeatCount = getReceiverRouteRepeatCount(rec);
-            const isSpammed = routeRepeatCount >= 1;
-            const maxLag = isSpammed ? 0 : (isCenterSlot ? 8 : 12);
-            const trailDist = isSpammed ? 2 : (isCenterSlot ? 6 : 14);
-            moveSpeed = isSpammed ? 1.92 : (isCenterSlot ? 1.76 : 1.70);
-            moveAccel = isSpammed ? 0.44 : (isCenterSlot ? 0.34 : 0.28);
-            if (d.reactionTimer > 0 && d.reactionTimer < maxLag) {
-              targetX = d.x + (rec.x > d.x ? 1.5 : -1.5);
-              targetY = d.y + (moveSpeed * 0.45 * dir);
-            } else if (rec.routeType === 'COMEBACK' && (rec.timer || 0) >= 50) {
-              targetX = rec.x;
-              targetY = rec.y - (4 * dir);
-            } else if (rec.routeType === 'FLAG-L' || rec.routeType === 'FLAG-R') {
-              const outShade = rec.x >= 170 ? 8 : -8;
-              targetX = rec.x + outShade;
-              targetY = rec.y + (trailDist * dir);
-            } else {
-              const shadeOffset = isSpammed ? (rec.x >= 170 ? -8 : 8) : (isCenterSlot ? (rec.x >= 170 ? 4 : -4) : 0);
-              targetX = rec.x + shadeOffset;
-              targetY = rec.y + (trailDist * dir);
-            }
-          } else {
-            targetX = d.zoneX || 170;
-            targetY = d.zoneY || (lineOfScrimmageY + (65 * dir));
-          }
-        }
+        targetX = d.zoneX ?? d.startX ?? d.x;
+        targetY = d.zoneY ?? (lineOfScrimmageY + (80 * dir));
 
         if (rb && (d.assignedReceiver === rb || d.defenseAssignment === 'RB_SPY') && (phase === 'QB_DROP' || phase === 'THROWN')) {
           const rbTarget = rb;
@@ -4293,16 +4051,6 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       });
     }
 
-    if (phase === 'RUNNING' && activeEntity && (activeEntity.isReturner || isInterceptionReturn)) {
-      const pursuers = [qb, rb, centerReceiver, ...receivers, ...linemen].filter((p): p is Entity => Boolean(p));
-      pursuers.forEach(p => {
-        p.pursuitTimer = (p.pursuitTimer || 0) + 1;
-        const distToRunner = Math.hypot(activeEntity.x - p.x, activeEntity.y - p.y);
-        const dynamicSpeed = Math.min(3.4, 2.0 + (p.pursuitTimer * 0.035) + Math.max(0, (distToRunner - 30) * 0.006));
-        moveToward(p, activeEntity.x, activeEntity.y, 0.28, dynamicSpeed);
-      });
-    }
-
     if (phase === 'RUNNING' && activeEntity) {
       const activeTacklers = (isInterceptionReturn || activeEntity.isReturner)
         ? [qb, rb, centerReceiver, ...receivers, ...linemen].filter((player): player is Entity => Boolean(player))
@@ -4364,6 +4112,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           const isBoosted = (activeEntity.powerBoostTimer || 0) > 0;
           const isRB = activeEntity === rb;
           const isQB = activeEntity === qb;
+          const hitSpeed = Math.hypot((activeEntity.vx || 0) - (d.vx || 0), (activeEntity.vy || 0) - (d.vy || 0));
+          const isBigHit = isBlitzer || isBoosted || isQB || hitSpeed >= 1.8;
 
           // Defenders labeled to blitz or tackling the QB have high tackling success
           let breakChance = calculateBrokenTackleChance({
@@ -4388,7 +4138,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
             d.pursuitTimer = 0; // Reset pursuit momentum for this stunned defender
             d.x += (d.x < activeEntity.x ? -30 : 30);
             d.y += (35 * attackDirection);
-            screenShakeTimer = 22;
+            triggerScreenShake(isBigHit ? 36 : 26, isBigHit ? 16 : 10);
             sounds.playBrokenTackle();
             brokenTackleEffect = { x: activeEntity.x, y: activeEntity.y, timer: 35 };
             showAnnouncement("BROKEN TACKLE! BREAKAWAY FOR A LONG GAIN! 💥🏃💨", "#00ffff");
@@ -4397,14 +4147,24 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
           // FUMBLE EVALUATION on hard hit
           const fumbleRoll = Math.random();
-          const fumbleChance = isBlitzer ? 0.15 : 0.08; // Blitzers force more fumbles on hard downhill collisions
+          const fumbleChance = isBlitzer ? 0.17 : isBigHit ? 0.12 : 0.08;
           if (fumbleRoll < fumbleChance) {
             triggerFumble(activeEntity);
             return;
           }
 
           // Standard tackle
-          screenShakeTimer = isBlitzer ? 30 : 25;
+          triggerScreenShake(isBigHit ? 32 : 25, isBigHit ? 12 : 5);
+          if (isBigHit) {
+            const impactX = d.x - activeEntity.x;
+            const impactY = d.y - activeEntity.y;
+            const impactLength = Math.hypot(impactX, impactY) || 1;
+            d.x += (impactX / impactLength) * 8;
+            d.y += (impactY / impactLength) * 8;
+            d.brokenTackleStun = Math.max(d.brokenTackleStun || 0, 16);
+            activeEntity.vx = (activeEntity.vx || 0) * 0.25;
+            activeEntity.vy = (activeEntity.vy || 0) * 0.25;
+          }
           phase = 'DEAD';
           const isBehindLine = (attackDirection === -1 && activeEntity.y > lineOfScrimmageY) ||
                                (attackDirection === 1 && activeEntity.y < lineOfScrimmageY);
@@ -4413,6 +4173,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
             showAnnouncement("BLITZ TACKLE FOR LOSS! 💥🛑", "#ff3333");
           } else if (isBlitzer) {
             showAnnouncement("HARD TACKLE BY BLITZER! 💥", "#ff5555");
+          } else if (isBigHit) {
+            showAnnouncement('BIG HIT! BALL CARRIER STOPPED!', '#ff5555', true);
           }
           handlePlayEnd(activeEntity.y, playEndingType);
         }
@@ -4435,13 +4197,11 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
         coverageUnits.forEach(p => {
           if (p) {
-            moveToward(p, ball!.targetX || 170, ball!.targetY || 500, 0.22, 2.7, 0);
+            moveToward(p, ball!.targetX || 170, ball!.targetY || 500, 0.22, getReturnPursuitSpeed(false, 0, 0), 0);
           }
         });
 
-        const blockers = ball.isKickoff
-          ? defenders.filter(d => !d.isReturner)
-          : defenders.filter(d => !d.isReturner && d.type !== 'CB');
+        const blockers = getReturnTeamBlockers(defenders, defenders.find(d => d.isReturner) ?? null);
         const engagedCoverageUnits = new Set<Entity>();
 
         blockers.forEach(b => {
@@ -4525,6 +4285,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
               if (d && d !== returner) {
                 d.isBlocker = true;
                 d.archetype = 'BLOCKER';
+                d.blockingDefender = null;
+                d.isEngagedWithBlocker = false;
               }
             });
 
@@ -4548,7 +4310,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
             coverageUnits.forEach(p => {
               if (p) {
-                p.pursuitTimer = 25;
+                p.pursuitTimer = 0;
+                p.brokenTackleStun = 0;
                 p.vx = 0;
                 p.vy = 0;
               }
@@ -4737,9 +4500,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       targetCamY = Math.max(cameraWorldTop, Math.min(cameraWorldBottom - 450, ball.y - 225));
       targetViewHeight = 480;
     } else if (phase === 'QB_DROP') {
-      // Camera stays locked at scrimmage by default.
-      // It ONLY zooms out when the user pulls back far enough for the QB aiming to reach/leave the screen.
-      // Wide receivers running downfield off-screen do NOT trigger a camera zoom out.
+      // Keep the QB and live routes framed so receivers stay available as tap targets.
       if (isAiming && activeOffense === 'P1') {
         const pullScreenX = aimScreenCurrentX - touchScreenStartX;
         const pullScreenY = aimScreenCurrentY - touchScreenStartY;
@@ -4788,12 +4549,37 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
             targetCamY = baseScrimmageCamY;
           }
         }
+      } else if (activeOffense === 'P1') {
+        const routeReceivers = [...receivers, centerReceiver]
+          .filter((receiver): receiver is Entity => Boolean(receiver && !receiver.isBlocker && receiver.routeType !== 'BLOCK'));
+        const topY = Math.min(qb.y, ...routeReceivers.map(receiver => receiver.y)) - 55;
+        const bottomY = Math.max(qb.y, ...routeReceivers.map(receiver => receiver.y)) + 55;
+        const baselineBottomY = baseScrimmageCamY + 450;
+        if (topY < baseScrimmageCamY || bottomY > baselineBottomY) {
+          targetViewHeight = Math.max(450, Math.min(1000, bottomY - topY));
+          targetCamY = topY;
+        } else {
+          targetViewHeight = 450;
+          targetCamY = baseScrimmageCamY;
+        }
       } else {
         targetViewHeight = 450;
         targetCamY = baseScrimmageCamY;
       }
+      if (activeOffense === 'P1') {
+        const routeReceivers = [...receivers, centerReceiver]
+          .filter((receiver): receiver is Entity => Boolean(receiver && !receiver.isBlocker && receiver.routeType !== 'BLOCK'));
+        const routeTopY = Math.min(qb.y, ...routeReceivers.map(receiver => receiver.y)) - 55;
+        const routeBottomY = Math.max(qb.y, ...routeReceivers.map(receiver => receiver.y)) + 55;
+        const frameTopY = Math.min(targetCamY, routeTopY);
+        const frameBottomY = Math.max(targetCamY + targetViewHeight, routeBottomY);
+        if (frameTopY < targetCamY || frameBottomY > targetCamY + targetViewHeight) {
+          targetViewHeight = Math.max(450, Math.min(1000, frameBottomY - frameTopY));
+          targetCamY = frameTopY;
+        }
+      }
     } else if (phase === 'THROWN') {
-      // While ball is in flight, frame the ball if it travels beyond screen bounds (WRs leaving screen do NOT zoom out)
+      // Track the ball during flight if it travels beyond the current screen bounds.
       if (ball) {
         const edgeMargin = 45;
         if (attackDirection === -1) {
@@ -4857,6 +4643,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     }
 
     if (screenShakeTimer > 0) screenShakeTimer--;
+    if (screenShakeTimer === 0) screenShakeStrength = 4;
   }
 
   function drawRoutePath(r: Entity | null) {
@@ -4980,7 +4767,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     ctx.save();
 
     if (screenShakeTimer > 0) {
-      ctx.translate((Math.random() - 0.5) * 6, (Math.random() - 0.5) * 6);
+      ctx.translate((Math.random() - 0.5) * screenShakeStrength, (Math.random() - 0.5) * screenShakeStrength);
     }
 
     // Apply dynamic camera scale and centering translation
@@ -5762,17 +5549,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       if (!options.tutorial) updateGameClock(timestamp);
       const tutorialSnapAnimating = options.tutorial && tutorialStep === 5 && tutorialAimFrames++ < 24;
       if (!options.tutorial || tutorialSnapAnimating || tutorialStep === 6 || tutorialStep === 10 || phase === 'PRE_SNAP') {
-        const timeScale = getDecisionTimeScale();
-        if (timeScale === 1) {
-          simulationFrameRemainder = 0;
-          update();
-        } else {
-          simulationFrameRemainder += timeScale;
-          if (simulationFrameRemainder >= 1) {
-            simulationFrameRemainder -= 1;
-            update();
-          }
-        }
+        update();
       }
     }
     draw();

@@ -39,7 +39,7 @@ function createTeamProfile(
   for (const ratingKey of Object.keys(ratings) as (keyof TeamProfile['ratings'])[]) {
     const rating = ratings[ratingKey];
     if (rating !== undefined) {
-      amplifiedRatings[ratingKey] = Math.max(0.6, Math.min(1.6, Number((1 + (rating - 1) * 2.5).toFixed(3))));
+      amplifiedRatings[ratingKey] = Math.max(0.5, Math.min(1.7, Number((1 + (rating - 1) * 3.5).toFixed(3))));
     }
   }
   return {

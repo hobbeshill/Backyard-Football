@@ -12,8 +12,8 @@ export const offensivePlaybook: Record<string, PlayOption> = {
     desc: 'Balanced spacing with quick timing routes',
     risk: 'SAFE',
     routeType: 'SHORT',
-    bestVs: ['COVER2MAN', 'ROBBER'],
-    weakVs: ['QUARTERS', 'BLITZ'],
+    bestVs: ['ZONE34', 'ZONE232'],
+    weakVs: ['COVER2', 'ZONE151'],
     expectedGain: [4, 9]
   },
   CONTROL_PASS: {
@@ -27,8 +27,8 @@ export const offensivePlaybook: Record<string, PlayOption> = {
     desc: 'Compressed alignment for controlled throws',
     risk: 'BALANCED',
     routeType: 'MEDIUM',
-    bestVs: ['COVER3', 'TAMPA2'],
-    weakVs: ['BLITZ', 'COVER2MAN'],
+    bestVs: ['COVER2', 'ZONE151'],
+    weakVs: ['ZONE34', 'ZONE232'],
     expectedGain: [8, 16]
   },
   DEEP_SHOT: {
@@ -42,8 +42,8 @@ export const offensivePlaybook: Record<string, PlayOption> = {
     desc: 'Three-receiver vertical stretch',
     risk: 'EXPLOSIVE',
     routeType: 'VERTICAL',
-    bestVs: ['QUARTERS', 'COVER3'],
-    weakVs: ['BLITZ', 'COVER2MAN'],
+    bestVs: ['COVER2', 'ZONE151'],
+    weakVs: ['ZONE34', 'ZONE232'],
     expectedGain: [18, 35]
   },
   ISO: {
@@ -56,8 +56,8 @@ export const offensivePlaybook: Record<string, PlayOption> = {
     desc: 'Tap the RB to choose the inside or angle path',
     risk: 'BALANCED',
     routeType: 'MEDIUM',
-    bestVs: ['ROBBER', 'BLITZ'],
-    weakVs: ['COVER2MAN', 'TAMPA2'],
+    bestVs: ['ZONE151'],
+    weakVs: ['ZONE34', 'COVER2'],
     expectedGain: [5, 12]
   },
   SWEEP: {
@@ -70,8 +70,8 @@ export const offensivePlaybook: Record<string, PlayOption> = {
     desc: 'Outside edge attack vs coverage',
     risk: 'BALANCED',
     routeType: 'MEDIUM',
-    bestVs: ['COVER3', 'QUARTERS'],
-    weakVs: ['BLITZ', 'ROBBER'],
+    bestVs: ['ZONE232'],
+    weakVs: ['ZONE34', 'COVER2'],
     expectedGain: [6, 14]
   },
   POWER: {
@@ -84,8 +84,8 @@ export const offensivePlaybook: Record<string, PlayOption> = {
     desc: 'Off-tackle smash with WR blocking',
     risk: 'SAFE',
     routeType: 'MEDIUM',
-    bestVs: ['BLITZ', 'ROBBER'],
-    weakVs: ['COVER2MAN', 'QUARTERS'],
+    bestVs: ['ZONE151'],
+    weakVs: ['ZONE34', 'ZONE232'],
     expectedGain: [4, 10]
   },
   MESH: {
@@ -99,8 +99,8 @@ export const offensivePlaybook: Record<string, PlayOption> = {
     desc: 'Dual crossing drags pick man coverage with center hitch',
     risk: 'SAFE',
     routeType: 'SHORT',
-    bestVs: ['COVER2MAN', 'ROBBER', 'BLITZ'],
-    weakVs: ['QUARTERS', 'TAMPA2'],
+    bestVs: ['COVER2', 'ZONE151', 'ZONE34'],
+    weakVs: ['ZONE232'],
     expectedGain: [6, 14]
   },
   SMASH: {
@@ -111,11 +111,11 @@ export const offensivePlaybook: Record<string, PlayOption> = {
     right: 'FLAG-R',
     center: 'CROSS-L',
     rbRoute: 'FLAT',
-    desc: 'Hi-Lo corner + hitch combo that shreds Cover 2 / Tampa 2',
+    desc: 'Hi-Lo corner and hitch combo that stresses Cover 2 flat defenders',
     risk: 'BALANCED',
     routeType: 'MEDIUM',
-    bestVs: ['TAMPA2', 'COVER3'],
-    weakVs: ['QUARTERS', 'BLITZ'],
+    bestVs: ['COVER2'],
+    weakVs: ['ZONE151', 'ZONE232'],
     expectedGain: [10, 22]
   },
   POST_WHEEL: {
@@ -126,11 +126,11 @@ export const offensivePlaybook: Record<string, PlayOption> = {
     right: 'FLAG-R',
     center: 'WHEEL',
     rbRoute: 'FLAT',
-    desc: 'Deep post & sideline wheel stretch that attacks Cover 3 & single-high',
+    desc: 'Deep post and sideline wheel stretch that attacks 3-4 and 1-5-1 shells',
     risk: 'EXPLOSIVE',
     routeType: 'VERTICAL',
-    bestVs: ['COVER3', 'ROBBER', 'QUARTERS'],
-    weakVs: ['BLITZ', 'COVER2MAN'],
+    bestVs: ['ZONE151', 'ZONE34'],
+    weakVs: ['COVER2', 'ZONE232'],
     expectedGain: [18, 38]
   },
   PUNT: {
@@ -149,41 +149,29 @@ export const offensivePlaybook: Record<string, PlayOption> = {
 };
 
 export const defensivePlaybook: Record<string, DefOption> = {
-  COVER3: {
-    name: 'COVER 3',
-    desc: '3 deep zones, 4 underneath',
-    weakness: 'deep middle / seam',
+  COVER2: {
+    name: '1-4-2 DEFENSE (COVER 2)',
+    desc: 'One rusher, two middle linebackers, two flat corners, and two deep safeties',
+    weakness: 'deep sideline seams',
     vulnerableRouteType: 'VERTICAL'
   },
-  COVER2MAN: {
-    name: 'COVER 2 MAN',
-    desc: 'Man coverage with 2 deep safeties',
-    weakness: 'boundary / quick routes',
+  ZONE34: {
+    name: '3-4 ZONE',
+    desc: 'Three on the line rush or stunt while four defenders cover intermediate and deep zones',
+    weakness: 'quick routes behind the rush',
     vulnerableRouteType: 'SHORT'
   },
-  TAMPA2: {
-    name: 'TAMPA 2',
-    desc: 'MLB drops deep to plug seams',
-    weakness: 'middle / intermediate throws',
+  ZONE232: {
+    name: '2-3-2 ZONE',
+    desc: 'Two upfront, three across the middle, and two deep defenders tracking long balls',
+    weakness: 'intermediate sideline windows',
     vulnerableRouteType: 'MEDIUM'
   },
-  BLITZ: {
-    name: 'ZERO BLITZ',
-    desc: 'All-out rush (multiple rushers)',
-    weakness: 'quick pass / scramble',
-    vulnerableRouteType: 'SHORT'
-  },
-  QUARTERS: {
-    name: 'COVER 4',
-    desc: '4 independent deep quadrants',
-    weakness: 'deep outside / vertical',
+  ZONE151: {
+    name: '1-5-1 DEFENSE',
+    desc: 'One rusher, five across the intermediate level, and one deep safety',
+    weakness: 'deep middle and outside vertical routes',
     vulnerableRouteType: 'VERTICAL'
-  },
-  ROBBER: {
-    name: 'MAN ROBBER',
-    desc: 'Man coverage with middle safety robber',
-    weakness: 'middle-of-field / slants',
-    vulnerableRouteType: 'MEDIUM'
   }
 };
 

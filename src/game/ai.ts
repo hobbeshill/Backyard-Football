@@ -327,7 +327,7 @@ export function evaluateCpuOffensiveAudibles(
     return result;
   }
 
-  // 8. DEEP SOFT ZONE (Cover 3/4) and down is short-to-medium:
+  // 8. DEEP SOFT ZONE (two-high shells) and down is short-to-medium:
   if (deepDefenders.length >= 3 && yardsToGo <= 8) {
     receivers.forEach(r => {
       if (r && !r.isBlocker) {

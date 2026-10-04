@@ -4,7 +4,7 @@ import { calculateBrokenTackleChance, calculateKickoffFlight, calculatePuntFligh
 import { offensivePlaybook } from './playbook';
 import { scoreRunBlockTarget } from './ai';
 import { mountFootballGame, type GameEngineHandle } from './engine';
-import { getBallCarrierRunSpeed, shouldApplyRunBlockStun } from './movement';
+import { getBallCarrierRunSpeed, getReturnPursuitSpeed, getReturnTeamBlockers, shouldApplyRunBlockStun } from './movement';
 
 function createMockCanvas() {
   return {
@@ -472,6 +472,19 @@ test('receiving team blockers run block during kickoff and punt returns', () => 
   const farScore = scoreRunBlockTarget(blocker, runner, tacklerFarAway, -1, false);
 
   assert.ok(aheadScore < farScore, 'Run blocker must prioritize oncoming tackler threatening the returner');
+
+  const returner = { x: 170, y: 300, radius: 10, isReturner: true };
+  const corner = { x: 45, y: 260, radius: 10, type: 'CB' };
+  const linebacker = { x: 130, y: 270, radius: 10, type: 'LB' };
+  assert.deepEqual(getReturnTeamBlockers([returner, corner, linebacker], returner), [corner, linebacker]);
+});
+
+test('kick coverage pursuers only gain return speed after the returner fields the ball', () => {
+  const flightSpeed = getReturnPursuitSpeed(false, 25, 300);
+  const postCatchSpeed = getReturnPursuitSpeed(true, 25, 300);
+
+  assert.equal(flightSpeed, 1.2);
+  assert.ok(postCatchSpeed > flightSpeed);
 });
 
 test('kick and punt returners use the slower return speed and cannot break tackles', () => {

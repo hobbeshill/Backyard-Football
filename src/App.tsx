@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Volume2, VolumeX, RefreshCw, HelpCircle, X, Users, Shield, ArrowRight, Search, Pause, Play, Home, Hand } from 'lucide-react';
 import { offensivePlaybook, defensivePlaybook } from './game/playbook';
 import { sounds } from './game/sound';
-import { hasSavedGameSession, mountFootballGame, type GameEngineHandle } from './game/engine';
+import { hasSavedGameSession, mountFootballGame, type GameBoxScore, type GameEngineHandle } from './game/engine';
 import { HelmetSpritePreview } from './game/HelmetSpritePreview';
 import { RealPlayTutorial } from './game/RealPlayTutorial';
 import { TEAM_KEYS, TEAMS, getAllTeams, getTeam, type TeamProfile } from './game/teams';
@@ -22,7 +22,6 @@ function getTeamTextStyle(color: string) {
 }
 
 const CONTROLS_TUTORIAL_KEY = 'backyard-football-controls-tutorial-complete-v1';
-const RELAXED_QB_TIMING_KEY = 'backyard-football-relaxed-qb-timing-v1';
 
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -33,9 +32,9 @@ export default function App() {
   const [downDistanceText, setDownDistanceText] = useState('1st & 10 at OWN 20');
   const [p1OffPlayState, setP1OffPlayState] = useState('SHORT_PASS');
   const [p1OffFormationState, setP1OffFormationState] = useState<'SPREAD' | 'STACK' | 'TRIPS'>('SPREAD');
-  const [p1DefPlayState, setP1DefPlayState] = useState('COVER3');
+  const [p1DefPlayState, setP1DefPlayState] = useState('COVER2');
   const [p2OffPlayState, setP2OffPlayState] = useState('SHORT_PASS');
-  const [p2DefPlayState, setP2DefPlayState] = useState('COVER3');
+  const [p2DefPlayState, setP2DefPlayState] = useState('COVER2');
   const [activeOffenseState, setActiveOffenseState] = useState('P1');
   const [p1TeamState, setP1TeamState] = useState<TeamProfile>(TEAMS.ALABAMA);
   const [p2TeamState, setP2TeamState] = useState<TeamProfile>(TEAMS.GEORGIA);
@@ -45,16 +44,10 @@ export default function App() {
   const [showTeamModal, setShowTeamModal] = useState(() => !hasSavedGameSession());
   const [hasKickedOff, setHasKickedOff] = useState(hasSavedGameSession);
   const [showPauseMenu, setShowPauseMenu] = useState(hasSavedGameSession);
-  const [relaxedQbTiming, setRelaxedQbTiming] = useState(() => {
-    try {
-      return window.localStorage.getItem(RELAXED_QB_TIMING_KEY) !== 'false';
-    } catch {
-      return true;
-    }
-  });
   const [gameMode, setGameMode] = useState<GameMode>(() => loadGameMode());
   const [seasonProgress, setSeasonProgress] = useState<SeasonProgress | null>(() => loadSeasonProgress());
-  const [finishedGame, setFinishedGame] = useState<{ p1Score: number; p2Score: number; restored: boolean } | null>(null);
+  const [finishedGame, setFinishedGame] = useState<{ p1Score: number; p2Score: number; restored: boolean; boxScore: GameBoxScore } | null>(null);
+  const finishedGameHandledRef = useRef(false);
   const gameModeRef = useRef(gameMode);
   const seasonProgressRef = useRef(seasonProgress);
   const [isKickoffActive, setIsKickoffActive] = useState(true);
@@ -267,64 +260,48 @@ export default function App() {
         cx.setLineDash([]);
       };
 
-      if (playKey === 'BLITZ') {
-        drawZoneLine(18, canvas.height / 2 - 10, 82, canvas.height / 2 - 10);
-        drawDefender(18, canvas.height / 2 - 10, '#ff3333');
-        drawDefender(28, canvas.height / 2 - 10, '#ff3333');
-        drawDefender(38, canvas.height / 2 - 10, '#ff3333');
-        drawDefender(48, canvas.height / 2 - 10, '#ff3333');
-        drawDefender(58, canvas.height / 2 - 10, '#ff3333');
-        drawDefender(68, canvas.height / 2 - 10, '#ff3333');
-        drawDefender(50, canvas.height / 2 + 8, '#ffb3b3');
-        drawDefender(37, canvas.height / 2 + 9, '#ffb3b3');
-        drawDefender(63, canvas.height / 2 + 9, '#ffb3b3');
-      } else if (playKey === 'QUARTERS') {
-        drawDefender(18, canvas.height / 2 - 12, '#ff6666');
-        drawDefender(32, canvas.height / 2 - 12, '#ff6666');
-        drawDefender(68, canvas.height / 2 - 12, '#ff6666');
-        drawDefender(82, canvas.height / 2 - 12, '#ff6666');
-        drawDefender(18, canvas.height / 2 + 12, '#ff6666');
-        drawDefender(32, canvas.height / 2 + 12, '#ff6666');
-        drawDefender(68, canvas.height / 2 + 12, '#ff6666');
-        drawDefender(82, canvas.height / 2 + 12, '#ff6666');
-        drawZoneLine(18, canvas.height / 2 - 12, 18, 8);
-        drawZoneLine(82, canvas.height / 2 - 12, 82, 8);
-        drawZoneLine(18, canvas.height / 2 + 12, 18, canvas.height - 8);
-        drawZoneLine(82, canvas.height / 2 + 12, 82, canvas.height - 8);
-      } else if (playKey === 'TAMPA2') {
-        drawDefender(22, canvas.height / 2 - 12, '#ff6666');
-        drawDefender(50, canvas.height / 2 - 14, '#ffcccc');
-        drawDefender(78, canvas.height / 2 - 12, '#ff6666');
-        drawDefender(38, canvas.height / 2 + 10, '#ff6666');
-        drawDefender(62, canvas.height / 2 + 10, '#ff6666');
-        drawDefender(50, canvas.height / 2 + 18, '#ff6666');
-        drawZoneLine(50, canvas.height / 2 - 14, 50, 30);
-      } else if (playKey === 'COVER2MAN') {
-        drawDefender(22, canvas.height / 2 - 14, '#ff6666');
-        drawDefender(78, canvas.height / 2 - 14, '#ff6666');
-        drawDefender(22, canvas.height / 2 + 10, '#ff6666');
-        drawDefender(78, canvas.height / 2 + 10, '#ff6666');
-        drawDefender(38, canvas.height / 2 + 10, '#ffcccc');
-        drawDefender(62, canvas.height / 2 + 10, '#ffcccc');
-        drawDefender(50, canvas.height / 2 + 18, '#ffcccc');
-        drawZoneLine(22, canvas.height / 2 - 14, 22, 8);
-        drawZoneLine(78, canvas.height / 2 - 14, 78, 8);
-      } else if (playKey === 'ROBBER') {
-        drawDefender(22, canvas.height / 2 - 10, '#ff6666');
-        drawDefender(38, canvas.height / 2 - 4, '#ff6666');
-        drawDefender(50, canvas.height / 2 - 15, '#ff3333');
-        drawDefender(62, canvas.height / 2 - 4, '#ff6666');
-        drawDefender(78, canvas.height / 2 - 10, '#ff6666');
-        drawDefender(50, canvas.height / 2 + 18, '#ffcccc');
-        drawZoneLine(50, canvas.height / 2 - 15, 50, 10);
+      if (playKey === 'COVER2') {
+        drawDefender(50, canvas.height / 2 - 14, '#ff3333');
+        drawDefender(18, canvas.height / 2 + 4, '#ff6666');
+        drawDefender(82, canvas.height / 2 + 4, '#ff6666');
+        drawDefender(42, canvas.height / 2 + 4, '#ffcccc');
+        drawDefender(58, canvas.height / 2 + 4, '#ffcccc');
+        drawDefender(38, canvas.height / 2 + 19, '#ff6666');
+        drawDefender(62, canvas.height / 2 + 19, '#ff6666');
+        drawZoneLine(18, canvas.height / 2 + 4, 18, canvas.height - 8);
+        drawZoneLine(82, canvas.height / 2 + 4, 82, canvas.height - 8);
+      } else if (playKey === 'ZONE34') {
+        drawDefender(32, canvas.height / 2 - 14, '#ff3333');
+        drawDefender(50, canvas.height / 2 - 14, '#ff3333');
+        drawDefender(68, canvas.height / 2 - 14, '#ff3333');
+        drawDefender(18, canvas.height / 2 + 5, '#ff6666');
+        drawDefender(82, canvas.height / 2 + 5, '#ff6666');
+        drawDefender(39, canvas.height / 2 + 18, '#ffcccc');
+        drawDefender(61, canvas.height / 2 + 18, '#ffcccc');
+      } else if (playKey === 'ZONE232') {
+        drawDefender(42, canvas.height / 2 - 14, '#ff3333');
+        drawDefender(58, canvas.height / 2 - 14, '#ff3333');
+        drawDefender(18, canvas.height / 2 + 5, '#ff6666');
+        drawDefender(50, canvas.height / 2 + 5, '#ff6666');
+        drawDefender(82, canvas.height / 2 + 5, '#ff6666');
+        drawDefender(39, canvas.height / 2 + 18, '#ffcccc');
+        drawDefender(61, canvas.height / 2 + 18, '#ffcccc');
+      } else if (playKey === 'ZONE151') {
+        drawDefender(50, canvas.height / 2 - 14, '#ff3333');
+        drawDefender(18, canvas.height / 2 + 4, '#ff6666');
+        drawDefender(34, canvas.height / 2 + 4, '#ff6666');
+        drawDefender(50, canvas.height / 2 + 4, '#ff6666');
+        drawDefender(66, canvas.height / 2 + 4, '#ff6666');
+        drawDefender(82, canvas.height / 2 + 4, '#ff6666');
+        drawDefender(50, canvas.height / 2 + 19, '#ffcccc');
       } else {
         drawDefender(50, canvas.height / 2 - 14, '#ff3333');
-        drawDefender(28, canvas.height / 2 + 2, '#ff6666');
-        drawDefender(72, canvas.height / 2 + 2, '#ff6666');
-        drawDefender(38, canvas.height / 2 + 10, '#ff6666');
-        drawDefender(62, canvas.height / 2 + 10, '#ff6666');
-        drawDefender(50, canvas.height / 2 + 18, '#ffcccc');
-        drawZoneLine(50, canvas.height / 2 - 14, 50, 8);
+        drawDefender(18, canvas.height / 2 + 4, '#ff6666');
+        drawDefender(34, canvas.height / 2 + 4, '#ff6666');
+        drawDefender(50, canvas.height / 2 + 4, '#ff6666');
+        drawDefender(66, canvas.height / 2 + 4, '#ff6666');
+        drawDefender(82, canvas.height / 2 + 4, '#ff6666');
+        drawDefender(50, canvas.height / 2 + 19, '#ffcccc');
       }
     }
   };
@@ -349,8 +326,13 @@ export default function App() {
       setGameClockState: (quarter, seconds) => setGameClockState({ quarter, seconds }),
       showAnnouncement,
       onEngineReady: engine => { engineRef.current = engine; },
-      onGameOver: (p1FinalScore, p2FinalScore, restored) => {
-        setFinishedGame({ p1Score: p1FinalScore, p2Score: p2FinalScore, restored: Boolean(restored) });
+      onGameOver: (p1FinalScore, p2FinalScore, restored, boxScore) => {
+        setFinishedGame({
+          p1Score: p1FinalScore,
+          p2Score: p2FinalScore,
+          restored: Boolean(restored),
+          boxScore: boxScore ?? { p1Quarters: [0, 0, 0, 0], p2Quarters: [0, 0, 0, 0] }
+        });
       },
       setIsKickoffState: (isKickoff, kicking, receiving) => {
         setIsKickoffActive(isKickoff);
@@ -359,7 +341,7 @@ export default function App() {
       setIs4thDownState: (val) => setIs4thDown(val),
       setKickMeterPowerState: (power) => setKickMeterPower(power),
       setP1OffPlayState
-    }, { relaxedQbTiming });
+    });
   }, []);
 
   useEffect(() => {
@@ -439,6 +421,8 @@ export default function App() {
   };
 
   const handleStartGame = () => {
+    finishedGameHandledRef.current = false;
+    setFinishedGame(null);
     saveGameMode(gameMode);
     gameModeRef.current = gameMode;
     if (gameMode === 'SEASON') {
@@ -468,6 +452,7 @@ export default function App() {
 
   const handleReturnToMainMenu = () => {
     engineRef.current?.endGame();
+    setFinishedGame(null);
     setUserScore(0);
     setCpuScore(0);
     setHasKickedOff(false);
@@ -476,18 +461,12 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (!finishedGame) return;
-    setFinishedGame(null);
-    if (gameModeRef.current === 'ONE_GAME') {
-      handleReturnToMainMenu();
-      return;
-    }
+    if (!finishedGame || finishedGameHandledRef.current) return;
+    finishedGameHandledRef.current = true;
+    if (gameModeRef.current === 'ONE_GAME') return;
 
     const currentSeason = seasonProgressRef.current;
-    if (!currentSeason) {
-      handleReturnToMainMenu();
-      return;
-    }
+    if (!currentSeason) return;
     const savedResult = currentSeason.results[currentSeason.results.length - 1];
     const resultAlreadySaved = finishedGame.restored && savedResult
       && savedResult.p1Score === finishedGame.p1Score && savedResult.p2Score === finishedGame.p2Score;
@@ -497,11 +476,6 @@ export default function App() {
     seasonProgressRef.current = updatedSeason;
     setSeasonProgress(updatedSeason);
     saveSeasonProgress(updatedSeason);
-    if (updatedSeason.results.length < updatedSeason.opponentIds.length) {
-      handleStartGame();
-    } else {
-      handleReturnToMainMenu();
-    }
   }, [finishedGame]);
 
   const finishTutorial = () => {
@@ -549,6 +523,9 @@ export default function App() {
     ? seasonProgress
     : createSeason(p1TeamState.id, TEAM_KEYS);
   const seasonComplete = seasonForDisplay.results.length >= seasonForDisplay.opponentIds.length;
+  const canContinueSeason = gameMode === 'SEASON' && Boolean(
+    seasonProgress && seasonProgress.results.length < seasonProgress.opponentIds.length
+  );
 
   return (
     <div className="relative w-screen h-screen overflow-hidden flex flex-col items-center justify-center bg-[#030704] text-white font-mono select-none">
@@ -997,12 +974,10 @@ export default function App() {
               <div className="bg-black/60 p-2.5 rounded border border-neutral-800">
                 <span className="text-red-400 font-bold block mb-1">5. DEFENSIVE SCHEMES & COUNTERS:</span>
                 <ul className="list-disc list-inside space-y-1 text-neutral-300">
-                  <li><b className="text-white">MAN ROBBER:</b> Middle safety specifically undercuts and robs center slants and crossing routes! <i>Weakness:</i> Outside 1-on-1 boundary routes (Go, Flag) and RB flats!</li>
-                  <li><b className="text-white">TAMPA 2:</b> Hook LB drops right into the intermediate slant window while corners cover the flat. <i>Weakness:</i> Sideline "Honey Hole" seam between corner and deep safety!</li>
-                  <li><b className="text-white">COVER 2 MAN:</b> Slot defender plays tight inside hip leverage against slants. <i>Weakness:</i> Running Back in the flat is uncovered!</li>
-                  <li><b className="text-white">COVER 3:</b> 3 deep DBs protect against deep passes, while right Hook LB squeezes crossing routes. <i>Weakness:</i> Out routes and flat checkdowns!</li>
-                  <li><b className="text-white">ZERO BLITZ:</b> All-out pass rush. <i>Weakness:</i> Zero deep safety help! Quick hot throws break for huge gains!</li>
-                  <li><b className="text-white">COVER 4:</b> 4 deep DBs prevent any big play. <i>Weakness:</i> Concedes underneath hitches and short flat dump-offs!</li>
+                  <li><b className="text-white">1-4-2 DEFENSE (COVER 2):</b> One rusher, two middle linebackers, two flat corners, and two deep safeties. <i>Weakness:</i> Deep sideline seams.</li>
+                  <li><b className="text-white">3-4 ZONE:</b> Three defenders rush or stunt while four drop into intermediate and deep zones. <i>Weakness:</i> Quick throws behind the rush.</li>
+                  <li><b className="text-white">2-3-2 ZONE:</b> Two upfront, three across the middle, and two deep defenders tracking long balls. <i>Weakness:</i> Intermediate sideline windows.</li>
+                  <li><b className="text-white">1-5-1 DEFENSE:</b> One rusher, five across the intermediate level, and one deep safety. <i>Weakness:</i> Deep middle and outside vertical routes.</li>
                 </ul>
               </div>
             </div>
@@ -1263,22 +1238,6 @@ export default function App() {
             className="w-full max-w-sm rounded-lg border-2 border-[#ffcc00] bg-[#07110a] p-5 text-center shadow-2xl"
           >
             <h2 id="pause-menu-title" className="text-xl font-black uppercase text-[#ffcc00]">Game Paused</h2>
-            <label className="mt-5 flex items-center justify-between gap-3 text-sm font-bold text-white">
-              Relaxed QB timing
-              <input
-                type="checkbox"
-                checked={relaxedQbTiming}
-                onChange={event => {
-                  const enabled = event.target.checked;
-                  setRelaxedQbTiming(enabled);
-                  engineRef.current?.setRelaxedQbTiming(enabled);
-                  try {
-                    window.localStorage.setItem(RELAXED_QB_TIMING_KEY, String(enabled));
-                  } catch {}
-                }}
-                className="h-5 w-5 accent-[#ffcc00]"
-              />
-            </label>
             <div className="mt-5 grid gap-3">
               <button
                 onClick={() => {
@@ -1290,6 +1249,83 @@ export default function App() {
                 <Play size={17} /> Continue game
               </button>
               <button
+                onClick={handleReturnToMainMenu}
+                className="flex w-full items-center justify-center gap-2 rounded-md border border-[#bd5635] bg-[#32170f] px-4 py-3 text-sm font-bold text-[#ffd8ca] transition hover:bg-[#512116]"
+              >
+                <Home size={17} /> Return to main menu
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {finishedGame && (
+        <div className="absolute inset-0 z-[140] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="box-score-title"
+            className="w-full max-w-md max-h-[90vh] overflow-y-auto rounded-lg border-2 border-[#ffcc00] bg-[#07110a] p-5 shadow-2xl"
+          >
+            <div className="text-center">
+              <p className="text-[0.65rem] font-bold uppercase tracking-widest text-neutral-400">Final</p>
+              <h2 id="box-score-title" className="mt-1 text-xl font-black uppercase text-[#ffcc00]">Box Score</h2>
+              <p className="mt-2 text-sm font-bold text-white">
+                {finishedGame.p1Score === finishedGame.p2Score
+                  ? 'Tie game'
+                  : finishedGame.p1Score > finishedGame.p2Score
+                    ? `${p1TeamState.name} win`
+                    : `${p2TeamState.name} win`}
+              </p>
+            </div>
+
+            <table className="mt-5 w-full table-fixed border-collapse text-center text-[0.68rem] sm:text-xs">
+              <thead>
+                <tr className="border-b border-white/20 text-neutral-400">
+                  <th className="w-[42%] px-1 py-2 text-left">Team</th>
+                  {[1, 2, 3, 4].map(quarterNumber => (
+                    <th key={quarterNumber} className="px-0.5 py-2">Q{quarterNumber}</th>
+                  ))}
+                  <th className="px-1 py-2 text-white">Final</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr className="border-b border-white/10">
+                  <th className="break-words px-1 py-3 text-left font-bold" style={getTeamTextStyle(p1TeamState.primaryColor)}>
+                    {p1TeamState.name} <span className="text-[0.58rem]">YOU</span>
+                  </th>
+                  {finishedGame.boxScore.p1Quarters.map((points, index) => (
+                    <td key={index} className="px-0.5 py-3 text-neutral-200">{points}</td>
+                  ))}
+                  <td className="px-1 py-3 text-lg font-black text-white">{finishedGame.p1Score}</td>
+                </tr>
+                <tr>
+                  <th className="break-words px-1 py-3 text-left font-bold" style={getTeamTextStyle(p2TeamState.primaryColor)}>
+                    {p2TeamState.name} <span className="text-[0.58rem]">CPU</span>
+                  </th>
+                  {finishedGame.boxScore.p2Quarters.map((points, index) => (
+                    <td key={index} className="px-0.5 py-3 text-neutral-200">{points}</td>
+                  ))}
+                  <td className="px-1 py-3 text-lg font-black text-white">{finishedGame.p2Score}</td>
+                </tr>
+              </tbody>
+            </table>
+
+            <div className={`mt-5 grid gap-2 ${canContinueSeason ? 'sm:grid-cols-2' : ''}`}>
+              {canContinueSeason && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFinishedGame(null);
+                    handleStartGame();
+                  }}
+                  className="flex w-full items-center justify-center gap-2 rounded-md bg-[#246344] px-4 py-3 text-sm font-bold text-white transition hover:bg-[#2c7751]"
+                >
+                  Next game <ArrowRight size={17} />
+                </button>
+              )}
+              <button
+                type="button"
                 onClick={handleReturnToMainMenu}
                 className="flex w-full items-center justify-center gap-2 rounded-md border border-[#bd5635] bg-[#32170f] px-4 py-3 text-sm font-bold text-[#ffd8ca] transition hover:bg-[#512116]"
               >
