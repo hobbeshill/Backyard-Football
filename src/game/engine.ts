@@ -1,7 +1,7 @@
 import type { Ball, Entity, FumbleBall } from './types';
 import { defensiveKeys, defensivePlaybook, middleRoutes, offensiveKeys, offensivePlaybook, outsideRoutes, runningBackRoutes, wrRoutes } from './playbook';
 import { alignDefenderAcrossFromRunningBack, alignDefenders, chooseCpuDefensiveAssignments, getBracketCoverageTarget, matchCpuDefendersToReceivers } from './defense';
-import { evaluateCpuOffensiveAudibles, evaluateCpuBallCarrierMoves, shouldCpuReleasePass, shouldCpuScramble, scoreRunBlockTarget } from './ai';
+import { evaluateCpuOffensiveAudibles, evaluateCpuBallCarrierMoves, isCpuPressureRecognized, shouldCpuReleasePass, shouldCpuScramble, scoreRunBlockTarget } from './ai';
 import { createFumbleBall } from './fumbles';
 import { canEngagePassBlock, distToSegment, GAME_SPEED_SCALE, getBallCarrierRunSpeed, getReturnPursuitSpeed, getReturnTeamBlockers, moveToward, resolveCollisions, shouldApplyRunBlockStun, updateRouteMovement } from './movement';
 import { resolvePlayResult, calculateBrokenTackleChance, calculateYardsToGo, getDriveStartY, getSnapBallPosition, getPassArcHeight, getPassArcMaxHeight, getPassFlightFrames, findTappedPassReceiver, shouldReleaseUserPass, getPassLeadTarget, getRoutePassLeadTarget, canDefenderDeflectPass, canTackleQuarterback, resolveCatchContestOutcome, evaluateQbThrowAccuracy, calculateKickoffFlight, calculatePuntFlight, getTouchbackYardLineY, getKickoffLineY, isPlayerOutOfBounds } from './rules';
@@ -2914,14 +2914,12 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     }
 
     if (phase === 'QB_DROP' && activeOffense === 'P2' && !ball) {
-      // Detect unblocked pass rusher pocket pressure with sufficient time to release before being sacked
-      const unblockedRushers = defenders.filter(d => d && (d.passRusher || d.defenseAssignment === 'BLITZ') && !d.isEngagedWithBlocker);
-      let distToRusher = 999;
-      unblockedRushers.forEach(r => {
-        const d = Math.hypot(r.x - qb.x, r.y - qb.y);
-        if (d < distToRusher) distToRusher = d;
+      let nearestUnblockedDefender = Infinity;
+      defenders.forEach(defender => {
+        if (!defender || defender.isEngagedWithBlocker) return;
+        nearestUnblockedDefender = Math.min(nearestUnblockedDefender, Math.hypot(defender.x - qb.x, defender.y - qb.y));
       });
-      const isUnderHeavyPressure = distToRusher < 65 || defenders.some(d => d && (d.passRusher || d.defenseAssignment === 'BLITZ') && Math.hypot(d.x - qb.x, d.y - qb.y) < 55);
+      const isUnderHeavyPressure = isCpuPressureRecognized(nearestUnblockedDefender < 65, playClock);
 
       // NFL Progression Read Framework:
       // Primary Read (Outside WRs): receivers[0], receivers[1]
@@ -2948,14 +2946,15 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         const arrivalFrames = Math.max(16, Math.round(targetDist / estimatedThrowSpeed));
         const arrivalX = Math.max(25, Math.min(fieldWidth - 25, t.x + (t.vx || 0) * arrivalFrames * 0.92));
         const arrivalY = t.y + (t.vy || 0) * arrivalFrames * 0.92;
-        let nearestDefDist = Infinity;
-        defenders.forEach(d => {
-          if (!d || d.passRusher) return;
-          const defenderArrivalX = d.x + (d.vx || 0) * arrivalFrames * 0.92;
-          const defenderArrivalY = d.y + (d.vy || 0) * arrivalFrames * 0.92;
-          const dist = Math.hypot(defenderArrivalX - arrivalX, defenderArrivalY - arrivalY);
-          if (dist < nearestDefDist) nearestDefDist = dist;
-        });
+        const nearestCoverage = defenders.reduce<{ defender: Entity; distance: number } | null>((nearest, defender) => {
+          if (!defender || defender.passRusher) return nearest;
+          const defenderArrivalX = defender.x + (defender.vx || 0) * arrivalFrames * 0.92;
+          const defenderArrivalY = defender.y + (defender.vy || 0) * arrivalFrames * 0.92;
+          const distance = Math.hypot(defenderArrivalX - arrivalX, defenderArrivalY - arrivalY);
+          return !nearest || distance < nearest.distance ? { defender, distance } : nearest;
+        }, null);
+        const nearestDefDist = nearestCoverage?.distance ?? Infinity;
+        const nearestCoverageDef = nearestCoverage?.defender ?? null;
 
         // Evaluate separation and depth where the receiver is expected to meet the pass.
         const depthYards = (arrivalY - lineOfScrimmageY) * attackDirection / 10;
@@ -2983,7 +2982,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         }
 
         // Check if defender covering this receiver made a coverage mistake
-        const coveringDef = defenders.find(d => d.assignedReceiver === t);
+        const coveringDef = nearestCoverageDef;
         const hasCoverageMistake = Boolean(
           (coveringDef && coveringDef.coverageMistake && (coveringDef.mistakeTimer || 0) > 0) ||
           defenders.some(d => d.coverageMistake && (d.mistakeTimer || 0) > 0 && Math.hypot(d.x - t.x, d.y - t.y) < 105)
@@ -2996,12 +2995,6 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         // Coverage Mismatch Exploitation: DL or LB covering a WR/TE in MAN coverage
         if (coveringDef && coveringDef.defenseAssignment === 'MAN' && (coveringDef.type === 'DL' || coveringDef.type === 'LB')) {
           score += 65; // Heavily exploit the physical speed/agility mismatch!
-        }
-
-        // Multi-rusher fronts leave fewer defenders available over the top.
-        const totalRushers = defenders.filter(d => d && (d.passRusher || d.defenseAssignment === 'BLITZ')).length;
-        if (totalRushers >= 2 && isDeepRoute) {
-          score += 115;
         }
 
         // 2. Route break window anticipation bonus:
@@ -3027,7 +3020,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
             isBreakOpen = true;
           }
           // Go route streaking deep behind CB (frame 34+)
-          else if (t.routeType === 'GO' && (rTime >= 34 || hasCoverageMistake || totalRushers >= 2) && nearestDefDist >= 14 && depthYards > 6) {
+          else if (t.routeType === 'GO' && (rTime >= 34 || hasCoverageMistake) && nearestDefDist >= 14 && depthYards > 6) {
             score += 75;
             isBreakOpen = true;
           }
@@ -3058,17 +3051,6 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           }
         }
 
-        // 3. Scheme-specific weakness exploitation (Tecmo Super Bowl strategic reads)
-        if (activeDefKey === 'ZONE232' && depthYards <= 14) {
-          score += 35;
-        } else if (activeDefKey === 'ZONE34' && (depthYards <= 14 || isCheckdown)) {
-          score += 35;
-        } else if (activeDefKey === 'COVER2' && depthYards > 10 && depthYards < 24 && Math.abs(t.x - 170) > 65) {
-          score += 45;
-        } else if (activeDefKey === 'ZONE151' && depthYards > 14) {
-          score += 35;
-        }
-
         // 4. Downfield progression reward
         if (depthYards > 0) {
           score += depthYards * 3.0;
@@ -3090,11 +3072,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         score -= laneObstruction;
 
         // Check for RB spy & bracket pressure on defense (explicit RB_SPY or assigned receiver covering the RB)
-        const rbSpyDefenders = defenders.filter(d => d && !d.passRusher && d.defenseAssignment !== 'BLITZ' && (
-          d.defenseAssignment === 'RB_SPY' ||
-          d.assignedReceiver === rb ||
-          (rb && Math.hypot(d.x - rb.x, d.y - rb.y) < 70 && Math.abs(d.y - lineOfScrimmageY) < 55)
-        ));
+        const rbSpyDefenders = defenders.filter(d => d && !d.passRusher && rb &&
+          Math.hypot(d.x - rb.x, d.y - rb.y) < 60 && Math.abs(d.y - lineOfScrimmageY) < 85);
         const rbSpyCount = rbSpyDefenders.length;
 
         // If evaluating downfield receivers: Recognize that defense wasted defenders spying the RB!
@@ -3154,11 +3133,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
       // Phase 2: Read Checkdown RB ONLY if downfield is locked, NO open receiver break, and RB is NOT spied
       if (checkdownTarget) {
-        const rbSpyCount = defenders.filter(d => d && !d.passRusher && d.defenseAssignment !== 'BLITZ' && (
-          d.defenseAssignment === 'RB_SPY' ||
-          d.assignedReceiver === rb ||
-          (rb && Math.hypot(d.x - rb.x, d.y - rb.y) < 70 && Math.abs(d.y - lineOfScrimmageY) < 55)
-        )).length;
+        const rbSpyCount = defenders.filter(d => d && !d.passRusher && rb &&
+          Math.hypot(d.x - rb.x, d.y - rb.y) < 60 && Math.abs(d.y - lineOfScrimmageY) < 85).length;
         if (rbSpyCount === 0 && !openBreakWR && !bestIsDownfieldWR) {
           const rbEval = evaluateTarget(checkdownTarget, true);
           if ((isUnderHeavyPressure || (bestScore < 20 && playClock > 65)) && rbEval.score > bestScore) {
@@ -3198,10 +3174,9 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       // 3. User blitz exploit or coverage bust opportunity!
       // 4. Emergency sack escape (under heavy pressure and playClock > 25)
       // 5. Play clock progression expiration (playClock > 70)
-      const totalRushers = defenders.filter(d => d && (d.passRusher || d.defenseAssignment === 'BLITZ')).length;
       const hasCoverageMistakeNow = defenders.some(d => d.coverageMistake && (d.mistakeTimer || 0) > 0);
       const isDeepShotOpportunity = (
-        (totalRushers >= 2 || hasCoverageMistakeNow) &&
+        hasCoverageMistakeNow &&
         bestTarget !== null &&
         (bestTarget.routeType === 'GO' || bestTarget.routeType === 'FLAG-L' || bestTarget.routeType === 'FLAG-R' || bestTarget.routeType === 'POST-L' || bestTarget.routeType === 'POST-R' || bestTarget.routeType === 'WHEEL') &&
         playClock >= 32
@@ -3220,11 +3195,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       });
 
       if (shouldThrowNow && bestTarget !== null) {
-        const activeRbSpies = defenders.filter(d => d && !d.passRusher && d.defenseAssignment !== 'BLITZ' && (
-          d.defenseAssignment === 'RB_SPY' ||
-          d.assignedReceiver === rb ||
-          (rb && Math.hypot(d.x - rb.x, d.y - rb.y) < 70 && Math.abs(d.y - lineOfScrimmageY) < 55)
-        )).length;
+        const activeRbSpies = defenders.filter(d => d && !d.passRusher && rb &&
+          Math.hypot(d.x - rb.x, d.y - rb.y) < 60 && Math.abs(d.y - lineOfScrimmageY) < 85).length;
 
         // Requirement: "2 RB spies is shutting do the AI offense because they keep tossing to the RB and not recognizing the open man."
         // If RB has spies/bracket coverage, NEVER throw to the RB: Select the open downfield receiver!
@@ -3242,11 +3214,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         }
 
         if (isDeepShotOpportunity && activeRbSpies === 0) {
-          if (totalRushers >= 2) {
-            showAnnouncement("CPU EXPLOITS USER BLITZ! DEEP STRIKE OVER THE TOP! 🏈🚀💥", "#00ffff");
-          } else {
-            showAnnouncement("CPU EXPLOITS COVERAGE BUST! DEEP PASS LAUNCHED! 🚀🏈", "#00ffff");
-          }
+          showAnnouncement("CPU EXPLOITS COVERAGE BUST! DEEP PASS LAUNCHED! 🚀🏈", "#00ffff");
         }
         const targetDist = Math.hypot(chosenTarget.x - qb.x, chosenTarget.y - qb.y);
         // Original calibrated ball speed

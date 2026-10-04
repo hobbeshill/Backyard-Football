@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { scoreRunBlockTarget, shouldCpuReleasePass, shouldCpuScramble } from './ai';
+import { isCpuPressureRecognized, scoreRunBlockTarget, shouldCpuReleasePass, shouldCpuScramble } from './ai';
 import { alignDefenderAcrossFromRunningBack, alignDefenders, chooseCpuDefensiveAssignments, getBracketCoverageTarget, matchCpuDefendersToReceivers } from './defense';
 import { calculateYardsToGo, canDefenderDeflectPass, canTackleQuarterback, findTappedPassReceiver, getDefenderPassReachHeight, getDriveStartY, getSnapBallPosition, getPassArcHeight, getPassArcMaxHeight, getPassFlightFrames, getPassLeadTarget, getRoutePassLeadTarget, resolvePlayResult } from './rules';
 import { canEngagePassBlock, moveToward, updateRouteMovement } from './movement';
@@ -198,6 +198,12 @@ test('CPU releases open, pressured, and overdue passes before scrambling', () =>
   assert.equal(shouldCpuReleasePass({ ...situation, isUnderHeavyPressure: true, playClock: 26 }), true);
   assert.equal(shouldCpuReleasePass({ ...situation, playClock: 58 }), true);
   assert.equal(shouldCpuReleasePass({ ...situation, hasTarget: false, playClock: 58 }), false);
+});
+
+test('CPU pressure reads allow a short reaction window before forcing a throw', () => {
+  assert.equal(isCpuPressureRecognized(false, 40), false);
+  assert.equal(isCpuPressureRecognized(true, 23), false);
+  assert.equal(isCpuPressureRecognized(true, 24), true);
 });
 
 test('CPU vertical calls wait for downfield windows but escape pressure and eventually release', () => {
@@ -570,7 +576,7 @@ test('AI offense audibles RB into pass protection when facing box pressure (2 ru
   const rb: Entity = { x: 220, y: 575, radius: 10, routeType: 'FLAT', isRB: true, side: 'right' };
   const defenders: Entity[] = [
     { x: 170, y: 524, radius: 10, type: 'DL', passRusher: true },
-    { x: 120, y: 540, radius: 10, type: 'LB', defenseAssignment: 'BLITZ' },
+    { x: 120, y: 528, radius: 10, type: 'LB', defenseAssignment: 'BLITZ' },
     { x: 80, y: 610, radius: 10, type: 'CB' },
     { x: 260, y: 610, radius: 10, type: 'CB' },
     { x: 170, y: 590, radius: 10, type: 'MLB' },
@@ -605,8 +611,8 @@ test('AI offense calls MAX PASS PROTECTION (RB and Center blocking) when facing 
   const rb: Entity = { x: 220, y: 575, radius: 10, routeType: 'FLAT', isRB: true, side: 'right' };
   const defenders: Entity[] = [
     { x: 170, y: 524, radius: 10, type: 'DL', passRusher: true },
-    { x: 120, y: 540, radius: 10, type: 'LB', defenseAssignment: 'BLITZ' },
-    { x: 215, y: 540, radius: 10, type: 'LB', defenseAssignment: 'BLITZ' },
+    { x: 120, y: 528, radius: 10, type: 'LB', defenseAssignment: 'BLITZ' },
+    { x: 215, y: 528, radius: 10, type: 'LB', defenseAssignment: 'BLITZ' },
     { x: 80, y: 610, radius: 10, type: 'CB' },
     { x: 260, y: 610, radius: 10, type: 'CB' },
     { x: 170, y: 590, radius: 10, type: 'MLB' },
@@ -631,6 +637,31 @@ test('AI offense calls MAX PASS PROTECTION (RB and Center blocking) when facing 
   assert.equal(centerReceiver.routeType, 'BLOCK');
   assert.ok(result.blockersAssigned.includes('RB'));
   assert.ok(result.blockersAssigned.includes('CENTER'));
+});
+
+test('CPU pre-snap protection does not trust blitz or spy assignment tags from deep defenders', async () => {
+  const { evaluateCpuOffensiveAudibles } = await import('./ai');
+  const receivers: Entity[] = [
+    { x: 50, y: 500, radius: 10, routeType: 'GO' },
+    { x: 290, y: 500, radius: 10, routeType: 'GO' }
+  ];
+  const centerReceiver: Entity = { x: 170, y: 500, radius: 10, routeType: 'SLANT-R' };
+  const runningBack: Entity = { x: 220, y: 530, radius: 10, routeType: 'FLAT' };
+  const taggedDefenders: Entity[] = [
+    { x: 45, y: 400, radius: 10, type: 'LB', defenseAssignment: 'BLITZ', passRusher: true },
+    { x: 170, y: 400, radius: 10, type: 'LB', defenseAssignment: 'BLITZ', passRusher: true },
+    { x: 295, y: 400, radius: 10, type: 'LB', defenseAssignment: 'BLITZ', passRusher: true },
+    { x: 80, y: 350, radius: 10, type: 'LB', defenseAssignment: 'RB_SPY' },
+    { x: 260, y: 350, radius: 10, type: 'SS', defenseAssignment: 'RB_SPY' }
+  ];
+
+  const result = evaluateCpuOffensiveAudibles(
+    'PASS', receivers, centerReceiver, runningBack, taggedDefenders, 1, 10, 500, -1
+  );
+
+  assert.equal(result.blockersAssigned.length, 0);
+  assert.equal(runningBack.isBlocker, undefined);
+  assert.equal(centerReceiver.isBlocker, undefined);
 });
 
 test('AI ball carrier executes intelligent lateral juke when defender closes in', async () => {

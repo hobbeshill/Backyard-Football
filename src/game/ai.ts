@@ -42,6 +42,10 @@ export function shouldCpuReleasePass(situation: CpuPassReleaseSituation): boolea
     situation.playClock >= 35;
 }
 
+export function isCpuPressureRecognized(isUnderHeavyPressure: boolean, playClock: number): boolean {
+  return isUnderHeavyPressure && playClock >= 24;
+}
+
 export interface CpuScrambleSituation {
   playClock: number;
   bestScore: number;
@@ -89,11 +93,9 @@ export function evaluateCpuOffensiveAudibles(
     blockersAssigned: []
   };
 
-  // Count defenders assigned to spy or cover the running back
-  const rbSpies = defenders.filter(d => d && !d.passRusher && d.defenseAssignment !== 'BLITZ' && (
-    d.defenseAssignment === 'RB_SPY' ||
-    d.assignedReceiver === rb
-  ));
+  // Read RB attention from the defender's position, not hidden assignment flags.
+  const rbSpies = defenders.filter(d => d && !d.passRusher && rb &&
+    Math.hypot(d.x - rb.x, d.y - rb.y) < 45 && Math.abs(d.y - lineOfScrimmageY) < 100);
   const rbSpyCount = rbSpies.length;
 
   // 1. MULTIPLE RB SPIES / RB BRACKET (2+ defenders dedicated to spying/shadowing the RB):
@@ -170,7 +172,7 @@ export function evaluateCpuOffensiveAudibles(
   }
 
   // Count blitzers and rushers threatening the pocket
-  const rushers = defenders.filter(d => d && (d.passRusher || d.defenseAssignment === 'BLITZ'));
+  const rushers = defenders.filter(d => d && !d.isEngagedWithBlocker && Math.abs(d.y - lineOfScrimmageY) <= 32);
   const rusherCount = rushers.length;
 
   // Find where rushers are aligned relative to center (170)
@@ -277,8 +279,8 @@ export function evaluateCpuOffensiveAudibles(
   // 5. COVERAGE MISMATCH EXPLOITATION:
   // Detect if user assigned a slower lineman (DL) or linebacker (LB) to MAN coverage on a WR
   for (const d of defenders) {
-    if (d && d.defenseAssignment === 'MAN' && (d.type === 'DL' || d.type === 'LB')) {
-      const mismatchedWr = d.assignedReceiver || receivers.find(r => r && !r.isBlocker && Math.hypot(r.x - d.x, r.y - d.y) < 65);
+    if (d && !d.passRusher && (d.type === 'DL' || d.type === 'LB')) {
+      const mismatchedWr = receivers.find(r => r && !r.isBlocker && Math.hypot(r.x - d.x, r.y - d.y) < 45);
       if (mismatchedWr && !mismatchedWr.isBlocker) {
         mismatchedWr.routeType = 'GO';
         mismatchedWr.routeIndex = Math.max(0, outsideRoutes.indexOf('GO'));
@@ -296,11 +298,12 @@ export function evaluateCpuOffensiveAudibles(
     return depth > 90;
   });
 
-  const manDefenders = defenders.filter(d => d && d.defenseAssignment === 'MAN');
+  const manDefenders = defenders.filter(d => d && !d.passRusher &&
+    receivers.some(receiver => !receiver.isBlocker && Math.hypot(receiver.x - d.x, receiver.y - d.y) < 40));
 
   // 6. DEEP MIDDLE VACATED (2-high safeties with open center of the field):
   if (deepDefenders.length === 2 && centerReceiver && !centerReceiver.isBlocker) {
-    const hasMiddleSafety = defenders.some(d => d && (d.defenseAssignment === 'ZONE' || d.type === 'FS') && Math.abs(d.x - fieldWidth / 2) < 45 && Math.abs(d.y - lineOfScrimmageY) > 60);
+    const hasMiddleSafety = defenders.some(d => d && (d.type === 'FS' || d.type === 'SS') && Math.abs(d.x - fieldWidth / 2) < 45 && Math.abs(d.y - lineOfScrimmageY) > 60);
     if (!hasMiddleSafety) {
       centerReceiver.routeType = 'POST-R';
       centerReceiver.routeIndex = Math.max(0, middleRoutes.indexOf('POST-R'));
