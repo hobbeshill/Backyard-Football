@@ -51,9 +51,16 @@ export interface GameEngineHandle {
   diveTackle: () => void;
   getReceivers: () => Entity[];
   isJoystickActiveForTest?: () => boolean;
+  cameraPerspective?: CameraPerspectiveMode;
+  setCameraPerspective?: (mode: CameraPerspectiveMode) => void;
+  getCameraPerspective?: () => CameraPerspectiveMode;
+  toggleCameraPerspective?: () => CameraPerspectiveMode;
 }
 
+export type CameraPerspectiveMode = 'THREE_QUARTER' | 'TOP_DOWN';
+
 export interface GameEngineCallbacks {
+  onCameraPerspectiveChange?: (mode: CameraPerspectiveMode) => void;
   setP2OffPlayState: (key: string) => void;
   setP2DefPlayState: (key: string) => void;
   setDownDistanceText: (text: string) => void;
@@ -140,6 +147,32 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   let currentViewHeight = 450;
   let cameraScale = 1.0;
   let cameraOffsetX = 0;
+  let cameraPerspectiveMode: CameraPerspectiveMode = (() => {
+    try {
+      const stored = localStorage.getItem('football_camera_perspective');
+      if (stored === 'TOP_DOWN' || stored === 'THREE_QUARTER') return stored;
+    } catch {}
+    return 'THREE_QUARTER';
+  })();
+
+  function getCameraPitchFactor(): number {
+    return cameraPerspectiveMode === 'THREE_QUARTER' ? 0.72 : 1.0;
+  }
+
+  function setCameraPerspective(mode: CameraPerspectiveMode) {
+    cameraPerspectiveMode = mode;
+    try {
+      localStorage.setItem('football_camera_perspective', mode);
+    } catch {}
+    callbacks.onCameraPerspectiveChange?.(mode);
+  }
+
+  function toggleCameraPerspective(): CameraPerspectiveMode {
+    const nextMode: CameraPerspectiveMode = cameraPerspectiveMode === 'THREE_QUARTER' ? 'TOP_DOWN' : 'THREE_QUARTER';
+    setCameraPerspective(nextMode);
+    return nextMode;
+  }
+
   let screenShakeTimer = 0;
   let screenShakeStrength = 4;
   let playClock = 0;
@@ -159,8 +192,9 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     const rect = canvas!.getBoundingClientRect();
     const canvasX = (clientX - rect.left) * (canvas!.width / rect.width);
     const canvasY = (clientY - rect.top) * (canvas!.height / rect.height);
+    const pitch = getCameraPitchFactor();
     const wx = (canvasX - cameraOffsetX) / cameraScale;
-    const wy = (canvasY / cameraScale) + cameraY;
+    const wy = (canvasY / (cameraScale * pitch)) + cameraY;
     return { x: wx, y: wy };
   }
 
@@ -2392,7 +2426,11 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       if (index === 0 && defenders[0]) {
         repositionUserDefender(defenders[0], x, y);
       }
-    }
+    },
+    get cameraPerspective() { return cameraPerspectiveMode; },
+    setCameraPerspective,
+    getCameraPerspective: () => cameraPerspectiveMode,
+    toggleCameraPerspective
   };
   callbacks.onEngineReady(engineHandle);
 
@@ -2614,9 +2652,10 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   }
 
   function worldToCanvas(wx: number, wy: number): { x: number; y: number } {
+    const pitch = getCameraPitchFactor();
     return {
       x: (wx * cameraScale) + cameraOffsetX,
-      y: (wy - cameraY) * cameraScale
+      y: (wy - cameraY) * (cameraScale * pitch)
     };
   }
 
@@ -5389,7 +5428,33 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     let targetViewHeight = 450;
     let targetCamY = baseScrimmageCamY;
 
-    if (phase === 'PRE_SNAP' || phase === 'KICKOFF') {
+    if (cameraPerspectiveMode === 'THREE_QUARTER') {
+      // 3/4 Perspective Camera: Elevated behind the QB looking down the field
+      const qbBehindY = attackDirection === -1 ? (qb.y - 325) : (qb.y - 125);
+      if (phase === 'PRE_SNAP' || phase === 'KICKOFF') {
+        targetViewHeight = 450;
+        targetCamY = qbBehindY;
+      } else if (ball && (ball.isKickoff || ball.isPunt)) {
+        targetCamY = attackDirection === -1 ? ball.y - 300 : ball.y - 150;
+        targetViewHeight = 460;
+      } else if (phase === 'QB_DROP') {
+        targetViewHeight = 450;
+        targetCamY = qbBehindY;
+      } else if (phase === 'THROWN' && ball) {
+        targetViewHeight = 450;
+        targetCamY = attackDirection === -1 ? ball.y - 250 : ball.y - 200;
+      } else if (phase === 'RUNNING') {
+        const trackingEntity = activeEntity || qb;
+        targetViewHeight = 450;
+        targetCamY = attackDirection === -1 ? trackingEntity.y - 310 : trackingEntity.y - 140;
+      } else if (phase === 'FUMBLE' && fumbleBall) {
+        targetViewHeight = 450;
+        targetCamY = attackDirection === -1 ? fumbleBall.y - 280 : fumbleBall.y - 170;
+      } else {
+        targetViewHeight = 450;
+        targetCamY = baseScrimmageCamY;
+      }
+    } else if (phase === 'PRE_SNAP' || phase === 'KICKOFF') {
       targetViewHeight = 450;
       targetCamY = baseScrimmageCamY;
     } else if (ball && (ball.isKickoff || ball.isPunt)) {
@@ -5558,24 +5623,35 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   }
 
   function drawHelmet(entity: Entity, design: HelmetDesign, forwardDirection: number) {
-    drawHelmetSprite(ctx!, entity, design, forwardDirection, touchOptimized ? 1.23 : 1.08);
-    if (entity.stamina === undefined) return;
-    const stamina = entity.stamina;
     ctx!.save();
-    ctx!.fillStyle = '#171717';
-    ctx!.fillRect(entity.x - 12, entity.y + 20, 24, 4);
-    ctx!.fillStyle = stamina < 25 ? '#ef4444' : stamina < 55 ? '#fbbf24' : '#4ade80';
-    ctx!.fillRect(entity.x - 12, entity.y + 20, 24 * stamina / 100, 4);
-    if (stamina < 55 && (phase === 'PRE_SNAP' || entity === activeEntity)) {
-      ctx!.font = 'bold 8px Courier New, monospace';
-      ctx!.textAlign = 'center';
-      ctx!.fillText(stamina < 25 ? 'EXHAUSTED' : 'TIRED', entity.x, entity.y + 34);
+    if (cameraPerspectiveMode === 'THREE_QUARTER') {
+      ctx!.translate(entity.x, entity.y);
+      ctx!.scale(1, 1 / 0.72);
+      ctx!.translate(-entity.x, -entity.y);
+    }
+    drawHelmetSprite(ctx!, entity, design, forwardDirection, touchOptimized ? 1.23 : 1.08, cameraPerspectiveMode);
+    if (entity.stamina !== undefined) {
+      const stamina = entity.stamina;
+      ctx!.fillStyle = '#171717';
+      ctx!.fillRect(entity.x - 12, entity.y + 20, 24, 4);
+      ctx!.fillStyle = stamina < 25 ? '#ef4444' : stamina < 55 ? '#fbbf24' : '#4ade80';
+      ctx!.fillRect(entity.x - 12, entity.y + 20, 24 * stamina / 100, 4);
+      if (stamina < 55 && (phase === 'PRE_SNAP' || entity === activeEntity)) {
+        ctx!.font = 'bold 8px Courier New, monospace';
+        ctx!.textAlign = 'center';
+        ctx!.fillText(stamina < 25 ? 'EXHAUSTED' : 'TIRED', entity.x, entity.y + 34);
+      }
     }
     ctx!.restore();
   }
 
   function drawFootball(x: number, y: number, rotation: number, size = 8) {
     ctx!.save();
+    if (cameraPerspectiveMode === 'THREE_QUARTER') {
+      ctx!.translate(x, y);
+      ctx!.scale(1, 1 / 0.72);
+      ctx!.translate(-x, -y);
+    }
     ctx!.translate(x, y);
     ctx!.rotate(rotation);
     const leather = ctx!.createLinearGradient(0, -size * 0.6, 0, size * 0.6);
@@ -5632,8 +5708,9 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     }
 
     // Apply dynamic camera scale and centering translation
+    const pitch = getCameraPitchFactor();
     ctx.translate(cameraOffsetX, 0);
-    ctx.scale(cameraScale, cameraScale);
+    ctx.scale(cameraScale, cameraScale * pitch);
     ctx.translate(0, -cameraY);
 
     // Playing field surface

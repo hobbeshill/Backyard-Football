@@ -120,3 +120,16 @@ test('helmets do not substitute invented initials for graphic decals', () => {
     assert.deepEqual(text, [], id);
   }
 });
+
+test('3/4 view helmet sprites render cleanly for all teams with balanced canvas state', () => {
+  for (const team of getAllTeams()) {
+    const { ctx, getSaveDepth } = createRecordingContext();
+    // Test facing downfield (offense rear 3/4)
+    drawHelmetSprite(ctx, { x: 170, y: 200, radius: 10 }, getHelmetDesign(team), -1, 1, 'THREE_QUARTER');
+    assert.equal(getSaveDepth(), 0, `${team.name} offense 3/4 save/restore balance`);
+
+    // Test facing upfield (defense front 3/4)
+    drawHelmetSprite(ctx, { x: 170, y: 200, radius: 10 }, getHelmetDesign(team), 1, 1, 'THREE_QUARTER');
+    assert.equal(getSaveDepth(), 0, `${team.name} defense 3/4 save/restore balance`);
+  }
+});
