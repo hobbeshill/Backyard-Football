@@ -565,12 +565,70 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       if (target === centerReceiver && value === 'BLOCK') completeTutorialAction(3);
       else if (value !== 'BLOCK') completeTutorialAction(2);
     } else if (role === 'RB' && rb) {
-      rb.routeType = value;
-      rb.isBlocker = (value === 'BLOCK');
-      rb.routeIndex = Math.max(0, runningBackRoutes.indexOf(value));
-      sounds.playJuke();
-      if (activeDefense === 'P2') {
-        applyDefensiveAlignment(true, true);
+      if (value === 'RUN' || value === 'RUN_LEFT' || value === 'RUN_RIGHT') {
+        p1OffPlay = 'ISO';
+        if (typeof callbacks !== 'undefined' && callbacks.setP1OffPlayState) {
+          callbacks.setP1OffPlayState('ISO');
+        }
+        rb.routeType = 'RUN';
+        rb.isBlocker = false;
+        if (value === 'RUN_LEFT') {
+          rb.side = 'left';
+          rb.startX = 120;
+          rb.x = 120;
+        } else if (value === 'RUN_RIGHT') {
+          rb.side = 'right';
+          rb.startX = 220;
+          rb.x = 220;
+        }
+        // Turn offensive formation receivers into lead run-blockers
+        if (typeof centerReceiver !== 'undefined' && centerReceiver) {
+          centerReceiver.routeType = 'BLOCK';
+          centerReceiver.isBlocker = true;
+        }
+        if (typeof receivers !== 'undefined' && receivers[1]) {
+          receivers[1].routeType = 'BLOCK';
+          receivers[1].isBlocker = true;
+        }
+        if (typeof receivers !== 'undefined' && receivers[0]) {
+          receivers[0].routeType = 'GO';
+          receivers[0].isBlocker = false;
+        }
+        if (typeof receivers !== 'undefined' && receivers[2]) {
+          receivers[2].routeType = 'GO';
+          receivers[2].isBlocker = false;
+        }
+        sounds.playJuke();
+        if (activeDefense === 'P2') {
+          applyDefensiveAlignment(true, true);
+        }
+        const dirLabel = value === 'RUN_LEFT' ? 'LEFT' : value === 'RUN_RIGHT' ? 'RIGHT' : '';
+        if (typeof showAnnouncement === 'function') {
+          showAnnouncement(dirLabel ? `RUN PLAY: HANDOFF ${dirLabel}! 🏈💨` : 'RUN PLAY: QB HANDOFF TO RB! 🏈💨', '#00ffaa');
+        }
+      } else {
+        const curFormation = (typeof p1OffFormation !== 'undefined') ? p1OffFormation : 'SPREAD';
+        const basePassPlay = curFormation === 'STACK' ? 'CONTROL_PASS' : curFormation === 'TRIPS' ? 'DEEP_SHOT' : 'SHORT_PASS';
+        if (p1OffPlay === 'ISO') {
+          p1OffPlay = basePassPlay;
+          if (typeof callbacks !== 'undefined' && callbacks.setP1OffPlayState) {
+            callbacks.setP1OffPlayState(basePassPlay);
+          }
+          if (typeof offensivePlaybook !== 'undefined' && offensivePlaybook[basePassPlay]) {
+            const passPlayObj = offensivePlaybook[basePassPlay];
+            if (typeof receivers !== 'undefined' && receivers[0]) { receivers[0].routeType = passPlayObj.left || 'GO'; receivers[0].isBlocker = false; }
+            if (typeof receivers !== 'undefined' && receivers[1]) { receivers[1].routeType = curFormation === 'TRIPS' ? 'CROSS-L' : 'SLANT-L'; receivers[1].isBlocker = false; }
+            if (typeof receivers !== 'undefined' && receivers[2]) { receivers[2].routeType = passPlayObj.right || 'GO'; receivers[2].isBlocker = false; }
+            if (typeof centerReceiver !== 'undefined' && centerReceiver) { centerReceiver.routeType = passPlayObj.center || 'SLANT-R'; centerReceiver.isBlocker = false; }
+          }
+        }
+        rb.routeType = value;
+        rb.isBlocker = (value === 'BLOCK');
+        rb.routeIndex = Math.max(0, runningBackRoutes.indexOf(value));
+        sounds.playJuke();
+        if (activeDefense === 'P2') {
+          applyDefensiveAlignment(true, true);
+        }
       }
     } else if (role === 'DEFENDER') {
       const defenderIndex = defenders.indexOf(target);
@@ -582,6 +640,18 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       }
       applyDefensiveAlignment(true, false, true);
       sounds.playJuke();
+      if (typeof showAnnouncement === 'function') {
+        const labels: Record<string, { text: string; color: string }> = {
+          BLITZ: { text: 'DEFENSE: BLITZ / RUSH QB! 💥', color: '#00ff66' },
+          ZONE: { text: 'DEFENSE: DEEP ZONE COVERAGE! 🛡️', color: '#ff3333' },
+          MAN: { text: 'DEFENSE: MAN COVERAGE! 👤', color: '#ffcc00' },
+          RB_SPY: { text: 'DEFENSE: RB SPY LOCKED! 🕵️‍♂️', color: '#00ffff' },
+        };
+        const info = labels[value];
+        if (info) {
+          showAnnouncement(info.text, info.color);
+        }
+      }
       if (activeOffense === 'P2') {
         triggerCpuOffensiveAudible(false);
       }
@@ -824,8 +894,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
   function resizeGame() {
     if (!canvas) return;
-    const availableHeight = typeof window !== 'undefined' ? window.innerHeight - 95 : 600;
-    const availableWidth = typeof window !== 'undefined' ? window.innerWidth - 10 : 340;
+    const availableHeight = typeof window !== 'undefined' ? Math.max(340, window.innerHeight - 80) : 600;
+    const availableWidth = typeof window !== 'undefined' ? Math.max(320, window.innerWidth - 8) : 340;
 
     canvas.width = fieldWidth;
     canvas.height = 450;
@@ -2156,12 +2226,12 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   }
 
   const engineHandle: GameEngineHandle = {
-    p1Score,
-    p2Score,
-    p1OffPlay,
-    p1DefPlay,
-    p2OffPlay,
-    p2DefPlay,
+    get p1Score() { return p1Score; },
+    get p2Score() { return p2Score; },
+    get p1OffPlay() { return p1OffPlay; },
+    get p1DefPlay() { return p1DefPlay; },
+    get p2OffPlay() { return p2OffPlay; },
+    get p2DefPlay() { return p2DefPlay; },
     get phase() { return phase; },
     get activeOffense() { return activeOffense; },
     get activeDefense() { return activeDefense; },
@@ -2429,14 +2499,15 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     }
 
     snapToQuarterback();
-    if (play?.type === 'PASS') {
-      phase = 'QB_DROP';
-      isAiming = false;
-      qb.dropStepTimer = 28;
-    } else {
+    const isDesignedRun = (play?.type !== 'PASS' && play?.type !== 'PUNT') || rb?.routeType === 'RUN';
+    if (isDesignedRun) {
       if (rb) rb.hasBall = false;
       activeEntity = rb || qb;
       phase = 'HANDOFF';
+    } else {
+      phase = 'QB_DROP';
+      isAiming = false;
+      qb.dropStepTimer = 28;
     }
   }
 
@@ -2689,6 +2760,30 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       return;
     }
 
+    // Tapping the punt meter on the field executes the punt!
+    if (phase === 'PRE_SNAP' && activeOffense === 'P1' && typeof p1OffPlay !== 'undefined' && p1OffPlay === 'PUNT') {
+      const cWidth = (typeof canvas !== 'undefined' && canvas) ? canvas.width : fieldWidth;
+      const cHeight = (typeof canvas !== 'undefined' && canvas) ? canvas.height : 450;
+      const meterW = 210;
+      const meterH = 50;
+      const meterX = (cWidth - meterW) / 2;
+      const meterY = cHeight - 145;
+      const isTapOnMeter = (
+        screenPos.x >= meterX - 35 &&
+        screenPos.x <= meterX + meterW + 35 &&
+        screenPos.y >= meterY - 30 &&
+        screenPos.y <= meterY + meterH + 35
+      );
+      const distToPunter = Math.hypot(qb.x - px, qb.y - py);
+      if (isTapOnMeter || distToPunter < 45) {
+        if (typeof snapToQuarterback === 'function') snapToQuarterback();
+        if (typeof executePunt === 'function') {
+          executePunt('P1', typeof attackDirection !== 'undefined' ? attackDirection : 1, typeof kickMeterPower !== 'undefined' ? kickMeterPower : 0.6);
+        }
+        return;
+      }
+    }
+
     tapThrowTarget = null;
 
     touchStartX = px;
@@ -2898,16 +2993,21 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       const dragDist = Math.hypot(curX - gestureStartX, curY - gestureStartY);
 
       if (gestureRole === 'DEFENDER') {
-        if (dragDist > 6 || isPullingDefender) {
-          isPullingDefender = true;
-          if (gestureEntity === defenders[0]) {
+        if (gestureEntity === defenders[0]) {
+          if (dragDist > 6 || isPullingDefender) {
+            isPullingDefender = true;
             repositionUserDefender(gestureEntity, curX + gestureGrabOffsetX, curY + gestureGrabOffsetY);
           }
+          return;
+        }
+
+        if (dragDist > 8 || Math.abs(curX - gestureStartX) > 8) {
+          isDirtGestureActive = true;
         }
         return;
       }
 
-      if (dragDist > 12) {
+      if (dragDist > 10 || Math.abs(curX - gestureStartX) > 10) {
         isDirtGestureActive = true;
       }
       return;
@@ -2955,10 +3055,13 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         gestureCurrentX = curX;
         gestureCurrentY = curY;
         const dragDist = Math.hypot(curX - gestureStartX, curY - gestureStartY);
+        const dx = gestureCurrentX - gestureStartX;
+        const dy = gestureCurrentY - gestureStartY;
+        const lateralDist = Math.abs(dx);
 
         if (gestureRole === 'DEFENDER') {
-          if (isPullingDefender || dragDist > 6) {
-            if (gestureEntity === defenders[0]) {
+          if (gestureEntity === defenders[0]) {
+            if (isPullingDefender || dragDist > 6) {
               repositionUserDefender(gestureEntity, curX + gestureGrabOffsetX, curY + gestureGrabOffsetY);
               sounds.playJuke();
             }
@@ -2967,18 +3070,15 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
             return;
           }
 
-          if (gestureEntity === defenders[0]) {
-            gestureEntity = null;
-            isDirtGestureActive = false;
-            return;
-          }
-          const dx = gestureCurrentX - gestureStartX;
-          const dy = gestureCurrentY - gestureStartY;
-          const lateralDist = Math.abs(dx);
-
-          // Requirement: "Swiping left or right on a defender should not register as a swipe to change alignments. It should only change the defensive players assignment to man coverage."
-          if (lateralDist > 16 && lateralDist > Math.abs(dy) * 0.75) {
-            applyChalkRoute(gestureEntity, 'DEFENDER', 'MAN');
+          if (isDirtGestureActive || dragDist > 10) {
+            const gesture = evaluateDirtSwipeGesture(
+              gestureEntity,
+              'DEFENDER',
+              dx,
+              dy,
+              attackDirection
+            );
+            applyChalkRoute(gestureEntity, 'DEFENDER', gesture.value);
           } else {
             // Cycle assignment-controlled teammates; the free defender has no assignment.
             const defenderIndex = defenders.indexOf(gestureEntity);
@@ -2991,6 +3091,16 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           gestureEntity = null;
           isDirtGestureActive = false;
           return;
+        } else if (gestureRole === 'RB' && (lateralDist > 10 || (isDirtGestureActive && dragDist > 10))) {
+          // Left or right swipe on the RB is the way to call a running play!
+          const gesture = evaluateDirtSwipeGesture(
+            gestureEntity,
+            gestureRole,
+            dx,
+            dy,
+            attackDirection
+          );
+          applyChalkRoute(gestureEntity, gestureRole, gesture.value);
         } else if (isDirtGestureActive && dragDist > 14) {
           // User drew a line for a route!
           const gesture = evaluateDirtSwipeGesture(
@@ -3002,18 +3112,29 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           );
           applyChalkRoute(gestureEntity, gestureRole, gesture.value);
         } else {
-          // Single tap on buddy: Assigns RUN BLOCKING!
-          if (gestureRole === 'WR' || gestureRole === 'RB') {
+          // Single tap on offensive player toggles role/assignment!
+          if (gestureRole === 'WR') {
             const isCurrentlyBlocking = gestureEntity.isBlocker || gestureEntity.routeType === 'BLOCK';
             if (isCurrentlyBlocking) {
-              // Tapping again toggles back to default pass route
-              const defaultRoute = (gestureRole === 'RB')
-                ? 'FLAT'
-                : (gestureEntity === centerReceiver ? 'SLANT-R' : (gestureEntity.startX! < 170 ? 'SLANT-R' : 'SLANT-L'));
+              const defaultRoute = (gestureEntity === centerReceiver ? 'SLANT-R' : (gestureEntity.startX! < 170 ? 'SLANT-R' : 'SLANT-L'));
               applyChalkRoute(gestureEntity, gestureRole, defaultRoute);
             } else {
-              // Assign RUN BLOCKING
               applyChalkRoute(gestureEntity, gestureRole, 'BLOCK');
+            }
+          } else if (gestureRole === 'RB') {
+            // RB Single Tap Toggle: Only toggles Pass Protection (BLOCK) <-> Pass Route (FLAT)
+            // Running play is NOT part of the toggle (called by swiping left or right on the RB).
+            const currentRoute = gestureEntity.routeType;
+            const isBlocking = gestureEntity.isBlocker || currentRoute === 'BLOCK';
+
+            if (isBlocking) {
+              // Toggles to Pass Route (FLAT)
+              applyChalkRoute(gestureEntity, 'RB', 'FLAT');
+              if (typeof showAnnouncement === 'function') showAnnouncement('PASS ROUTE: RB RUNNING FLAT! 🎯', '#00ffff');
+            } else {
+              // Toggles to Pass Protection (BLOCK)
+              applyChalkRoute(gestureEntity, 'RB', 'BLOCK');
+              if (typeof showAnnouncement === 'function') showAnnouncement('PASS PROTECTION: RB BLOCKING! 🛡️', '#ffffff');
             }
           }
         }
@@ -3969,7 +4090,10 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           const baseRunSpeed = getBallCarrierRunSpeed(isReturn, (activeEntity.powerBoostTimer || 0) > 0);
           const contactSpeed = (activeEntity.contactSlowTimer || 0) > 0 ? 0.75 : 1;
           if ((activeEntity.contactSlowTimer || 0) > 0) activeEntity.contactSlowTimer!--;
-          const carrierMaxSpeed = baseRunSpeed * GAME_SPEED_SCALE * (activeEntity.speedMultiplier || 1) * getFatigueSpeedMultiplier(activeEntity.stamina) * contactSpeed;
+          // Requirement: "The user controlled the ball here should only be as fast as his teammates, currently he's too fast."
+          // Teammate routes and lead blockers scale movement by 0.68 * GAME_SPEED_SCALE.
+          const teammateSpeedScale = 0.68;
+          const carrierMaxSpeed = baseRunSpeed * teammateSpeedScale * GAME_SPEED_SCALE * (activeEntity.speedMultiplier || 1) * getFatigueSpeedMultiplier(activeEntity.stamina) * contactSpeed;
 
           if (isUserControlled) {
             const joy = getEffectiveJoystickInput();
@@ -5417,6 +5541,10 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       const angleX = (r.startX < 170) ? 210 : 130;
       ctx!.lineTo(r.startX, r.startY + (45 * dir));
       ctx!.lineTo(angleX, r.startY + (85 * dir));
+    } else if (r.routeType === 'RUN') {
+      const holeX = (r.side === 'left' || r.startX < 170) ? 140 : 200;
+      ctx!.lineTo(holeX, lineOfScrimmageY + (10 * dir));
+      ctx!.lineTo(holeX, lineOfScrimmageY + (90 * dir));
     }
     ctx!.stroke();
 
@@ -5424,7 +5552,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       ctx!.fillStyle = (r === rb) ? '#00ffaa' : '#ffcc00';
       ctx!.font = '10px Courier New, monospace';
       ctx!.textAlign = 'center';
-      ctx!.fillText(r.routeType || '', r.startX, r.startY - (16 * dir));
+      const label = r.routeType === 'RUN' ? '🏈 RUN' : (r.routeType || '');
+      ctx!.fillText(label, r.startX, r.startY - (16 * dir));
     }
   }
 
@@ -5601,6 +5730,12 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       if (playObj && playObj.type === 'PASS') {
         receivers.forEach(r => drawRoutePath(r));
         drawRoutePath(centerReceiver);
+        if (rb) drawRoutePath(rb);
+      } else if (playObj && playObj.type !== 'PASS') {
+        receivers.forEach(r => {
+          if (r.isBlocker || r.routeType === 'BLOCK') drawRoutePath(r);
+        });
+        if (centerReceiver) drawRoutePath(centerReceiver);
         if (rb) drawRoutePath(rb);
       }
     }
@@ -5908,7 +6043,26 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         ctx.stroke();
         ctx.restore();
       }
-      if (d.defenseAssignment) {
+      const isUnassignedCenterDefender = (activeDefense === 'P1' && d === defenders[0]) || d.defenseAssignment === 'USER';
+      if (isUnassignedCenterDefender) {
+        if (phase === 'PRE_SNAP' && activeDefense === 'P1') {
+          const radius = d.radius || 10;
+          ctx.save();
+          ctx.strokeStyle = '#00ffff';
+          ctx.fillStyle = '#00ffff';
+          ctx.lineWidth = 2 / cameraScale;
+          ctx.setLineDash([4, 3]);
+          ctx.beginPath();
+          ctx.arc(d.x, d.y, radius + 5, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.font = `bold ${Math.round(8 / cameraScale)}px monospace`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'bottom';
+          ctx.fillText('NO ASSIGNMENT', d.x, d.y - radius - 5);
+          ctx.restore();
+        }
+      } else if (d.defenseAssignment) {
         const assignmentColor = d.defenseAssignment === 'BLITZ'
           ? '#00ff66'
           : d.defenseAssignment === 'MAN'
@@ -6191,9 +6345,9 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
       if (isUserKicking) {
         ctx.fillStyle = '#ffcc00';
-        ctx.font = 'bold 10px monospace';
+        ctx.font = 'bold 11px monospace';
         ctx.textAlign = 'center';
-        ctx.fillText('🏈 KICKOFF • TAP FIELD TO KICK', canvas.width / 2, meterY + 14);
+        ctx.fillText('🏈 TAP METER TO KICKOFF!', canvas.width / 2, meterY + 14);
 
         const barX = meterX + 15;
         const barY = meterY + 22;
@@ -6214,9 +6368,19 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         ctx.lineWidth = 1;
         ctx.strokeRect(barX, barY, barW, barH);
 
+        // Indicator line
+        const indX = barX + barW * kickMeterPower;
+        ctx.strokeStyle = '#ffff00';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(indX, barY - 2);
+        ctx.lineTo(indX, barY + barH + 2);
+        ctx.stroke();
+
+        const estYards = Math.round(45 + kickMeterPower * 25);
         ctx.fillStyle = '#ffffff';
         ctx.font = 'bold 9px monospace';
-        ctx.fillText(`${Math.round(kickMeterPower * 100)}% POWER`, canvas.width / 2, barY + 11);
+        ctx.fillText(`${Math.round(kickMeterPower * 100)}% POWER (~${estYards} YDS)`, canvas.width / 2, barY + 11);
       } else {
         ctx.fillStyle = '#00ffff';
         ctx.font = 'bold 11px monospace';
@@ -6231,23 +6395,23 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
     if (phase === 'PRE_SNAP' && activeOffense === 'P1' && p1OffPlay === 'PUNT') {
       ctx.save();
-      const meterW = 200;
-      const meterH = 46;
+      const meterW = 210;
+      const meterH = 48;
       const meterX = (canvas.width - meterW) / 2;
       const meterY = canvas.height - 145;
 
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.88)';
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.90)';
       ctx.strokeStyle = '#00ffff';
-      ctx.lineWidth = 2;
+      ctx.lineWidth = 2.5;
       ctx.beginPath();
       ctx.roundRect(meterX, meterY, meterW, meterH, 8);
       ctx.fill();
       ctx.stroke();
 
       ctx.fillStyle = '#00ffff';
-      ctx.font = 'bold 10px monospace';
+      ctx.font = 'bold 11px monospace';
       ctx.textAlign = 'center';
-      ctx.fillText('🏈 PUNT • TAP BOTTOM BUTTON', canvas.width / 2, meterY + 14);
+      ctx.fillText('🏈 TAP METER TO PUNT!', canvas.width / 2, meterY + 14);
 
       const barX = meterX + 15;
       const barY = meterY + 22;

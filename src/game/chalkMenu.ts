@@ -39,16 +39,24 @@ export function evaluateDirtSwipeGesture(
   }
 
   if (role === 'RB') {
-    // Backward swipe -> RUN BLOCKING
-    if (forwardY < -12) {
-      return { value: 'BLOCK', label: 'RUN BLOCK', icon: '🛡️', color: '#ffffff' };
+    // Backward swipe -> RUN BLOCKING / PASS PROTECTION
+    if (forwardY < -12 && lateralDist < 20) {
+      return { value: 'BLOCK', label: 'PASS BLOCK', icon: '🛡️', color: '#ffffff' };
     }
     // Straight line forward (within 26 degrees) -> FLY (GO) ROUTE!
     if (Math.abs(angleDeg) <= 26 && forwardY > 15) {
       return { value: 'GO', label: 'RB FLY (GO)', icon: '🚀', color: '#00ffff' };
     }
-    // Diagonal line (or lateral sweep) -> FLAT ROUTE!
-    return { value: 'FLAT', label: 'RB FLAT ROUTE', icon: '➡️', color: '#00ffaa' };
+    // Forward diagonal line -> FLAT ROUTE!
+    if (forwardY > 15 && lateralDist >= 15) {
+      return { value: 'FLAT', label: 'FLAT ROUTE', icon: '➡️', color: '#00ffff' };
+    }
+    // Left or right swipe on the RB -> CALL A DESIGNED RUN PLAY!
+    if (dx < 0) {
+      return { value: 'RUN_LEFT', label: 'RUN PLAY (LEFT)', icon: '🏈', color: '#00ffaa' };
+    } else {
+      return { value: 'RUN_RIGHT', label: 'RUN PLAY (RIGHT)', icon: '🏈', color: '#00ffaa' };
+    }
   }
 
   // DEFENDER
@@ -106,6 +114,10 @@ export function getBackyardBuddyCallout(
 
   if (role === 'RB') {
     switch (routeValue) {
+      case 'RUN':
+      case 'RUN_LEFT':
+      case 'RUN_RIGHT':
+        return "I got the rock! Running it! 🏈💨";
       case 'GO':
         return "Streaking deep on the fly! 🚀";
       case 'FLAT':

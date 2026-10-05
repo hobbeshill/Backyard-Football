@@ -1,6 +1,6 @@
 import type { Entity } from './types';
 
-export const GAME_SPEED_SCALE = 0.77;
+export const GAME_SPEED_SCALE = 0.80;
 export function getFatigueSpeedMultiplier(stamina = 100): number {
   return 1 - Math.min(1, Math.max(0, (70 - stamina) / 70)) * 0.35;
 }

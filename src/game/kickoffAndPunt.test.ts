@@ -13,6 +13,7 @@ function createMockCanvas() {
       restore: () => {},
       clearRect: () => {},
       beginPath: () => {},
+      closePath: () => {},
       moveTo: () => {},
       lineTo: () => {},
       stroke: () => {},
@@ -29,7 +30,10 @@ function createMockCanvas() {
       measureText: () => ({ width: 50 }),
       translate: () => {},
       scale: () => {},
-      rotate: () => {}
+      clip: () => {},
+      rotate: () => {},
+      quadraticCurveTo: () => {},
+      bezierCurveTo: () => {}
     }),
     width: 340,
     height: 450,
@@ -550,6 +554,161 @@ test('return blockers only stun once per tackler engagement', () => {
   assert.equal(shouldApplyRunBlockStun(blocker, otherTackler), true);
   assert.equal(shouldApplyRunBlockStun({ x: 0, y: 0, radius: 10 }, tackler), true);
 });
+
+test('tapping the punt meter on the field executes the punt and all player speeds scale with GAME_SPEED_SCALE', async () => {
+  const { GAME_SPEED_SCALE } = await import('./movement');
+  assert.equal(GAME_SPEED_SCALE, 0.80, 'Player speed scale is slightly increased to 0.80 for more enjoyable gameplay');
+
+  const handlers = new Map<string, Function>();
+  const mockCanvas = createMockCanvas();
+  mockCanvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 340, height: 450 } as DOMRect);
+  mockCanvas.addEventListener = ((name: string, handler: Function) => handlers.set(name, handler)) as typeof mockCanvas.addEventListener;
+
+  let engineInstance: GameEngineHandle | null = null;
+  let announcement = '';
+  let p1OffPlay = '';
+
+  const cleanup = mountFootballGame(mockCanvas, {
+    setP2OffPlayState: () => {},
+    setP2DefPlayState: () => {},
+    setDownDistanceText: () => {},
+    setActiveOffenseState: () => {},
+    setUserScore: () => {},
+    setCpuScore: () => {},
+    setP1DefPlayState: () => {},
+    setP1OffFormationState: () => {},
+    setMomentumState: () => {},
+    setP1TeamState: () => {},
+    setP2TeamState: () => {},
+    setGameClockState: () => {},
+    showAnnouncement: (msg) => { announcement = msg; },
+    onEngineReady: (engine: GameEngineHandle | null) => { engineInstance = engine; },
+    setP1OffPlayState: (play: string) => { p1OffPlay = play; }
+  });
+
+  assert.ok(engineInstance);
+  const engine = engineInstance as GameEngineHandle;
+
+  // Set 4th down for P1
+  engine.setPossessionForTest?.('P1');
+  engine.set4thDownForTest?.();
+  engine.callPunt();
+  assert.equal(p1OffPlay, 'PUNT');
+
+  // Verify pointerdown listener on canvas
+  const pointerDown = handlers.get('pointerdown');
+  assert.ok(typeof pointerDown === 'function', 'Canvas has pointerdown listener');
+
+  // Meter is drawn at meterX = (340-210)/2 = 65, meterY = 450 - 145 = 305
+  // Tapping the meter (x: 170, y: 320)
+  pointerDown({ clientX: 170, clientY: 320, pointerId: 1 });
+
+  assert.ok(announcement.includes('PUNT') || engine.phase === 'THROWN' || engine.phase === 'PUNT', 'Tapping on-field punt meter triggers the punt');
+
+  if (cleanup) cleanup();
+});
+
+test('swiping left or right on the RB calls a running play while tapping toggles pass protection and route', async () => {
+  const handlers = new Map<string, Function>();
+  const mockCanvas = createMockCanvas();
+  mockCanvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 340, height: 450 } as DOMRect);
+  mockCanvas.addEventListener = ((name: string, handler: Function) => handlers.set(name, handler)) as typeof mockCanvas.addEventListener;
+
+  let engineInstance: GameEngineHandle | null = null;
+  let announcement = '';
+  let p1OffPlay = '';
+
+  const cleanup = mountFootballGame(mockCanvas, {
+    setP2OffPlayState: () => {},
+    setP2DefPlayState: () => {},
+    setDownDistanceText: () => {},
+    setActiveOffenseState: () => {},
+    setUserScore: () => {},
+    setCpuScore: () => {},
+    setP1DefPlayState: () => {},
+    setP1OffFormationState: () => {},
+    setMomentumState: () => {},
+    setP1TeamState: () => {},
+    setP2TeamState: () => {},
+    setGameClockState: () => {},
+    showAnnouncement: (msg) => { announcement = msg; },
+    onEngineReady: (engine: GameEngineHandle | null) => { engineInstance = engine; },
+    setP1OffPlayState: (play: string) => { p1OffPlay = play; }
+  });
+
+  assert.ok(engineInstance);
+  const engine = engineInstance as GameEngineHandle;
+
+  // Set 1st down for P1
+  engine.setPossessionForTest?.('P1');
+  engine.resetDrill();
+  assert.equal(engine.phase, 'PRE_SNAP');
+  assert.equal(engine.p1OffPlay, 'SHORT_PASS');
+
+  const pointerDown = handlers.get('pointerdown');
+  const pointerMove = handlers.get('pointermove');
+  const pointerUp = handlers.get('pointerup');
+  assert.ok(typeof pointerDown === 'function');
+  assert.ok(typeof pointerUp === 'function');
+
+  // Advance time past the 450ms defense select / playbook guard
+  const originalNow = Date.now;
+  let simulatedTime = originalNow() + 1000;
+  Date.now = () => simulatedTime;
+
+  try {
+    // 1. Single tap on RB at (220, 300) toggles into Pass Protection ('BLOCK') - NOT a run play!
+    pointerDown({ clientX: 220, clientY: 300, pointerId: 1 });
+    simulatedTime += 50;
+    pointerUp({ clientX: 220, clientY: 300, pointerId: 1 });
+
+    assert.equal(engine.p1OffPlay, 'SHORT_PASS', 'Tapping RB does not call running play; keeps pass play');
+    assert.ok(announcement.includes('PASS PROTECTION'), 'Announcement indicates pass protection');
+
+    // 2. Single tap again: toggles into Pass Route ('FLAT') - NOT a run play!
+    simulatedTime += 500;
+    pointerDown({ clientX: 220, clientY: 300, pointerId: 1 });
+    simulatedTime += 50;
+    pointerUp({ clientX: 220, clientY: 300, pointerId: 1 });
+    assert.equal(engine.p1OffPlay, 'SHORT_PASS', 'Tapping RB again keeps pass play');
+    assert.ok(announcement.includes('PASS ROUTE'), 'Announcement indicates pass route');
+
+    // 3. Swipe left on RB: calls a Designed Run Play ('ISO')!
+    simulatedTime += 500;
+    pointerDown({ clientX: 220, clientY: 300, pointerId: 1 });
+    if (typeof pointerMove === 'function') {
+      pointerMove({ clientX: 180, clientY: 300, pointerId: 1 });
+    }
+    simulatedTime += 100;
+    pointerUp({ clientX: 180, clientY: 300, pointerId: 1 });
+
+    assert.equal(engine.p1OffPlay, 'ISO', 'Swiping left on RB calls running play ISO');
+    assert.ok(announcement.includes('RUN PLAY'), 'Announcement indicates running play');
+
+    // 4. Swipe right on RB: calls a Designed Run Play ('ISO') to the right!
+    simulatedTime += 500;
+    pointerDown({ clientX: 120, clientY: 300, pointerId: 1 });
+    if (typeof pointerMove === 'function') {
+      pointerMove({ clientX: 170, clientY: 300, pointerId: 1 });
+    }
+    simulatedTime += 100;
+    pointerUp({ clientX: 170, clientY: 300, pointerId: 1 });
+
+    assert.equal(engine.p1OffPlay, 'ISO', 'Swiping right on RB calls running play ISO');
+    assert.ok(announcement.includes('RUN PLAY'), 'Announcement indicates running play');
+  } finally {
+    Date.now = originalNow;
+  }
+
+  // Verify App.tsx does not have ISO Run or Sweep buttons
+  const { readFileSync } = await import('node:fs');
+  const appSrc = readFileSync(new URL('../App.tsx', import.meta.url), 'utf8');
+  assert.equal(appSrc.includes('ISO Run'), false, 'ISO Run button is removed from UI');
+  assert.equal(appSrc.includes('handleSelectOffensePlay(\'SWEEP\')'), false, 'Sweep button is removed from UI');
+
+  if (cleanup) cleanup();
+});
+
 
 
 

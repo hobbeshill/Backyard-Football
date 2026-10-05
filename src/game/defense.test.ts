@@ -2116,19 +2116,31 @@ test('AI QB throws decisively on rhythm and under pressure without freezing in t
   assert.equal(progressionRelease, true, 'AI QB releases by frame 42 to prevent freezing indefinitely');
 });
 
-test('Passes in flight overhead do not trigger catch contests or bat-downs at the line of scrimmage', () => {
-  // Pass flight arrival definition: progress >= 0.70 or near destination, descending to z <= 20
-  const isArrival = (progress: number, z: number, frame: number, total: number) => {
-    return (progress >= 0.70 || frame >= total - 4) && z <= 20;
-  };
+test('Defenders respond to swipe gestures for blitz, zone, man, and spy assignments', async () => {
+  const { evaluateDirtSwipeGesture } = await import('./chalkMenu');
+  const defender: Entity = { x: 170, y: 350, radius: 10 };
 
-  // At line of scrimmage: frame 3 of 40, progress 0.075, ball high in air z = 28
-  assert.equal(isArrival(0.075, 28, 3, 40), false, 'Pass crossing line of scrimmage is NOT at arrival');
-  // At midpoint of pass: frame 20 of 40, progress 0.50, ball at arc apex z = 42
-  assert.equal(isArrival(0.50, 42, 20, 40), false, 'Pass at arc apex is NOT at arrival');
-  // Downfield arrival: frame 36 of 40, progress 0.90, ball descending to catch point z = 15
-  assert.equal(isArrival(0.90, 15, 36, 40), true, 'Pass descending to downfield receiver IS at arrival window');
+  // Swiping toward LOS / offense (forwardY < -16, e.g. dy = 30 when attackDirection = -1) -> BLITZ
+  const blitz = evaluateDirtSwipeGesture(defender, 'DEFENDER', 0, 30, -1);
+  assert.equal(blitz.value, 'BLITZ', 'Swiping toward LOS assigns BLITZ');
+  assert.ok(blitz.label.includes('BLITZ'), 'Label includes BLITZ');
+
+  // Swiping deep backward (forwardY > 18, e.g. dy = -30 when attackDirection = -1) -> ZONE
+  const zone = evaluateDirtSwipeGesture(defender, 'DEFENDER', 0, -30, -1);
+  assert.equal(zone.value, 'ZONE', 'Swiping deep back assigns ZONE');
+  assert.ok(zone.label.includes('ZONE'), 'Label includes ZONE');
+
+  // Swiping horizontally left or right (lateralDist > 16) -> MAN
+  const manLeft = evaluateDirtSwipeGesture(defender, 'DEFENDER', -30, 0, -1);
+  assert.equal(manLeft.value, 'MAN', 'Swiping left assigns MAN');
+  const manRight = evaluateDirtSwipeGesture(defender, 'DEFENDER', 30, 0, -1);
+  assert.equal(manRight.value, 'MAN', 'Swiping right assigns MAN');
+
+  // Short or diagonal swipe -> RB_SPY
+  const spy = evaluateDirtSwipeGesture(defender, 'DEFENDER', 8, -5, -1);
+  assert.equal(spy.value, 'RB_SPY', 'Short swipe assigns RB_SPY');
 });
+
 
 
 

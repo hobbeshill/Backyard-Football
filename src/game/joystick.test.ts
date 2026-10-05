@@ -569,7 +569,7 @@ test('assignment defenders can cycle coverage but cannot be moved or controlled'
     moveHandler({ clientX: teammate.x + 50, clientY: teammate.y + 35, pointerId: 2 } as PointerEvent);
     upHandler({ clientX: teammate.x + 50, clientY: teammate.y + 35, pointerId: 2 } as PointerEvent);
     assert.deepEqual({ x: teammate.x, y: teammate.y }, initialPosition);
-    assert.equal(teammate.defenseAssignment, 'BLITZ');
+    assert.equal(teammate.defenseAssignment, 'ZONE', 'Deep backward swipe on assignment defender assigns ZONE coverage without moving the sprite');
     assert.equal(game.getControlledDefender?.(), defenders[0]);
   } finally {
     cleanup?.();

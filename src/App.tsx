@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
-import { Volume2, VolumeX, RefreshCw, HelpCircle, X, Users, Shield, ArrowRight, Search, Pause, Play, Home, Hand, Crosshair } from 'lucide-react';
+import { Volume2, VolumeX, RefreshCw, HelpCircle, X, Users, Shield, ArrowRight, Search, Pause, Play, Home, Hand, Crosshair, Trophy, Award, RotateCcw } from 'lucide-react';
 import { offensivePlaybook, defensivePlaybook } from './game/playbook';
 import { sounds } from './game/sound';
 import { hasSavedGameSession, mountFootballGame, type GameBoxScore, type GameEngineHandle } from './game/engine';
 import { HelmetSpritePreview } from './game/HelmetSpritePreview';
 import { RealPlayTutorial } from './game/RealPlayTutorial';
 import { TEAM_KEYS, TEAMS, getAllTeams, getTeam, type TeamProfile } from './game/teams';
-import { createSeason, loadGameMode, loadSeasonProgress, recordSeasonGame, saveGameMode, saveSeasonProgress, type GameMode, type SeasonProgress } from './game/season';
+import { createSeason, getSeasonRecord, loadGameMode, loadSeasonProgress, recordSeasonGame, saveGameMode, saveSeasonProgress, type GameMode, type SeasonProgress } from './game/season';
+import { getRivalryForMatchup, type RivalryGame } from './game/rivalries';
 
 function getTeamTextStyle(color: string) {
   const hex = color.replace('#', '');
@@ -44,8 +45,11 @@ export default function App() {
   const [showTeamModal, setShowTeamModal] = useState(() => !hasSavedGameSession());
   const [hasKickedOff, setHasKickedOff] = useState(hasSavedGameSession);
   const [showPauseMenu, setShowPauseMenu] = useState(hasSavedGameSession);
+  const [showDynastyPreview, setShowDynastyPreview] = useState(false);
   const [gameMode, setGameMode] = useState<GameMode>(() => loadGameMode());
   const [seasonProgress, setSeasonProgress] = useState<SeasonProgress | null>(() => loadSeasonProgress());
+  const [showSeasonChoiceModal, setShowSeasonChoiceModal] = useState(false);
+  const [isStartingNewSeason, setIsStartingNewSeason] = useState(false);
   const [finishedGame, setFinishedGame] = useState<{ p1Score: number; p2Score: number; restored: boolean; boxScore: GameBoxScore } | null>(null);
   const finishedGameHandledRef = useRef(false);
   const gameModeRef = useRef(gameMode);
@@ -428,10 +432,18 @@ export default function App() {
     gameModeRef.current = gameMode;
     if (gameMode === 'SEASON') {
       let currentSeason = seasonProgressRef.current;
-      if (!currentSeason || currentSeason.teamId !== p1TeamState.id || currentSeason.results.length >= currentSeason.opponentIds.length) {
+      if (!currentSeason || currentSeason.teamId !== p1TeamState.id) {
         currentSeason = createSeason(p1TeamState.id, TEAM_KEYS);
       }
-      const nextOpponentId = currentSeason.opponentIds[currentSeason.results.length];
+      let nextOpponentId = '';
+      if (currentSeason.results.length < currentSeason.opponentIds.length) {
+        nextOpponentId = currentSeason.opponentIds[currentSeason.results.length];
+      } else if (currentSeason.secChampionship?.userQualified && !currentSeason.secChampionship?.played) {
+        nextOpponentId = currentSeason.secChampionship.opponentId;
+      } else {
+        currentSeason = createSeason(p1TeamState.id, TEAM_KEYS);
+        nextOpponentId = currentSeason.opponentIds[0];
+      }
       if (!nextOpponentId) return;
       const opponent = getTeam(nextOpponentId);
       currentSeason = { ...currentSeason };
@@ -496,25 +508,72 @@ export default function App() {
     setShowTutorial(true);
   };
 
+  const handleContinueSeason = () => {
+    gameModeRef.current = 'SEASON';
+    setGameMode('SEASON');
+    saveGameMode('SEASON');
+    setTeamSelectionSide('P1');
+    setShowSeasonChoiceModal(false);
+
+    let currentSeason = seasonProgressRef.current || loadSeasonProgress();
+    if (!currentSeason) {
+      currentSeason = createSeason(p1TeamState.id, TEAM_KEYS);
+    }
+    seasonProgressRef.current = currentSeason;
+    setSeasonProgress(currentSeason);
+    saveSeasonProgress(currentSeason);
+
+    if (currentSeason.teamId !== p1TeamState.id) {
+      const seasonTeam = getTeam(currentSeason.teamId);
+      setP1TeamState(seasonTeam);
+      engineRef.current?.selectP1Team(currentSeason.teamId);
+    }
+
+    const nextOpponentId = currentSeason.secChampionship?.userQualified && currentSeason.results.length === currentSeason.opponentIds.length
+      ? currentSeason.secChampionship.opponentId
+      : (currentSeason.opponentIds[currentSeason.results.length] || currentSeason.opponentIds[0]);
+
+    if (nextOpponentId) {
+      const opponent = getTeam(nextOpponentId);
+      setP2TeamState(opponent);
+      engineRef.current?.selectP2Team(nextOpponentId);
+    }
+  };
+
+  const handleStartNewSeason = (teamId: string = p1TeamState.id) => {
+    gameModeRef.current = 'SEASON';
+    setGameMode('SEASON');
+    saveGameMode('SEASON');
+    setTeamSelectionSide('P1');
+    setShowSeasonChoiceModal(false);
+
+    const newSeason = createSeason(teamId, TEAM_KEYS);
+    seasonProgressRef.current = newSeason;
+    setSeasonProgress(newSeason);
+    saveSeasonProgress(newSeason);
+
+    const nextOpponentId = newSeason.opponentIds[0];
+    if (nextOpponentId) {
+      const opponent = getTeam(nextOpponentId);
+      setP2TeamState(opponent);
+      engineRef.current?.selectP2Team(nextOpponentId);
+    }
+  };
+
   const handleGameModeChange = (mode: GameMode) => {
+    if (mode === 'SEASON') {
+      const currentSeason = seasonProgressRef.current || loadSeasonProgress();
+      if (currentSeason) {
+        setShowSeasonChoiceModal(true);
+        return;
+      }
+      handleStartNewSeason(p1TeamState.id);
+      return;
+    }
+
     gameModeRef.current = mode;
     setGameMode(mode);
     saveGameMode(mode);
-    if (mode === 'SEASON') {
-      setTeamSelectionSide('P1');
-      const currentSeason = seasonProgressRef.current;
-      const nextSeason = currentSeason?.teamId === p1TeamState.id
-        ? currentSeason
-        : createSeason(p1TeamState.id, TEAM_KEYS);
-      seasonProgressRef.current = nextSeason;
-      setSeasonProgress(nextSeason);
-      const nextOpponentId = nextSeason.opponentIds[nextSeason.results.length] || nextSeason.opponentIds[0];
-      if (nextOpponentId) {
-        const opponent = getTeam(nextOpponentId);
-        setP2TeamState(opponent);
-        engineRef.current?.selectP2Team(nextOpponentId);
-      }
-    }
   };
 
   const visibleTeams = getAllTeams().filter(team =>
@@ -523,20 +582,27 @@ export default function App() {
   const seasonForDisplay = seasonProgress?.teamId === p1TeamState.id
     ? seasonProgress
     : createSeason(p1TeamState.id, TEAM_KEYS);
-  const seasonComplete = seasonForDisplay.results.length >= seasonForDisplay.opponentIds.length;
+  const isSecChampionshipQualified = Boolean(seasonForDisplay.secChampionship?.userQualified);
+  const isSecChampionshipPlayed = Boolean(seasonForDisplay.secChampionship?.played);
+  const isChampionshipWeek = gameMode === 'SEASON' && isSecChampionshipQualified && seasonForDisplay.results.length === seasonForDisplay.opponentIds.length;
+  const seasonComplete = seasonForDisplay.results.length >= seasonForDisplay.opponentIds.length &&
+    (!isSecChampionshipQualified || isSecChampionshipPlayed);
   const canContinueSeason = gameMode === 'SEASON' && Boolean(
-    seasonProgress && seasonProgress.results.length < seasonProgress.opponentIds.length
+    seasonProgress && (
+      seasonProgress.results.length < seasonProgress.opponentIds.length ||
+      (seasonProgress.secChampionship?.userQualified && !seasonProgress.secChampionship?.played)
+    )
   );
+  const currentRivalry = getRivalryForMatchup(p1TeamState.id, p2TeamState.id);
+  const currentWeekNumber = seasonForDisplay.results.length + 1;
   const isReadyPhase = hasKickedOff && engineRef.current?.phase === 'PRE_SNAP' && !engineRef.current.isKickoffActive();
   const showPuntAction = isReadyPhase && activeOffenseState === 'P1' && is4thDown;
-  const showRunPlayActions = isReadyPhase && activeOffenseState === 'P1' &&
-    p1OffPlayState !== 'PUNT' && !showPauseMenu && !finishedGame;
 
   return (
-    <div className="relative w-screen h-screen overflow-hidden flex flex-col items-center justify-center bg-[#030704] text-white font-mono select-none">
+    <div className="relative w-screen min-h-[100dvh] h-[100dvh] overflow-hidden flex flex-col items-center justify-between py-1 bg-[#030704] text-white font-mono select-none">
       
       {/* Top Header & Scoreboard */}
-      <header className="flex flex-col items-center justify-center z-20 mb-1 w-full max-w-[430px] px-2 pt-1">
+      <header className="flex flex-col items-center justify-center z-20 mb-0.5 w-full max-w-[430px] px-2 pt-0.5 shrink-0">
         {/* Team Matchup Selector Button */}
         <button
           onClick={() => setShowTeamModal(true)}
@@ -547,6 +613,11 @@ export default function App() {
           <span className="rounded-sm px-0.5" style={getTeamTextStyle(p1TeamState.primaryColor)}>{p1TeamState.name}</span>
           <span className="text-neutral-400 font-normal">VS</span>
           <span className="rounded-sm px-0.5" style={getTeamTextStyle(p2TeamState.primaryColor)}>{p2TeamState.name}</span>
+          {gameMode === 'SEASON' && (
+            <span className="text-emerald-400 font-bold ml-0.5">
+              • {isChampionshipWeek ? '🏆 SEC TITLE' : `WK ${currentWeekNumber} (${getSeasonRecord(seasonForDisplay).wins}-${getSeasonRecord(seasonForDisplay).losses})`}
+            </span>
+          )}
           <span className="text-[#ffcc00] ml-1">▾ TEAMS</span>
         </button>
 
@@ -628,97 +699,29 @@ export default function App() {
         </div>
       </header>
 
-      {/* Special Teams: Kickoff Controls & Status HUD */}
-      {isKickoffActive ? (
-        <div className="flex items-center justify-between w-full max-w-[420px] bg-black/95 border-2 border-[#ffcc00] px-3 py-1.5 rounded-lg mb-1 shadow-2xl z-20">
-          {kickoffSide.kicking === 'P1' ? (
-            <>
-              <div className="flex flex-col text-left">
-                <span className="text-[#ffcc00] font-black text-[0.72rem] tracking-wider flex items-center gap-1">
-                  🏈 YOU ARE KICKING OFF
-                </span>
-                <span className="text-neutral-300 text-[0.58rem]">
-                  POWER: <b className="text-white">{Math.round(kickMeterPower * 100)}%</b> • TAP FIELD OR BUTTON
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-20 h-3 bg-neutral-800 rounded border border-white/40 overflow-hidden relative">
-                  <div
-                    className="h-full bg-gradient-to-r from-amber-400 via-cyan-400 to-emerald-400 transition-all duration-75"
-                    style={{ width: `${kickMeterPower * 100}%` }}
-                  />
-                </div>
-                <button
-                  onClick={() => engineRef.current?.kickoff?.(kickMeterPower)}
-                  className="px-3 py-1 bg-gradient-to-r from-amber-500 to-yellow-400 hover:from-amber-400 hover:to-yellow-300 text-black font-black text-xs uppercase rounded transition cursor-pointer shadow-lg active:scale-95"
-                >
-                  BOOT KICK 🏈
-                </button>
-              </div>
-            </>
-          ) : (
-            <div className="flex items-center justify-between w-full">
-              <span className="text-[#00ffff] font-black text-[0.72rem] tracking-wide flex items-center gap-1.5">
-                🏈 {p2TeamState.name.toUpperCase()} KICKING OFF
-              </span>
-              <span className="text-neutral-300 text-[0.58rem] bg-neutral-900 border border-neutral-700 px-2 py-0.5 rounded font-bold">
-                PREPARE FOR RETURN 🏃
-              </span>
-            </div>
+      {/* 4th Down Special Teams Punt / Audible Action Controls */}
+      {((showPuntAction && p1OffPlayState !== 'PUNT') || p1OffPlayState === 'PUNT') && (
+        <div className="flex items-center justify-center gap-2 mb-1 z-30 w-full max-w-[420px] px-2 shrink-0">
+          {showPuntAction && p1OffPlayState !== 'PUNT' && (
+            <button
+              type="button"
+              onClick={() => engineRef.current?.callPunt?.()}
+              className="min-w-0 px-3.5 py-1.5 rounded-lg border-2 border-cyan-300 bg-gradient-to-r from-cyan-600 to-blue-600 text-xs font-black uppercase text-white shadow-xl transition hover:from-cyan-500 hover:to-blue-500 active:scale-95"
+            >
+              PUNT
+            </button>
+          )}
+          {p1OffPlayState === 'PUNT' && (
+            <button
+              type="button"
+              onClick={() => handleSelectOffensePlay('SHORT_PASS')}
+              className="min-w-0 px-3.5 py-1.5 rounded-lg border border-neutral-500 bg-neutral-900 text-neutral-100 text-xs font-bold shadow-xl transition hover:bg-neutral-800 active:scale-95"
+            >
+              Audible
+            </button>
           )}
         </div>
-      ) : is4thDown && activeOffenseState === 'P1' && p1OffPlayState !== 'PUNT' ? (
-        /* Special Teams: 4th Down Decision & Punt Option HUD */
-        <div className="flex items-center justify-between w-full max-w-[420px] bg-red-950/95 border-2 border-red-500 px-3 py-1.5 rounded-lg mb-1 shadow-2xl z-20 animate-pulse">
-          <div className="flex flex-col text-left">
-            <span className="text-white font-black text-[0.72rem] tracking-wider flex items-center gap-1">
-              ⚠️ 4TH DOWN DECISION!
-            </span>
-            <span className="text-red-200 text-[0.56rem]">
-              Punt to flip field or Go For It!
-            </span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <button
-              onClick={() => handleSelectOffensePlay('SHORT_PASS')}
-              className="px-2 py-1 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 border border-neutral-600 rounded font-bold text-[0.62rem] transition cursor-pointer"
-            >
-              GO FOR IT
-            </button>
-          </div>
-        </div>
-      ) : null}
-
-      {/* Small UI: Active On-Field Alignment Indicator & Shift Controls */}
-      <div className="flex items-center justify-between w-full max-w-[420px] bg-black/85 border border-[#ffcc00]/50 px-3 py-1 rounded-md mb-1 shadow-lg text-[0.68rem] z-20">
-        <div className="flex items-center gap-2">
-          <span className="text-neutral-400 font-bold uppercase tracking-wider text-[0.60rem]">
-            {activeOffenseState === 'P1' ? 'Offense Alignment:' : 'Defense Alignment:'}
-          </span>
-          <span className={`font-black text-[0.76rem] tracking-wide ${activeOffenseState === 'P1' ? 'text-[#00ffff]' : 'text-[#ff6666]'}`}>
-            {activeOffenseState === 'P1'
-              ? p1OffFormationState
-              : (defensivePlaybook[p1DefPlayState]?.name || p1DefPlayState)}
-          </span>
-        </div>
-        <div className="flex items-center gap-1.5 text-[0.58rem] text-neutral-300">
-          <button
-            onClick={() => engineRef.current?.shiftFormation?.(-1)}
-            className="px-1.5 py-0.5 bg-neutral-800 hover:bg-neutral-700 text-[#ffcc00] border border-neutral-600 rounded font-bold transition cursor-pointer active:scale-95"
-            title="Previous Alignment"
-          >
-            ◀
-          </button>
-          <span className="text-[0.54rem] text-neutral-400 font-semibold uppercase tracking-tight">SWIPE TO SHIFT</span>
-          <button
-            onClick={() => engineRef.current?.shiftFormation?.(1)}
-            className="px-1.5 py-0.5 bg-neutral-800 hover:bg-neutral-700 text-[#ffcc00] border border-neutral-600 rounded font-bold transition cursor-pointer active:scale-95"
-            title="Next Alignment"
-          >
-            ▶
-          </button>
-        </div>
-      </div>
+      )}
 
       {/* Screen edge alert vignette for turnovers and touchdowns */}
       {screenVignette === 'TURNOVER' && (
@@ -744,9 +747,9 @@ export default function App() {
             <div className="relative overflow-hidden rounded-xl border-2 border-red-500 bg-gradient-to-b from-[#240606]/98 via-[#180303]/98 to-[#0b0101]/98 backdrop-blur-md shadow-2xl">
               {/* Header Badge */}
               <div className="flex items-center justify-between border-b-2 border-red-500 bg-white px-3 py-1 text-[#1b3026] font-black uppercase text-[0.66rem] sm:text-xs tracking-widest shadow-md">
-                <span className="flex items-center gap-1.5">
-                  <span className="animate-ping inline-block h-2 w-2 rounded-full bg-black/80" />
-                  🚨 TURNOVER ALERT 🚨
+                <span className="flex items-center gap-1.5 truncate">
+                  <span className="animate-ping inline-block h-2 w-2 rounded-full bg-black/80 shrink-0" />
+                  <span>🚨 TURNOVER ALERT {currentRivalry ? `• ${currentRivalry.name.toUpperCase()}` : ''} 🚨</span>
                 </span>
                 <button
                   onClick={() => {
@@ -777,8 +780,8 @@ export default function App() {
             /* Major Event: TOUCHDOWN */
             <div className="relative overflow-hidden rounded-xl border-2 border-amber-400 bg-gradient-to-b from-[#261d04]/98 via-[#1c1502]/98 to-[#0d0901]/98 backdrop-blur-md shadow-2xl">
               <div className="flex items-center justify-between border-b-2 border-amber-400 bg-white px-3 py-1 text-[#1b3026] font-black uppercase text-[0.66rem] sm:text-xs tracking-widest shadow-md">
-                <span className="flex items-center gap-1.5">
-                  🏆 TOUCHDOWN! 🏆
+                <span className="flex items-center gap-1.5 truncate">
+                  <span>🏆 TOUCHDOWN! {currentRivalry ? `• ${currentRivalry.name.toUpperCase()}` : ''} 🏆</span>
                 </span>
                 <button
                   onClick={() => {
@@ -814,12 +817,13 @@ export default function App() {
                 className="flex items-center justify-between px-3 py-1 font-black uppercase text-[0.62rem] sm:text-[0.68rem] tracking-wider"
                 style={{ backgroundColor: banner.color, color: '#000' }}
               >
-                <span>
+                <span className="truncate">
                   {banner.category === 'FIRST_DOWN'
                     ? '🎯 1ST DOWN ACHIEVED'
                     : banner.category === 'FUMBLE'
                       ? '⚠️ LOOSE BALL! FUMBLE'
                       : '⚡ KEY PLAY'}
+                  {currentRivalry ? ` • ⚔️ ${currentRivalry.name.toUpperCase()}` : ''}
                 </span>
                 <button
                   onClick={() => {
@@ -850,17 +854,24 @@ export default function App() {
               className="bg-black/95 border-2 rounded-lg font-extrabold text-center px-5 py-2.5 text-[0.88rem] tracking-wide shadow-2xl animate-pulse"
               style={{ borderColor: banner.color, ...getTeamTextStyle(banner.color) }}
             >
-              {banner.text}
+              {currentRivalry && (
+                <div className="text-[0.62rem] font-black uppercase tracking-wider text-[#ffcc00] mb-0.5 flex items-center justify-center gap-1">
+                  <span>⚔️</span>
+                  <span>{currentRivalry.name}</span>
+                  <span>⚔️</span>
+                </div>
+              )}
+              <div>{banner.text}</div>
             </div>
           )}
         </div>
       )}
 
       {/* Canvas Element */}
-      <div className="relative max-w-full">
+      <div className="relative flex-1 flex flex-col items-center justify-center min-h-0 w-full overflow-hidden">
         <canvas
           ref={canvasRef}
-          className="bg-[#176620] shadow-[0_8px_30px_rgba(0,0,0,0.9)] rounded-md border-3 border-white max-w-full touch-none"
+          className="bg-[#176620] shadow-[0_8px_30px_rgba(0,0,0,0.9)] rounded-md border-2 border-white touch-none"
         />
       </div>
 
@@ -871,15 +882,15 @@ export default function App() {
         </button>
       )}
 
-      <footer className="mt-1 text-[0.54rem] text-[#adff2f] text-center z-20 px-2 max-w-[420px] flex items-center justify-between gap-2">
-        <span className="font-bold opacity-90">v2.8.6 • 7v7 Football Sandbox</span>
+      <footer className="mt-0.5 text-[0.52rem] text-[#adff2f] text-center z-20 px-2 max-w-[420px] flex items-center justify-between gap-2 shrink-0">
+        <span className="font-bold opacity-90">v2.8.6 • 7v7 Football</span>
         <span className="text-neutral-300">
           {activeOffenseState === 'P1'
-            ? 'Draw Routes • Double-tap field to flip RB • Tap QB to Snap'
+            ? 'Draw Routes • Swipe RB Left/Right for Run Play • Tap RB for Protection • Tap QB to Snap'
             : 'Move Highlighted Defender • Ready to Start'}
         </span>
       </footer>
-      <p className="keyboard-controls mt-1 max-w-[420px] px-2 text-center text-xs text-neutral-200">
+      <p className="keyboard-controls hidden sm:block mt-0.5 max-w-[420px] px-2 text-center text-[11px] text-neutral-300 shrink-0">
         <kbd>Space</kbd> Ready / Snap · <kbd>WASD</kbd> / <kbd>Arrow keys</kbd> Move
       </p>
 
@@ -898,55 +909,6 @@ export default function App() {
             <Play size={14} className="fill-white" /> READY
             <kbd className="keyboard-controls rounded border border-white/40 px-1 text-[10px]">Space</kbd>
           </button>
-        </div>
-      )}
-
-      {(showPuntAction || showRunPlayActions) && (
-        <div className="pointer-events-none fixed inset-x-0 bottom-3 z-[80] flex justify-center px-3 pb-[env(safe-area-inset-bottom)]">
-          <div className="pointer-events-auto grid w-full max-w-[420px] grid-cols-2 gap-2 pr-28 sm:grid-cols-3">
-            {showRunPlayActions && (
-              <>
-                <button
-                  type="button"
-                  aria-pressed={p1OffPlayState === 'ISO'}
-                  title="Double-tap the left or right field side to flip the running back"
-                  onClick={() => handleSelectOffensePlay('ISO')}
-                  className={`min-w-0 w-full whitespace-nowrap rounded-lg border px-1.5 py-2 text-xs font-black uppercase shadow-xl transition active:scale-[0.98] sm:px-3 sm:py-3 sm:text-sm ${p1OffPlayState === 'ISO' ? 'border-emerald-300 bg-emerald-700 text-white' : 'border-emerald-700 bg-emerald-950 text-emerald-100 hover:bg-emerald-900'}`}
-                >
-                  ISO Run
-                </button>
-                <button
-                  type="button"
-                  aria-pressed={p1OffPlayState === 'SWEEP'}
-                  title="Double-tap the left or right field side to flip the running back"
-                  onClick={() => handleSelectOffensePlay('SWEEP')}
-                  className={`min-w-0 w-full whitespace-nowrap rounded-lg border px-1.5 py-2 text-xs font-black uppercase shadow-xl transition active:scale-[0.98] sm:px-3 sm:py-3 sm:text-sm ${p1OffPlayState === 'SWEEP' ? 'border-emerald-300 bg-emerald-700 text-white' : 'border-emerald-700 bg-emerald-950 text-emerald-100 hover:bg-emerald-900'}`}
-                >
-                  Sweep
-                </button>
-              </>
-            )}
-            {showPuntAction && (
-              <button
-                type="button"
-                onClick={() => p1OffPlayState === 'PUNT'
-                  ? engineRef.current?.punt?.(kickMeterPower)
-                  : engineRef.current?.callPunt?.()}
-                className="min-w-0 w-full whitespace-nowrap rounded-lg border-2 border-cyan-300 bg-gradient-to-r from-cyan-600 to-blue-600 px-1.5 py-2 text-xs font-black uppercase text-white shadow-xl transition hover:from-cyan-500 hover:to-blue-500 active:scale-[0.98] sm:px-4 sm:py-3 sm:text-sm"
-              >
-                {p1OffPlayState === 'PUNT' ? 'BOOT PUNT' : 'PUNT'}
-              </button>
-            )}
-            {p1OffPlayState === 'PUNT' && (
-              <button
-                type="button"
-                onClick={() => handleSelectOffensePlay('SHORT_PASS')}
-                className="w-full whitespace-nowrap rounded-lg border border-neutral-500 bg-neutral-900 px-1.5 py-2 text-xs font-bold text-neutral-100 shadow-xl transition hover:bg-neutral-800 active:scale-[0.98] sm:px-4 sm:py-3 sm:text-sm"
-              >
-                Audible
-              </button>
-            )}
-          </div>
         </div>
       )}
 
@@ -970,13 +932,15 @@ export default function App() {
               <div className="bg-black/60 p-2.5 rounded border border-neutral-800">
                 <span className="text-[#00ffff] font-bold block mb-1">1. BACKYARD PLAYMAKER (LINE DRAWING & RUN BLOCKING):</span>
                 <ul className="list-disc list-inside space-y-1 text-neutral-300">
-                  <li><b className="text-white">Draw Routes in the Dirt:</b> Touch any player and draw a line in the direction you want them to run:
+                  <li><b className="text-white">Draw Routes & Defensive Assignments in the Dirt:</b> Touch any player and draw a line in the direction you want them to play:
                     <ul className="list-disc list-inside ml-2 text-neutral-300">
-                      <li><b className="text-[#00ffaa]">Running Back (RB):</b> Straight forward line calls a <b>FLY / GO</b> route streaking deep downfield! Diagonal line calls a <b>FLAT</b> checkdown route!</li>
+                      <li><b className="text-[#00ffaa]">Running Back (RB):</b> Swipe left or right on the RB to call a <b>Designed Run Play</b> (QB hands off to RB)! Straight forward line calls a <b>FLY / GO</b> route streaking deep downfield!</li>
                       <li><b className="text-[#00ffff]">Receivers (WR / Center):</b> Straight line = Fly, Inside diagonal = Slant, Horizontal = Cross, Outside diagonal = Corner, Pull back = Curl!</li>
+                      <li><b className="text-[#ffcc00]">Defenders:</b> Swipe forward toward LOS = <b>BLITZ / RUSH</b> 💥, Swipe deep back = <b>ZONE COVERAGE</b> 🛡️, Swipe left/right = <b>MAN COVERAGE</b> 👤, Short swipe = <b>RB SPY</b> 🕵️‍♂️! Drag center defender to reposition anywhere!</li>
                     </ul>
                   </li>
-                  <li><b className="text-white">Single Tap for Run Blocking:</b> Simply tap any player (WR, Center, or RB) to assign them to <b>RUN BLOCKING</b>! A white block bar appears across them and they lead-block for the runner! Tap again to toggle back to route.</li>
+                  <li><b className="text-white">Call a Run Play vs RB Tap Toggle:</b> Swipe left or right on the Running Back to call a <b>Designed Run Play</b> (QB hands off to RB)! Tapping the RB toggles between <b>Pass Protection</b> (RB lead-blocks rushers) and <b>Pass Route</b> (Flat checkdown)!</li>
+                  <li><b className="text-white">Single Tap for Run Blocking:</b> Simply tap any receiver (WR or Center) to assign them to <b>RUN BLOCKING</b>! A white block bar appears across them and they lead-block downfield! Tap again to toggle back to route.</li>
                   <li><b className="text-white">Start the Play:</b> Tap the QB on offense or READY on defense. Tap assignment-controlled defenders to cycle blitz, man, RB spy, and zone.</li>
                   <li><b className="text-white">Flip Running Back:</b> Quick double-tap left or right of center to shift the RB side.</li>
                 </ul>
@@ -1065,7 +1029,7 @@ export default function App() {
                   <h2 id="team-selector-title" className="text-xl font-extrabold leading-tight sm:text-2xl">
                     {!hasKickedOff ? (gameMode === 'SEASON' ? 'Season setup' : 'Choose teams') : 'Team matchup'}
                   </h2>
-                  <p className="mt-0.5 text-xs text-[#66756b]">{gameMode === 'SEASON' ? 'Four-game schedule' : 'Single matchup'}</p>
+                  <p className="mt-0.5 text-xs text-[#66756b]">{gameMode === 'SEASON' ? '9-Game SEC season + SEC Championship' : 'Single matchup'}</p>
                 </div>
               </div>
               <button
@@ -1082,29 +1046,44 @@ export default function App() {
             </div>
 
             {!hasKickedOff && (
-              <div className="grid shrink-0 grid-cols-3 gap-1 border-b border-[#dce3dd] bg-[#f7f9f7] p-2" role="group" aria-label="Game mode">
+              <div className="grid shrink-0 grid-cols-4 gap-1 border-b border-[#dce3dd] bg-[#f7f9f7] p-2" role="group" aria-label="Game mode">
                 <button
                   type="button"
                   aria-pressed={gameMode === 'ONE_GAME'}
                   onClick={() => handleGameModeChange('ONE_GAME')}
-                  className={`rounded-md px-3 py-2 text-sm font-bold transition ${gameMode === 'ONE_GAME' ? 'bg-[#246344] text-white' : 'text-[#59685f] hover:bg-[#e9efea]'}`}
+                  className={`rounded-md px-2 py-2 text-xs font-bold transition sm:text-sm ${gameMode === 'ONE_GAME' ? 'bg-[#246344] text-white' : 'text-[#59685f] hover:bg-[#e9efea]'}`}
                 >
                   One Game
                 </button>
                 <button
                   type="button"
                   aria-pressed={gameMode === 'SEASON'}
-                  onClick={() => handleGameModeChange('SEASON')}
-                  className={`rounded-md px-3 py-2 text-sm font-bold transition ${gameMode === 'SEASON' ? 'bg-[#bd5635] text-white' : 'text-[#59685f] hover:bg-[#f4e9e4]'}`}
+                  onClick={() => {
+                    const currentSeason = seasonProgressRef.current || loadSeasonProgress();
+                    if (currentSeason) {
+                      setShowSeasonChoiceModal(true);
+                    } else {
+                      handleGameModeChange('SEASON');
+                    }
+                  }}
+                  className={`rounded-md px-2 py-2 text-xs font-bold transition sm:text-sm ${gameMode === 'SEASON' ? 'bg-[#bd5635] text-white' : 'text-[#59685f] hover:bg-[#f4e9e4]'}`}
                 >
                   Season
                 </button>
                 <button
                   type="button"
-                  onClick={replayTutorial}
-                  className="flex items-center justify-center gap-1 rounded-md px-3 py-2 text-sm font-bold text-[#246344] transition hover:bg-[#e9efea]"
+                  onClick={() => setShowDynastyPreview(true)}
+                  className="rounded-md border border-amber-300 bg-amber-50 px-2 py-2 text-xs font-bold text-amber-800 transition hover:bg-amber-100 sm:text-sm"
+                  title="Dynasty Mode • Coming Soon"
                 >
-                  <Hand size={16} aria-hidden="true" /> Tutorial
+                  Dynasty <span className="ml-0.5 rounded bg-amber-200 px-1 py-0.5 text-[9px] font-black text-amber-900">SOON</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={replayTutorial}
+                  className="flex items-center justify-center gap-1 rounded-md px-2 py-2 text-xs font-bold text-[#246344] transition hover:bg-[#e9efea] sm:text-sm"
+                >
+                  <Hand size={14} aria-hidden="true" /> Tutorial
                 </button>
               </div>
             )}
@@ -1199,23 +1178,52 @@ export default function App() {
 
             <div className="shrink-0 border-t border-[#dce3dd] bg-white px-4 py-3 sm:px-6">
               {!hasKickedOff ? (
-                <button
-                  onClick={() => {
-                    handleStartGame();
-                    showAnnouncement(
-                      gameMode === 'SEASON'
-                        ? `${p1TeamState.name.toUpperCase()} SEASON • WEEK ${seasonComplete ? 1 : seasonForDisplay.results.length + 1} VS ${p2TeamState.name.toUpperCase()}`
-                        : `${p1TeamState.name.toUpperCase()} VS ${p2TeamState.name.toUpperCase()} - READY FOR KICKOFF! 🏈`,
-                      p1TeamState.primaryColor,
-                      true
-                    );
-                  }}
-                  className="flex w-full items-center justify-center gap-2 rounded-md bg-[#bd5635] px-4 py-3 text-sm font-bold text-white transition hover:bg-[#a9492d] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#bd5635]"
-                >
-                  {gameMode === 'SEASON'
-                    ? (seasonComplete ? 'Start new season' : seasonForDisplay.results.length ? `Continue season · Week ${seasonForDisplay.results.length + 1}` : 'Start season')
-                    : 'Kick off game'} <ArrowRight size={17} />
-                </button>
+                <div className="flex flex-col gap-2">
+                  <button
+                    onClick={() => {
+                      handleStartGame();
+                      const isChampionship = gameMode === 'SEASON' && seasonForDisplay.secChampionship?.userQualified && seasonForDisplay.results.length === seasonForDisplay.opponentIds.length;
+                      const rivalry = getRivalryForMatchup(p1TeamState.id, p2TeamState.id);
+                      if (isChampionship) {
+                        showAnnouncement(`🏆 SEC CHAMPIONSHIP GAME! ${p1TeamState.name.toUpperCase()} VS ${p2TeamState.name.toUpperCase()}! 🏆`, '#ffcc00', true);
+                      } else if (rivalry) {
+                        showAnnouncement(`⚔️ ${rivalry.name.toUpperCase()}! 🏆 FOR ${rivalry.trophy.toUpperCase()}!`, '#ffcc00', true);
+                      } else if (gameMode === 'SEASON') {
+                        showAnnouncement(
+                          `${p1TeamState.name.toUpperCase()} SEASON • WEEK ${seasonComplete ? 1 : seasonForDisplay.results.length + 1} VS ${p2TeamState.name.toUpperCase()}`,
+                          p1TeamState.primaryColor,
+                          true
+                        );
+                      } else {
+                        showAnnouncement(
+                          `${p1TeamState.name.toUpperCase()} VS ${p2TeamState.name.toUpperCase()} - READY FOR KICKOFF! 🏈`,
+                          p1TeamState.primaryColor,
+                          true
+                        );
+                      }
+                    }}
+                    className="flex w-full items-center justify-center gap-2 rounded-md bg-[#bd5635] px-4 py-3 text-sm font-bold text-white transition hover:bg-[#a9492d] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#bd5635]"
+                  >
+                    {gameMode === 'SEASON'
+                      ? (isChampionshipWeek
+                          ? 'Play SEC Championship Game 🏆'
+                          : seasonComplete
+                            ? 'Start new season'
+                            : seasonForDisplay.results.length
+                              ? `Continue season · Week ${seasonForDisplay.results.length + 1}`
+                              : 'Start season')
+                      : 'Kick off game'} <ArrowRight size={17} />
+                  </button>
+                  {gameMode === 'SEASON' && seasonForDisplay.results.length > 0 && !seasonComplete && (
+                    <button
+                      type="button"
+                      onClick={() => handleStartNewSeason(p1TeamState.id)}
+                      className="flex w-full items-center justify-center gap-1.5 rounded-md border border-[#cbd6cd] bg-white px-4 py-2 text-xs font-bold text-[#59685f] transition hover:bg-[#f2f5f2] hover:text-[#1b3026]"
+                    >
+                      <RotateCcw size={14} /> Start new season
+                    </button>
+                  )}
+                </div>
               ) : (
                 <button
                   onClick={() => setShowTeamModal(false)}
@@ -1265,6 +1273,70 @@ export default function App() {
                     className="rounded-md border border-[#cbd6cd] bg-white px-4 py-2.5 text-sm font-bold text-[#405047] transition hover:bg-[#edf1ed] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#246344]"
                   >
                     close
+                  </button>
+                </div>
+              </section>
+            </div>
+          )}
+          {showDynastyPreview && (
+            <div
+              onPointerDown={event => event.stopPropagation()}
+              className="absolute inset-0 z-[115] flex items-center justify-center bg-[#101713]/80 p-4 backdrop-blur-sm"
+            >
+              <section
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="dynasty-modal-title"
+                className="w-full max-w-md rounded-lg border-2 border-amber-400 bg-[#0f1712] p-5 text-left text-white shadow-2xl sm:p-6"
+              >
+                <div className="flex items-center justify-between border-b border-amber-500/30 pb-3">
+                  <div className="flex items-center gap-2">
+                    <span className="flex h-9 w-9 items-center justify-center rounded bg-amber-500/20 text-amber-400">
+                      <Trophy size={20} />
+                    </span>
+                    <div>
+                      <h2 id="dynasty-modal-title" className="text-base font-black uppercase tracking-wide text-amber-300">
+                        Dynasty Mode
+                      </h2>
+                      <span className="text-[10px] font-bold text-amber-200/70">ARCHITECTED FOR FUTURE EXPANSION</span>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setShowDynastyPreview(false)}
+                    className="rounded p-1 text-neutral-400 hover:text-white"
+                    aria-label="Close dynasty preview"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+
+                <div className="mt-4 space-y-3 text-xs leading-relaxed text-neutral-300">
+                  <p className="text-sm font-semibold text-amber-100">
+                    Take the headset as head coach and build an enduring Southeastern Conference powerhouse:
+                  </p>
+                  <ul className="space-y-2 pl-1">
+                    <li className="flex items-start gap-2">
+                      <span className="font-bold text-amber-400">⭐</span>
+                      <span><b>Multi-Year Legacy:</b> Lead your SEC program across decades with coach prestige tracking and historical records.</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="font-bold text-amber-400">🏆</span>
+                      <span><b>Trophy Case:</b> Accumulate iconic rivalry trophies like the Iron Bowl Foy-ODK and Golden Egg across consecutive campaigns.</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="font-bold text-amber-400">👑</span>
+                      <span><b>Championship Dominance:</b> Compete year-in and year-out for the SEC Championship Game in Atlanta and national prestige.</span>
+                    </li>
+                  </ul>
+                </div>
+
+                <div className="mt-5 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setShowDynastyPreview(false)}
+                    className="rounded bg-amber-500 px-4 py-2 text-xs font-black uppercase text-black transition hover:bg-amber-400"
+                  >
+                    Got It
                   </button>
                 </div>
               </section>
@@ -1355,6 +1427,25 @@ export default function App() {
               </tbody>
             </table>
 
+            {/* Rivalry Trophy celebration */}
+            {currentRivalry && finishedGame.p1Score > finishedGame.p2Score && (
+              <div className="mt-4 rounded-lg border-2 border-yellow-400 bg-gradient-to-r from-amber-950 via-yellow-900 to-amber-950 p-3 text-center shadow-lg">
+                <p className="text-xs font-black uppercase tracking-wider text-yellow-300">🏆 RIVALRY TROPHY SECURED! 🏆</p>
+                <p className="mt-1 text-sm font-extrabold text-white">{currentRivalry.name} Champions!</p>
+                <p className="mt-0.5 text-xs text-yellow-200">Hoisted {currentRivalry.trophy}</p>
+                <p className="mt-1 text-[0.65rem] italic text-neutral-300">{currentRivalry.historicFact}</p>
+              </div>
+            )}
+
+            {/* SEC Championship victory celebration */}
+            {seasonProgress?.secChampionship?.played && seasonProgress?.secChampionship?.trophyWon && (
+              <div className="mt-4 rounded-lg border-2 border-yellow-300 bg-gradient-to-r from-yellow-700 via-amber-600 to-yellow-700 p-3 text-center shadow-xl">
+                <p className="text-xs font-black uppercase tracking-wider text-black">👑 SEC CHAMPIONS! 👑</p>
+                <p className="mt-1 text-base font-black text-white">SEC Championship Trophy Won!</p>
+                <p className="mt-0.5 text-xs text-yellow-100">Top of the SEC! The Crown Belongs to {p1TeamState.name}!</p>
+              </div>
+            )}
+
             <div className={`mt-5 grid gap-2 ${canContinueSeason ? 'sm:grid-cols-2' : ''}`}>
               {canContinueSeason && (
                 <button
@@ -1377,6 +1468,107 @@ export default function App() {
               </button>
             </div>
           </section>
+        </div>
+      )}
+
+      {/* Season Choice Modal (Continue Season vs Start New Season) */}
+      {showSeasonChoiceModal && (
+        <div
+          onPointerDown={(e) => e.stopPropagation()}
+          className="absolute inset-0 z-[120] flex flex-col items-center justify-center bg-black/85 p-4 backdrop-blur-sm"
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="season-choice-title"
+            className="flex w-full max-w-md flex-col overflow-hidden rounded-xl border-2 border-emerald-500/60 bg-[#0c1610] text-left text-white shadow-2xl"
+          >
+            {/* Header */}
+            <div className="flex shrink-0 items-center justify-between border-b border-emerald-500/30 bg-gradient-to-r from-[#14291c] to-[#0c1610] px-5 py-3.5">
+              <div className="flex items-center gap-2.5">
+                <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-500/20 text-emerald-400">
+                  <Trophy size={20} />
+                </span>
+                <div>
+                  <h3 id="season-choice-title" className="text-base font-black uppercase tracking-wider text-white">
+                    SEC Season Mode
+                  </h3>
+                  <p className="text-[0.68rem] text-emerald-300/80">9-Game SEC Campaign + SEC Championship</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowSeasonChoiceModal(false)}
+                className="rounded-lg p-1.5 text-neutral-400 transition hover:bg-white/10 hover:text-white"
+                title="Close"
+                aria-label="Close season choice dialog"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Content Body */}
+            <div className="flex flex-col gap-3 p-5">
+              {/* Option 1: Continue Existing Season */}
+              {seasonProgress && (
+                <div className="rounded-lg border border-emerald-500/40 bg-emerald-950/40 p-4 transition hover:border-emerald-400">
+                  <span className="inline-block rounded bg-emerald-500/20 px-2 py-0.5 text-[0.65rem] font-black uppercase text-emerald-300">
+                    {seasonProgress.results.length > 0 ? 'In Progress' : 'Current Season'}
+                  </span>
+                  <h4 className="mt-1 text-sm font-black text-white">
+                    {getTeam(seasonProgress.teamId).name} Season
+                  </h4>
+                  <p className="mt-0.5 text-xs text-neutral-300">
+                    {seasonProgress.secChampionship?.userQualified && seasonProgress.results.length === seasonProgress.opponentIds.length
+                      ? '🏆 SEC Championship Game in Atlanta'
+                      : `Week ${seasonProgress.results.length + 1} of 9 · Next: vs ${getTeam(seasonProgress.opponentIds[seasonProgress.results.length] || seasonProgress.opponentIds[0]).name}`}
+                  </p>
+                  <p className="mt-1 text-[0.72rem] font-bold text-emerald-400">
+                    Record: {getSeasonRecord(seasonProgress).wins}-{getSeasonRecord(seasonProgress).losses}
+                    {getSeasonRecord(seasonProgress).ties ? `-${getSeasonRecord(seasonProgress).ties}` : ''}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleContinueSeason}
+                    className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-2.5 text-xs font-black uppercase tracking-wider text-white shadow-lg transition hover:bg-emerald-500 active:scale-95 cursor-pointer"
+                  >
+                    Continue Season <ArrowRight size={15} />
+                  </button>
+                </div>
+              )}
+
+              {/* Option 2: Start New Season */}
+              <div className="rounded-lg border border-neutral-700 bg-neutral-900/60 p-4 transition hover:border-amber-500/60">
+                <span className="inline-block rounded bg-amber-500/20 px-2 py-0.5 text-[0.65rem] font-black uppercase text-amber-300">
+                  Fresh Campaign
+                </span>
+                <h4 className="mt-1 text-sm font-black text-white">
+                  Start New Season
+                </h4>
+                <p className="mt-0.5 text-xs text-neutral-300">
+                  Begin a new 9-game regular season schedule from Week 1 with {p1TeamState.name}.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => handleStartNewSeason(p1TeamState.id)}
+                  className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-amber-500/60 bg-amber-600/20 px-4 py-2.5 text-xs font-black uppercase tracking-wider text-amber-200 transition hover:bg-amber-600 hover:text-white active:scale-95 cursor-pointer"
+                >
+                  <RotateCcw size={14} /> Start New Season (Week 1)
+                </button>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="flex justify-end border-t border-white/10 bg-black/40 px-5 py-3">
+              <button
+                type="button"
+                onClick={() => setShowSeasonChoiceModal(false)}
+                className="rounded-lg px-4 py-1.5 text-xs font-bold text-neutral-400 transition hover:bg-white/10 hover:text-white cursor-pointer"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
