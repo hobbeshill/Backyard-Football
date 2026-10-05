@@ -9,6 +9,14 @@ function createRecordingContext() {
   const rotations: number[] = [];
   const text: string[] = [];
   const scales: [number, number][] = [];
+  const ellipses: [number, number][] = [];
+  const movePoints: [number, number][] = [];
+  const lineToX: number[] = [];
+  const lineToPoints: [number, number][] = [];
+  const quadraticEndY: number[] = [];
+  const quadraticControlY: number[] = [];
+  const bezierCurveYs: [number, number, number][] = [];
+  const bezierCurveXs: [number, number, number][] = [];
   let saveDepth = 0;
   const gradient: CanvasGradient = { addColorStop() {} };
   const context: HelmetDrawingContext = {
@@ -20,21 +28,30 @@ function createRecordingContext() {
     font: '',
     textAlign: 'center',
     textBaseline: 'middle',
+    imageSmoothingEnabled: true,
+    imageSmoothingQuality: 'high',
     save() { saveDepth++; },
     restore() { saveDepth--; },
     translate() {},
     rotate(angle: number) { rotations.push(angle); },
     scale(x: number, y: number) { scales.push([x, y]); },
     beginPath() {},
-    moveTo() {},
-    lineTo() {},
-    quadraticCurveTo() {},
-    bezierCurveTo() {},
+    moveTo(x, y) { movePoints.push([x, y]); },
+    lineTo(x, y) { lineToX.push(x); lineToPoints.push([x, y]); },
+    quadraticCurveTo(_controlX, controlY, _x, y) {
+      quadraticControlY.push(controlY);
+      quadraticEndY.push(y);
+    },
+    bezierCurveTo(cp1x, cp1y, cp2x, cp2y, x, y) {
+      bezierCurveXs.push([cp1x, cp2x, x]);
+      bezierCurveYs.push([cp1y, cp2y, y]);
+    },
     closePath() {},
     fill() {},
     stroke() {},
     clip() {},
-    ellipse() {},
+    ellipse(_x, _y, radiusX, radiusY) { ellipses.push([radiusX, radiusY]); },
+    drawImage() {},
     fillText(value: string) { text.push(value); },
     createRadialGradient() { return gradient; },
     fillRect(x: number, _y: number, width: number) {
@@ -47,6 +64,14 @@ function createRecordingContext() {
     rotations,
     text,
     scales,
+    ellipses,
+    movePoints,
+    lineToX,
+    lineToPoints,
+    quadraticEndY,
+    quadraticControlY,
+    bezierCurveYs,
+    bezierCurveXs,
     getSaveDepth: () => saveDepth
   };
 }
@@ -96,6 +121,22 @@ test('all team sprites render at gameplay size and preserve canvas save/restore 
   }
 });
 
+test('helmet visuals use the same dimensions regardless of player collision radius', () => {
+  for (const viewMode of ['TOP_DOWN', 'THREE_QUARTER'] as const) {
+    for (const forwardDirection of [-1, 1]) {
+      const standard = createRecordingContext();
+      const largerHitbox = createRecordingContext();
+      const design = getHelmetDesign(TEAMS.AUBURN);
+      drawHelmetSprite(standard.ctx, { x: 0, y: 0, radius: 10 }, design, forwardDirection, 1, viewMode);
+      drawHelmetSprite(largerHitbox.ctx, { x: 0, y: 0, radius: 12 }, design, forwardDirection, 1, viewMode);
+
+      assert.deepEqual(largerHitbox.ellipses, standard.ellipses, `${viewMode} ellipses`);
+      assert.deepEqual(largerHitbox.movePoints, standard.movePoints, `${viewMode} paths`);
+      assert.deepEqual(largerHitbox.lineToX, standard.lineToX, `${viewMode} facemask`);
+    }
+  }
+});
+
 test('shared helmet sprites face attack direction when stationary and velocity when moving', () => {
   const { ctx, rotations } = createRecordingContext();
   const design = getHelmetDesign(TEAMS.ARKANSAS);
@@ -132,4 +173,98 @@ test('3/4 view helmet sprites render cleanly for all teams with balanced canvas 
     drawHelmetSprite(ctx, { x: 170, y: 200, radius: 10 }, getHelmetDesign(team), 1, 1, 'THREE_QUARTER');
     assert.equal(getSaveDepth(), 0, `${team.name} defense 3/4 save/restore balance`);
   }
+});
+
+test('rear 3/4 helmet uses a custom shell silhouette', () => {
+  const { ctx, ellipses } = createRecordingContext();
+  drawHelmetSprite(ctx, { x: 0, y: 0, radius: 10 }, getHelmetDesign(TEAMS.AUBURN), -1, 1, 'THREE_QUARTER');
+  assert.equal(ellipses.length, 1, 'Only the ground shadow is circular');
+});
+
+test('rear 3/4 helmet is taller without changing width and has a flat bottom', () => {
+  const { ctx, movePoints, lineToPoints, bezierCurveYs } = createRecordingContext();
+  drawHelmetSprite(ctx, { x: 0, y: 0, radius: 10 }, getHelmetDesign(TEAMS.AUBURN), -1, 1, 'THREE_QUARTER');
+  const radius = 10 * 1.15;
+
+  assert.ok(Math.abs(movePoints[0][0] + radius * 0.72) < 0.000001);
+  assert.ok(Math.abs(movePoints[0][1] - lineToPoints[0][1]) < 0.000001);
+  assert.ok(Math.abs(lineToPoints[1][0] - radius * 0.92) < 0.000001);
+  assert.ok(bezierCurveYs.some(([firstControlY, secondControlY]) => Math.min(firstControlY, secondControlY) < -radius));
+});
+
+test('front helmet shell reaches the rear base height while leaving the face opening clear', () => {
+  const { ctx, quadraticEndY, quadraticControlY } = createRecordingContext();
+  drawHelmetSprite(ctx, { x: 0, y: 0, radius: 10 }, getHelmetDesign(TEAMS.AUBURN), 1, 1, 'THREE_QUARTER');
+  const helmetRadius = 10 * 1.15;
+
+  const shellCurveYs = [...quadraticEndY.slice(0, 8), ...quadraticControlY.slice(0, 8)];
+  assert.ok(Math.abs(Math.max(...shellCurveYs) - helmetRadius * 0.82) < 0.000001);
+  assert.ok(quadraticEndY[4] <= helmetRadius * 0.30);
+});
+
+test('front and rear helmet crowns share the same width and height', () => {
+  const design = getHelmetDesign(TEAMS.AUBURN);
+  const front = createRecordingContext();
+  drawHelmetSprite(front.ctx, { x: 0, y: 0, radius: 10 }, design, 1, 1, 'THREE_QUARTER');
+
+  const rear = createRecordingContext();
+  drawHelmetSprite(rear.ctx, { x: 0, y: 0, radius: 10 }, design, -1, 1, 'THREE_QUARTER');
+  assert.equal(Math.abs(front.bezierCurveXs[0][0]), Math.abs(rear.bezierCurveXs[0][0]));
+  const frontCrownY = Math.min(...front.quadraticEndY, ...front.quadraticControlY, ...front.bezierCurveYs.flat());
+  const rearCrownY = Math.min(...rear.quadraticEndY, ...rear.quadraticControlY, ...rear.bezierCurveYs.flat());
+  assert.ok(Math.abs(frontCrownY - rearCrownY) < 0.000001);
+});
+
+test('rear-facing 3/4 helmets show neither side logos nor the front facemask', () => {
+  const design = getHelmetDesign(TEAMS.AUBURN);
+  const rear = createRecordingContext();
+  drawHelmetSprite(rear.ctx, { x: 0, y: 0, radius: 10 }, design, -1, 1, 'THREE_QUARTER');
+  assert.deepEqual(rear.text, []);
+  assert.equal(rear.lineToX.some(x => Math.abs(x) < 10 * 1.15 * 0.4), false);
+
+  const front = createRecordingContext();
+  drawHelmetSprite(front.ctx, { x: 0, y: 0, radius: 10 }, design, 1, 1, 'THREE_QUARTER');
+  assert.equal(front.text.length, 2);
+  assert.ok(front.lineToX.some(x => Math.abs(x) < 10 * 1.15 * 0.4));
+});
+
+test('3/4 view side profiles keep the crown stripe on top and face logos toward the camera', () => {
+  for (const direction of [-1, 1]) {
+    const { ctx, ellipses, lineToX, movePoints, text, bezierCurveYs } = createRecordingContext();
+    drawHelmetSprite(
+      ctx,
+      { x: 0, y: 0, radius: 10, vx: direction * 2, vy: 0 },
+      getHelmetDesign(TEAMS.AUBURN),
+      -1,
+      1,
+      'THREE_QUARTER'
+    );
+
+    assert.equal(ellipses.length, 2, 'Profile has a ground shadow and visor, not colored circles beneath the helmet');
+    assert.ok(movePoints[0][1] > 0, 'Shell silhouette has a defined lower edge instead of a circular outline');
+    assert.equal(text.length, 1, 'Profile shows the visible side decal once');
+    assert.ok(lineToX.some(x => Math.sign(x) === direction && Math.abs(x) > 8), 'Facemask points toward movement');
+    assert.ok(bezierCurveYs[0][0] < -6 && bezierCurveYs[0][1] < -6, 'Crown stripe follows the top ridge');
+  }
+});
+
+test('helmet decal sheet indexes match its four-by-four team order', () => {
+  const teamIds = [
+    'ALABAMA', 'ARKANSAS', 'AUBURN', 'FLORIDA',
+    'GEORGIA', 'KENTUCKY', 'LSU', 'OLE_MISS',
+    'MISSISSIPPI_STATE', 'MISSOURI', 'OKLAHOMA', 'SOUTH_CAROLINA',
+    'TENNESSEE', 'TEXAS', 'TEXAS_AM', 'VANDERBILT'
+  ];
+
+  teamIds.forEach((teamId, index) => {
+    assert.equal(getHelmetDesign(TEAMS[teamId]).decalSheetIndex, index, teamId);
+  });
+});
+
+test('Texas longhorn remains a graphic side decal in profile view', () => {
+  const { ctx, lineToX, text } = createRecordingContext();
+  drawHelmetSprite(ctx, { x: 0, y: 0, radius: 10, vx: 2, vy: 0 }, getHelmetDesign(TEAMS.TEXAS), -1, 1, 'THREE_QUARTER');
+
+  assert.ok(lineToX.length > 0, 'Longhorn is drawn as a graphic shape');
+  assert.deepEqual(text, [], 'Texas uses its graphic decal, not substitute text');
 });

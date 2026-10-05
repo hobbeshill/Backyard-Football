@@ -557,7 +557,7 @@ test('return blockers only stun once per tackler engagement', () => {
 
 test('tapping the punt meter on the field executes the punt and all player speeds scale with GAME_SPEED_SCALE', async () => {
   const { GAME_SPEED_SCALE } = await import('./movement');
-  assert.equal(GAME_SPEED_SCALE, 0.80, 'Player speed scale is slightly increased to 0.80 for more enjoyable gameplay');
+  assert.equal(GAME_SPEED_SCALE, 0.90, 'Player speed scale is increased for more responsive gameplay');
 
   const handlers = new Map<string, Function>();
   const mockCanvas = createMockCanvas();

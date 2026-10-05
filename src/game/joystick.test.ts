@@ -1,7 +1,26 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mountFootballGame, type GameEngineHandle } from './engine';
+import { getCanvasRenderScale, getCameraYForLineOfScrimmage, mountFootballGame, type GameEngineHandle } from './engine';
 import { createSimulationClock, getDesignedRunLateralBias } from './movement';
+
+test('camera places the line of scrimmage in the lower third on offense and upper third on defense', () => {
+  const lineOfScrimmageY = 500;
+  const viewHeight = 450;
+  const pitch = 0.72;
+  const getScreenFraction = (userOnOffense: boolean) => {
+    const cameraY = getCameraYForLineOfScrimmage(lineOfScrimmageY, viewHeight, pitch, userOnOffense);
+    return (lineOfScrimmageY - cameraY) * pitch / viewHeight;
+  };
+
+  assert.ok(Math.abs(getScreenFraction(true) - 2 / 3) < 0.000001);
+  assert.ok(Math.abs(getScreenFraction(false) - 1 / 3) < 0.000001);
+});
+
+test('canvas backing resolution follows display scale with a bounded pixel ratio', () => {
+  assert.equal(getCanvasRenderScale(340, 450, 2), 2);
+  assert.equal(getCanvasRenderScale(680, 900, 2), 3);
+  assert.equal(getCanvasRenderScale(170, 225, 1), 1);
+});
 
 test('simulation runs at 60 Hz regardless of display refresh rate', () => {
   for (const refreshRate of [30, 60, 120]) {

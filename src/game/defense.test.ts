@@ -4,7 +4,7 @@ import { isCpuPressureRecognized, scoreRunBlockTarget, shouldCpuReleasePass, sho
 import { alignDefenderAcrossFromReceiver, alignDefenderAcrossFromRunningBack, alignDefenderToZone, alignDefenders, chooseCpuDefensiveAssignments, constrainDefendersToFieldSide, getBlitzAlignmentY, getBracketCoverageTarget, getDefensiveLineAlignmentY, matchCpuDefendersToReceivers, separateDefenderAlignments } from './defense';
 import { getCarrierFumbleChance } from './fumbles';
 import { calculateYardsToGo, canDefenderDeflectPass, canTackleQuarterback, findTappedPassReceiver, getCatchCompletionChance, getDefenderPassReachHeight, getDriveStartY, getSnapBallPosition, getPassArcHeight, getPassArcMaxHeight, getPassFlightFrames, getPassLeadTarget, getRoutePassLeadTarget, isSafety, resolveCatchContestOutcome, resolvePlayResult } from './rules';
-import { canEngagePassBlock, clampPlayerToFieldY, getFatigueSpeedMultiplier, getPassBlockHoldFrames, isRusherActivelyBlocked, moveToward, shouldHoldPassBlock, updatePlayerStamina, updateReceiverTargetStamina, updateRouteMovement } from './movement';
+import { canEngagePassBlock, clampPlayerToFieldY, getFatigueSpeedMultiplier, getPassBlockHoldFrames, getRunPursuitMovement, isRusherActivelyBlocked, moveToward, shouldHoldPassBlock, updatePlayerStamina, updateReceiverTargetStamina, updateRouteMovement } from './movement';
 import type { Entity } from './types';
 
 test('coverage reduces catches smoothly and touching players are not wide open', () => {
@@ -43,6 +43,19 @@ test('route movement applies the speed bonus once and fatigue slows receivers', 
   const normal = runRoute(1, 100);
   assert.ok(Math.abs(runRoute(1.08, 100) / normal - 1.08) < 0.001);
   assert.ok(runRoute(1, 0) / normal > 0.62 && runRoute(1, 0) / normal <= 0.63);
+});
+
+test('defender run pursuit starts at base speed and ramps up over time', () => {
+  const initial = getRunPursuitMovement(0.88, 1);
+  const later = getRunPursuitMovement(0.88, 40);
+  const maxed = getRunPursuitMovement(0.88, 1000);
+
+  assert.ok(initial.speed < 0.92, 'Pursuit should not gain an instant distance-based speed bonus');
+  assert.ok(initial.acceleration < 0.13, 'Pursuit acceleration should start gradually');
+  assert.ok(later.speed > initial.speed);
+  assert.ok(later.acceleration > initial.acceleration);
+  assert.equal(maxed.speed, 2.68);
+  assert.equal(maxed.acceleration, 0.4);
 });
 
 test('fatigue follows workload and endurance, with bounded recovery and speed penalties', () => {
@@ -1888,9 +1901,9 @@ test('SEC team profiles include every member with varied game strengths and weak
   assert.ok(TEAMS.ARKANSAS.ratings.runPower > TEAMS.FLORIDA.ratings.runPower, 'Run-focused profiles have varied run power');
 });
 
-test('Game speed is scaled down 10% for testing', async () => {
+test('overall game speed uses the increased movement scale', async () => {
   const { GAME_SPEED_SCALE } = await import('./movement');
-  assert.ok(GAME_SPEED_SCALE <= 0.80 && GAME_SPEED_SCALE >= 0.70, 'Game speed scale is reduced ~10% around 0.77');
+  assert.equal(GAME_SPEED_SCALE, 0.90);
 });
 
 test('Ball travels at original speed so passes can be completed crisply', () => {

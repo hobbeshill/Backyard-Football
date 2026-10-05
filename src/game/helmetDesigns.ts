@@ -9,26 +9,27 @@ export interface HelmetDesign {
   decalColor: string;
   decalBackground?: string;
   decalShape?: 'oval' | 'longhorn';
+  decalSheetIndex?: number;
   facemask: string;
 }
 
 const HELMET_DESIGNS: Record<string, HelmetDesign> = {
-  ALABAMA: { shell: '#9E1B32', centerStripe: ['#FFFFFF'], decalMark: '12', decalColor: '#FFFFFF', facemask: '#D5D9D8' },
-  ARKANSAS: { shell: '#9D2235', centerStripe: [], decalMark: '', decalColor: '#FFFFFF', facemask: '#D5D9D8' },
-  AUBURN: { shell: '#FFFFFF', centerStripe: ['#0C2340', '#FFFFFF', '#E87722', '#FFFFFF', '#0C2340'], stripeWidths: [3, 1, 4, 1, 3], decalMark: 'AU', decalColor: '#0C2340', facemask: '#D5D9D8' },
-  FLORIDA: { shell: '#FA4616', centerStripe: ['#FFFFFF', '#0021A5', '#FFFFFF'], decalMark: '', decalColor: '#0021A5', facemask: '#D5D9D8' },
-  GEORGIA: { shell: '#BA0C2F', centerStripe: ['#000000', '#FFFFFF', '#000000'], decalMark: 'G', decalColor: '#000000', decalBackground: '#FFFFFF', decalShape: 'oval', facemask: '#D5D9D8' },
-  KENTUCKY: { shell: '#0033A0', centerStripe: ['#FFFFFF'], decalMark: 'UK', decalColor: '#FFFFFF', facemask: '#D5D9D8' },
-  LSU: { shell: '#FDD023', centerStripe: ['#461D7C', '#FFFFFF', '#461D7C'], decalMark: 'LSU', decalColor: '#461D7C', facemask: '#461D7C' },
-  MISSISSIPPI_STATE: { shell: '#5D1725', centerStripe: ['#FFFFFF'], decalMark: '', decalColor: '#FFFFFF', facemask: '#D5D9D8' },
-  MISSOURI: { shell: '#101820', centerStripe: ['#F1B82D'], decalMark: '', decalColor: '#F1B82D', facemask: '#D5D9D8' },
-  OKLAHOMA: { shell: '#841617', centerStripe: ['#FFFFFF'], decalMark: 'OU', decalColor: '#FFFFFF', facemask: '#D5D9D8' },
-  OLE_MISS: { shell: '#65A7CD', centerStripe: ['#CE1126'], decalMark: '', decalColor: '#CE1126', facemask: '#D5D9D8' },
-  SOUTH_CAROLINA: { shell: '#73000A', centerStripe: ['#000000', '#FFFFFF', '#000000'], decalMark: '', decalColor: '#FFFFFF', facemask: '#D5D9D8' },
-  TENNESSEE: { shell: '#FF8200', centerStripe: ['#FFFFFF'], decalMark: 'T', decalColor: '#FFFFFF', facemask: '#D5D9D8' },
-  TEXAS: { shell: '#FFFFFF', centerStripe: ['#BF5700'], decalMark: '', decalColor: '#BF5700', decalShape: 'longhorn', facemask: '#D5D9D8' },
-  TEXAS_AM: { shell: '#500000', centerStripe: [], decalMark: 'ATM', decalColor: '#FFFFFF', facemask: '#D5D9D8' },
-  VANDERBILT: { shell: '#101820', centerStripe: ['#CFAE70', '#FFFFFF', '#CFAE70'], decalMark: '', decalColor: '#CFAE70', facemask: '#D5D9D8' }
+  ALABAMA: { shell: '#9E1B32', centerStripe: ['#FFFFFF'], decalMark: '12', decalColor: '#FFFFFF', decalSheetIndex: 0, facemask: '#D5D9D8' },
+  ARKANSAS: { shell: '#9D2235', centerStripe: [], decalMark: '', decalColor: '#FFFFFF', decalSheetIndex: 1, facemask: '#D5D9D8' },
+  AUBURN: { shell: '#FFFFFF', centerStripe: ['#0C2340', '#FFFFFF', '#E87722', '#FFFFFF', '#0C2340'], stripeWidths: [3, 1, 4, 1, 3], decalMark: 'AU', decalColor: '#0C2340', decalSheetIndex: 2, facemask: '#D5D9D8' },
+  FLORIDA: { shell: '#FA4616', centerStripe: ['#FFFFFF', '#0021A5', '#FFFFFF'], decalMark: '', decalColor: '#0021A5', decalSheetIndex: 3, facemask: '#D5D9D8' },
+  GEORGIA: { shell: '#BA0C2F', centerStripe: ['#000000', '#FFFFFF', '#000000'], decalMark: 'G', decalColor: '#000000', decalBackground: '#FFFFFF', decalShape: 'oval', decalSheetIndex: 4, facemask: '#D5D9D8' },
+  KENTUCKY: { shell: '#0033A0', centerStripe: ['#FFFFFF'], decalMark: 'UK', decalColor: '#FFFFFF', decalSheetIndex: 5, facemask: '#D5D9D8' },
+  LSU: { shell: '#FDD023', centerStripe: ['#461D7C', '#FFFFFF', '#461D7C'], decalMark: 'LSU', decalColor: '#461D7C', decalSheetIndex: 6, facemask: '#461D7C' },
+  MISSISSIPPI_STATE: { shell: '#5D1725', centerStripe: ['#FFFFFF'], decalMark: '', decalColor: '#FFFFFF', decalSheetIndex: 8, facemask: '#D5D9D8' },
+  MISSOURI: { shell: '#101820', centerStripe: ['#F1B82D'], decalMark: '', decalColor: '#F1B82D', decalSheetIndex: 9, facemask: '#D5D9D8' },
+  OKLAHOMA: { shell: '#841617', centerStripe: ['#FFFFFF'], decalMark: 'OU', decalColor: '#FFFFFF', decalSheetIndex: 10, facemask: '#D5D9D8' },
+  OLE_MISS: { shell: '#65A7CD', centerStripe: ['#CE1126'], decalMark: '', decalColor: '#CE1126', decalSheetIndex: 7, facemask: '#D5D9D8' },
+  SOUTH_CAROLINA: { shell: '#73000A', centerStripe: ['#000000', '#FFFFFF', '#000000'], decalMark: '', decalColor: '#FFFFFF', decalSheetIndex: 11, facemask: '#D5D9D8' },
+  TENNESSEE: { shell: '#FF8200', centerStripe: ['#FFFFFF'], decalMark: 'T', decalColor: '#FFFFFF', decalSheetIndex: 12, facemask: '#D5D9D8' },
+  TEXAS: { shell: '#FFFFFF', centerStripe: ['#BF5700'], decalMark: '', decalColor: '#BF5700', decalShape: 'longhorn', decalSheetIndex: 13, facemask: '#D5D9D8' },
+  TEXAS_AM: { shell: '#500000', centerStripe: [], decalMark: 'ATM', decalColor: '#FFFFFF', decalSheetIndex: 14, facemask: '#D5D9D8' },
+  VANDERBILT: { shell: '#101820', centerStripe: ['#CFAE70', '#FFFFFF', '#CFAE70'], decalMark: '', decalColor: '#CFAE70', decalSheetIndex: 15, facemask: '#D5D9D8' }
 };
 
 export function getHelmetDesign(team: TeamProfile): HelmetDesign {

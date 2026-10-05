@@ -3,7 +3,7 @@ import { defensiveKeys, defensivePlaybook, middleRoutes, offensiveKeys, offensiv
 import { alignDefenderAcrossFromReceiver, alignDefenderAcrossFromRunningBack, alignDefenderToZone, alignDefenders, chooseCpuDefensiveAssignments, constrainDefendersToFieldSide, getBlitzAlignmentY, getBracketCoverageTarget, getDefensiveLineAlignmentY, matchCpuDefendersToReceivers, separateDefenderAlignments } from './defense';
 import { evaluateCpuOffensiveAudibles, evaluateCpuBallCarrierMoves, isCpuPressureRecognized, shouldCpuGoForItOnFourthDown, shouldCpuReleasePass, shouldCpuScramble, scoreRunBlockTarget } from './ai';
 import { createFumbleBall, getCarrierFumbleChance } from './fumbles';
-import { canEngagePassBlock, clampPlayerToFieldY, createSimulationClock, distToSegment, GAME_SPEED_SCALE, getBallCarrierRunSpeed, getDesignedRunLateralBias, getFatigueSpeedMultiplier, getPassBlockHoldFrames, getReturnPursuitSpeed, getReturnTeamBlockers, isRusherActivelyBlocked, moveToward, resolveCollisions, shouldApplyRunBlockStun, shouldHoldPassBlock, updatePlayerStamina, updateReceiverTargetStamina, updateRouteMovement } from './movement';
+import { canEngagePassBlock, clampPlayerToFieldY, createSimulationClock, distToSegment, GAME_SPEED_SCALE, getBallCarrierRunSpeed, getDesignedRunLateralBias, getFatigueSpeedMultiplier, getPassBlockHoldFrames, getReturnPursuitSpeed, getReturnTeamBlockers, getRunPursuitMovement, isRusherActivelyBlocked, moveToward, resolveCollisions, shouldApplyRunBlockStun, shouldHoldPassBlock, updatePlayerStamina, updateReceiverTargetStamina, updateRouteMovement } from './movement';
 import { resolvePlayResult, isSafety, calculateBrokenTackleChance, calculateYardsToGo, getDriveStartY, getSnapBallPosition, getPassArcHeight, getPassArcMaxHeight, getPassFlightFrames, findTappedPassReceiver, shouldReleaseUserPass, getPassLeadTarget, getRoutePassLeadTarget, canDefenderDeflectPass, canTackleQuarterback, resolveCatchContestOutcome, evaluateQbThrowAccuracy, getCpuThrowAimVariance, calculateKickoffFlight, calculatePuntFlight, getTouchbackYardLineY, getKickoffLineY, getDefenderPassReachHeight, isPlayerOutOfBounds } from './rules';
 import { sounds } from './sound';
 import { evaluateDirtSwipeGesture, drawDirtSwipeGesture } from './chalkMenu';
@@ -58,6 +58,21 @@ export interface GameEngineHandle {
 }
 
 export type CameraPerspectiveMode = 'THREE_QUARTER' | 'TOP_DOWN';
+export function getCanvasRenderScale(availableWidth: number, availableHeight: number, devicePixelRatio = 1): number {
+  const layoutScale = Math.min(availableWidth / 340, availableHeight / 450);
+  const deviceScale = Math.min(2, Math.max(1, devicePixelRatio || 1));
+  return Math.max(1, Math.min(3, layoutScale * deviceScale));
+}
+
+export function getCameraYForLineOfScrimmage(
+  lineOfScrimmageY: number,
+  viewHeight: number,
+  pitch: number,
+  userOnOffense: boolean
+): number {
+  const screenFraction = userOnOffense ? 2 / 3 : 1 / 3;
+  return lineOfScrimmageY - (viewHeight * screenFraction / pitch);
+}
 
 export interface GameEngineCallbacks {
   onCameraPerspectiveChange?: (mode: CameraPerspectiveMode) => void;
@@ -137,6 +152,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   const receiverHitPadding = touchOptimized ? 30 : 20;
 
   const fieldWidth = 340;
+  const logicalCanvasWidth = fieldWidth;
+  const logicalCanvasHeight = 450;
   const fieldHeight = 1200;
   const endZoneHeight = 100;
   const cameraRunoff = 225;
@@ -190,8 +207,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
   function screenToWorld(clientX: number, clientY: number): { x: number; y: number } {
     const rect = canvas!.getBoundingClientRect();
-    const canvasX = (clientX - rect.left) * (canvas!.width / rect.width);
-    const canvasY = (clientY - rect.top) * (canvas!.height / rect.height);
+    const canvasX = (clientX - rect.left) * (logicalCanvasWidth / rect.width);
+    const canvasY = (clientY - rect.top) * (logicalCanvasHeight / rect.height);
     const pitch = getCameraPitchFactor();
     const wx = (canvasX - cameraOffsetX) / cameraScale;
     const wy = (canvasY / (cameraScale * pitch)) + cameraY;
@@ -931,13 +948,16 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     const availableHeight = typeof window !== 'undefined' ? Math.max(340, window.innerHeight - 80) : 600;
     const availableWidth = typeof window !== 'undefined' ? Math.max(320, window.innerWidth - 8) : 340;
 
-    canvas.width = fieldWidth;
-    canvas.height = 450;
+    const scale = Math.min(availableWidth / logicalCanvasWidth, availableHeight / logicalCanvasHeight);
+    const devicePixelRatio = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+    const renderScale = getCanvasRenderScale(availableWidth, availableHeight, devicePixelRatio);
+    canvas.width = Math.round(logicalCanvasWidth * renderScale);
+    canvas.height = Math.round(logicalCanvasHeight * renderScale);
+    ctx?.scale(renderScale, renderScale);
 
-    const scale = Math.min(availableWidth / fieldWidth, availableHeight / canvas.height);
     if (canvas.style) {
-      canvas.style.width = (fieldWidth * scale) + 'px';
-      canvas.style.height = (canvas.height * scale) + 'px';
+      canvas.style.width = (logicalCanvasWidth * scale) + 'px';
+      canvas.style.height = (logicalCanvasHeight * scale) + 'px';
     }
   }
 
@@ -2646,8 +2666,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     if (!canvas) return { x: clientX, y: clientY };
     const rect = canvas.getBoundingClientRect();
     return {
-      x: (clientX - rect.left) * (canvas.width / (rect.width || 1)),
-      y: (clientY - rect.top) * (canvas.height / (rect.height || 1))
+      x: (clientX - rect.left) * (logicalCanvasWidth / (rect.width || 1)),
+      y: (clientY - rect.top) * (logicalCanvasHeight / (rect.height || 1))
     };
   }
 
@@ -2801,8 +2821,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
     // Tapping the punt meter on the field executes the punt!
     if (phase === 'PRE_SNAP' && activeOffense === 'P1' && typeof p1OffPlay !== 'undefined' && p1OffPlay === 'PUNT') {
-      const cWidth = (typeof canvas !== 'undefined' && canvas) ? canvas.width : fieldWidth;
-      const cHeight = (typeof canvas !== 'undefined' && canvas) ? canvas.height : 450;
+      const cWidth = (typeof canvas !== 'undefined' && canvas) ? logicalCanvasWidth : fieldWidth;
+      const cHeight = (typeof canvas !== 'undefined' && canvas) ? logicalCanvasHeight : logicalCanvasHeight;
       const meterW = 210;
       const meterH = 50;
       const meterX = (cWidth - meterW) / 2;
@@ -2960,7 +2980,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     const isLiveMovementPhase = (phase === 'QB_DROP' || phase === 'HANDOFF' || phase === 'RUNNING');
     if (typeof joystick !== 'undefined' && isLiveMovementPhase && !joystick.active) {
       const cPos = typeof getCanvasCoords === 'function' ? getCanvasCoords(e.clientX, e.clientY) : { x: e.clientX, y: e.clientY };
-      if (cPos.y >= canvas.height / 2) {
+      if (cPos.y >= logicalCanvasHeight / 2) {
         joystick.active = true;
         joystick.pointerId = e.pointerId;
         joystick.baseX = cPos.x;
@@ -4022,7 +4042,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           if (activeOffense === 'P1') {
             const joy = getEffectiveJoystickInput();
             if (joy.active) {
-              const qbSpeed = 1.30 * 0.68 * GAME_SPEED_SCALE * (p1Team.ratings.wrSpeed || 1.0) * getFatigueSpeedMultiplier(qb.stamina);
+              const qbSpeed = 1.30 * 0.78 * GAME_SPEED_SCALE * (p1Team.ratings.wrSpeed || 1.0) * getFatigueSpeedMultiplier(qb.stamina);
               qb.vx = joy.x * qbSpeed;
               qb.vy = joy.y * qbSpeed;
               qb.x += qb.vx;
@@ -4057,7 +4077,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
               const dropSpeed = Math.sin(progress * Math.PI) * 1.35;
               qb.y -= (dropSpeed * GAME_SPEED_SCALE * attackDirection);
             } else {
-              const cpuQbSpeed = 1.30 * 0.68 * GAME_SPEED_SCALE * (p2Team.ratings.wrSpeed || 1.0) * getFatigueSpeedMultiplier(qb.stamina);
+              const cpuQbSpeed = 1.30 * 0.78 * GAME_SPEED_SCALE * (p2Team.ratings.wrSpeed || 1.0) * getFatigueSpeedMultiplier(qb.stamina);
               const unblockedRushers = defenders.filter(d => d && (d.passRusher || d.defenseAssignment === 'BLITZ') && !d.isEngagedWithBlocker);
               const leftPressure = unblockedRushers.some(d => d.x < qb.x && Math.hypot(d.x - qb.x, d.y - qb.y) < 65);
               const rightPressure = unblockedRushers.some(d => d.x > qb.x && Math.hypot(d.x - qb.x, d.y - qb.y) < 65);
@@ -4131,7 +4151,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           if ((activeEntity.contactSlowTimer || 0) > 0) activeEntity.contactSlowTimer!--;
           // Requirement: "The user controlled the ball here should only be as fast as his teammates, currently he's too fast."
           // Teammate routes and lead blockers scale movement by 0.68 * GAME_SPEED_SCALE.
-          const teammateSpeedScale = 0.68;
+          const teammateSpeedScale = isReturn ? 0.68 : 0.78;
           const carrierMaxSpeed = baseRunSpeed * teammateSpeedScale * GAME_SPEED_SCALE * (activeEntity.speedMultiplier || 1) * getFatigueSpeedMultiplier(activeEntity.stamina) * contactSpeed;
 
           if (isUserControlled) {
@@ -4230,7 +4250,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
               targetX = Math.max(35, Math.min(fieldWidth - 35, targetX));
               const steerDiff = targetX - activeEntity.x;
-              const rbSteerSpeed = 0.85 * 0.68 * GAME_SPEED_SCALE * (p2Team.ratings.wrSpeed || 1.0);
+              const rbSteerSpeed = 0.85 * 0.78 * GAME_SPEED_SCALE * (p2Team.ratings.wrSpeed || 1.0);
               activeEntity.vx = Math.max(-rbSteerSpeed, Math.min(rbSteerSpeed, steerDiff * 0.18));
               activeEntity.x += activeEntity.vx;
             }
@@ -4862,17 +4882,9 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
             return;
           }
           d.pursuitTimer = (d.pursuitTimer || 0) + 1;
-          const distToRunner = Math.hypot(activeEntity.x - d.x, activeEntity.y - d.y);
           const isBlitzer = Boolean(d.defenseAssignment === 'BLITZ' || d.passRusher);
           const isSpy = Boolean(d.defenseAssignment === 'QB_SPY' || d.defenseAssignment === 'RB_SPY' || d.isQbSpy);
-
-          // Calibrated realistic pursuit speed
-          const timeAcceleration = d.pursuitTimer * 0.034;
-          const distanceUrgency = Math.max(0, (distToRunner - 25) * 0.0065);
-          const dynamicPursuitSpeed = Math.min(3.4, (baseSpeed + timeAcceleration + distanceUrgency) * (isSpy ? 1.25 : isBlitzer ? 1.20 : 1.0));
-
-          // Calibrated agility as defender gains speed
-          const dynamicAccel = Math.min(0.50, (0.24 + (d.pursuitTimer * 0.0025)) * (isSpy ? 1.25 : isBlitzer ? 1.20 : 1.0));
+          const pursuit = getRunPursuitMovement(baseSpeed, d.pursuitTimer, isSpy ? 1.25 : isBlitzer ? 1.20 : 1.0);
 
           // Leading pursuit angle to cut off the runner's lane; when runner is QB, contain the edge
           const leadY = activeEntity.y + (18 * dir);
@@ -4888,7 +4900,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           const targetEntityX = Math.max(25, Math.min(fieldWidth - 25, leadX));
           const targetEntityY = Math.max(40, Math.min(fieldHeight - 40, leadY));
 
-          moveToward(d, targetEntityX, targetEntityY, dynamicAccel, dynamicPursuitSpeed);
+          moveToward(d, targetEntityX, targetEntityY, pursuit.acceleration, pursuit.speed);
         } else {
           d.pursuitTimer = 0;
           moveToward(d, targetX, targetY, moveAccel, moveSpeed);
@@ -4963,26 +4975,18 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         }
         if (isInterceptionReturn || activeEntity.isReturner) {
           d.pursuitTimer = (d.pursuitTimer || 0) + 1;
-          const distToRunner = Math.hypot(activeEntity.x - d.x, activeEntity.y - d.y);
           const isSkillPlayer = receivers.includes(d) || d === rb || d === centerReceiver;
           const isLineman = linemen.includes(d);
           const basePursuitSpeed = isSkillPlayer ? 1.05 : (isLineman ? 0.88 : 0.96);
           const speedMultiplier = isSkillPlayer ? 1.25 : 1.10;
-
-          // Calibrated realistic pursuit speed traits matching defense chasing a ball carrier
-          const timeAcceleration = d.pursuitTimer * 0.034;
-          const distanceUrgency = Math.max(0, (distToRunner - 25) * 0.0065);
-          const dynamicPursuitSpeed = Math.min(3.4, (basePursuitSpeed + timeAcceleration + distanceUrgency) * speedMultiplier);
-
-          // Calibrated agility as pursuer gains speed
-          const dynamicAccel = Math.min(0.50, (0.24 + (d.pursuitTimer * 0.0025)) * (isSkillPlayer ? 1.25 : 1.10));
+          const pursuit = getRunPursuitMovement(basePursuitSpeed, d.pursuitTimer, speedMultiplier);
 
           // Leading pursuit angle to cut off the returner's lane downfield
           const leadY = activeEntity.y + (18 * attackDirection);
           const targetX = Math.max(25, Math.min(fieldWidth - 25, activeEntity.x));
           const targetY = Math.max(40, Math.min(fieldHeight - 40, leadY));
 
-          moveToward(d, targetX, targetY, dynamicAccel, dynamicPursuitSpeed);
+          moveToward(d, targetX, targetY, pursuit.acceleration, pursuit.speed);
         }
         const dist = Math.hypot(activeEntity.x - d.x, activeEntity.y - d.y);
         const isBlitzer = Boolean(d.defenseAssignment === 'BLITZ' || d.passRusher);
@@ -5531,10 +5535,19 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       targetCamY = baseScrimmageCamY;
     }
 
+    if (phase === 'PRE_SNAP') {
+      targetCamY = getCameraYForLineOfScrimmage(
+        lineOfScrimmageY,
+        targetViewHeight,
+        getCameraPitchFactor(),
+        activeOffense === 'P1'
+      );
+    }
+
     // Smoothly interpolate view height and calculate zoom scale and centering offset
     currentViewHeight += (targetViewHeight - currentViewHeight) * 0.12;
-    cameraScale = canvas!.height / currentViewHeight;
-    cameraOffsetX = (canvas!.width - fieldWidth * cameraScale) / 2;
+    cameraScale = logicalCanvasHeight / currentViewHeight;
+    cameraOffsetX = (logicalCanvasWidth - fieldWidth * cameraScale) / 2;
 
     // Clamp camera vertical position to field boundaries
     const maxCamY = cameraWorldBottom - currentViewHeight;
@@ -5695,11 +5708,11 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
   function draw() {
     if (!ctx || !canvas) return;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.clearRect(0, 0, logicalCanvasWidth, logicalCanvasHeight);
 
     // Outer stadium turf background when zoomed out
     ctx.fillStyle = '#061c0a';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillRect(0, 0, logicalCanvasWidth, logicalCanvasHeight);
 
     ctx.save();
 
@@ -6408,8 +6421,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
       const meterW = 220;
       const meterH = 46;
-      const meterX = (canvas.width - meterW) / 2;
-      const meterY = canvas.height - 76;
+      const meterX = (logicalCanvasWidth - meterW) / 2;
+      const meterY = logicalCanvasHeight - 76;
 
       ctx.save();
       ctx.fillStyle = 'rgba(0, 0, 0, 0.90)';
@@ -6424,7 +6437,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         ctx.fillStyle = '#ffcc00';
         ctx.font = 'bold 11px monospace';
         ctx.textAlign = 'center';
-        ctx.fillText('🏈 TAP METER TO KICKOFF!', canvas.width / 2, meterY + 14);
+        ctx.fillText('🏈 TAP METER TO KICKOFF!', logicalCanvasWidth / 2, meterY + 14);
 
         const barX = meterX + 15;
         const barY = meterY + 22;
@@ -6457,15 +6470,15 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         const estYards = Math.round(45 + kickMeterPower * 25);
         ctx.fillStyle = '#ffffff';
         ctx.font = 'bold 9px monospace';
-        ctx.fillText(`${Math.round(kickMeterPower * 100)}% POWER (~${estYards} YDS)`, canvas.width / 2, barY + 11);
+        ctx.fillText(`${Math.round(kickMeterPower * 100)}% POWER (~${estYards} YDS)`, logicalCanvasWidth / 2, barY + 11);
       } else {
         ctx.fillStyle = '#00ffff';
         ctx.font = 'bold 11px monospace';
         ctx.textAlign = 'center';
-        ctx.fillText(`${p2Team.name.toUpperCase()} KICKOFF...`, canvas.width / 2, meterY + 18);
+        ctx.fillText(`${p2Team.name.toUpperCase()} KICKOFF...`, logicalCanvasWidth / 2, meterY + 18);
         ctx.fillStyle = '#aaaaaa';
         ctx.font = '9px monospace';
-        ctx.fillText('GET READY TO FIELD AND RETURN!', canvas.width / 2, meterY + 34);
+        ctx.fillText('GET READY TO FIELD AND RETURN!', logicalCanvasWidth / 2, meterY + 34);
       }
       ctx.restore();
     }
@@ -6474,8 +6487,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       ctx.save();
       const meterW = 210;
       const meterH = 48;
-      const meterX = (canvas.width - meterW) / 2;
-      const meterY = canvas.height - 145;
+      const meterX = (logicalCanvasWidth - meterW) / 2;
+      const meterY = logicalCanvasHeight - 145;
 
       ctx.fillStyle = 'rgba(0, 0, 0, 0.90)';
       ctx.strokeStyle = '#00ffff';
@@ -6488,7 +6501,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       ctx.fillStyle = '#00ffff';
       ctx.font = 'bold 11px monospace';
       ctx.textAlign = 'center';
-      ctx.fillText('🏈 TAP METER TO PUNT!', canvas.width / 2, meterY + 14);
+      ctx.fillText('🏈 TAP METER TO PUNT!', logicalCanvasWidth / 2, meterY + 14);
 
       const barX = meterX + 15;
       const barY = meterY + 22;
@@ -6512,7 +6525,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       const estYards = Math.round(25 + kickMeterPower * 30);
       ctx.fillStyle = '#ffffff';
       ctx.font = 'bold 9px monospace';
-      ctx.fillText(`${Math.round(kickMeterPower * 100)}% POWER (~${estYards} YDS)`, canvas.width / 2, barY + 11);
+      ctx.fillText(`${Math.round(kickMeterPower * 100)}% POWER (~${estYards} YDS)`, logicalCanvasWidth / 2, barY + 11);
       ctx.restore();
     } else if (currentDown === 4 && phase === 'PRE_SNAP') {
       ctx.save();
@@ -6521,7 +6534,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       ctx.lineWidth = 1.5;
       const tagW = 160;
       const tagH = 22;
-      const tagX = (canvas.width - tagW) / 2;
+      const tagX = (logicalCanvasWidth - tagW) / 2;
       const tagY = 8;
       ctx.beginPath();
       ctx.roundRect(tagX, tagY, tagW, tagH, 6);
@@ -6531,7 +6544,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       ctx.fillStyle = '#ffffff';
       ctx.font = 'bold 10px monospace';
       ctx.textAlign = 'center';
-      ctx.fillText('🏈 4TH DOWN • PUNT OPTION', canvas.width / 2, tagY + 15);
+      ctx.fillText('🏈 4TH DOWN • PUNT OPTION', logicalCanvasWidth / 2, tagY + 15);
       ctx.restore();
     }
 
@@ -6544,8 +6557,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
     if (joystick.alpha > 0.01) {
       ctx.save();
-      const MAX_RADIUS = 46 * (canvas.width / 340);
-      const KNOB_RADIUS = 20 * (canvas.width / 340);
+      const MAX_RADIUS = 46 * (logicalCanvasWidth / 340);
+      const KNOB_RADIUS = 20 * (logicalCanvasWidth / 340);
       const alpha = joystick.alpha;
 
       // Base ring

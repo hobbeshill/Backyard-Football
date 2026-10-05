@@ -1,6 +1,6 @@
 import type { Entity } from './types';
 
-export const GAME_SPEED_SCALE = 0.80;
+export const GAME_SPEED_SCALE = 0.90;
 export function getFatigueSpeedMultiplier(stamina = 100): number {
   return 1 - Math.min(1, Math.max(0, (70 - stamina) / 70)) * 0.35;
 }
@@ -53,6 +53,16 @@ export function getReturnTeamBlockers(players: Entity[], returner: Entity | null
 export function getReturnPursuitSpeed(returnerHasBall: boolean, pursuitFrames: number, distanceToRunner: number): number {
   if (!returnerHasBall) return 1.2;
   return Math.min(3.4, 2.0 + (pursuitFrames * 0.035) + Math.max(0, (distanceToRunner - 30) * 0.006));
+}
+
+export function getRunPursuitMovement(baseSpeed: number, pursuitFrames: number, roleMultiplier = 1): { speed: number; acceleration: number } {
+  const frames = Math.max(0, pursuitFrames);
+  const speedRamp = Math.min(1.8, frames * 0.025);
+  const accelerationRamp = Math.min(0.28, frames * 0.003);
+  return {
+    speed: Math.min(3.4, (baseSpeed + speedRamp) * roleMultiplier),
+    acceleration: Math.min(0.50, (0.12 + accelerationRamp) * roleMultiplier)
+  };
 }
 
 export function canEngagePassBlock(blocker: Entity, rusher: Entity): boolean {
