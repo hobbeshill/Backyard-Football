@@ -146,6 +146,19 @@ test('shared helmet sprites face attack direction when stationary and velocity w
   assert.deepEqual(rotations, [0, Math.PI, Math.PI / 2]);
 });
 
+test('quarterback keeps facing downfield while backpedaling in the pocket', () => {
+  const design = getHelmetDesign(TEAMS.AUBURN);
+  const backpedalingQb = { x: 0, y: 0, radius: 10, vx: 0, vy: -2 };
+
+  const threeQuarter = createRecordingContext();
+  drawHelmetSprite(threeQuarter.ctx, backpedalingQb, design, 1, 1, 'THREE_QUARTER', true);
+  assert.equal(threeQuarter.text.length, 2, 'The QB shows the front helmet and facemask while moving backward');
+
+  const topDown = createRecordingContext();
+  drawHelmetSprite(topDown.ctx, backpedalingQb, design, 1, 1, 'TOP_DOWN', true);
+  assert.equal(topDown.rotations[0], Math.PI);
+});
+
 test('side decals face outward on opposite sides and are foreshortened rather than painted across the crown', () => {
   const { ctx, rotations, scales, text } = createRecordingContext();
   drawHelmetSprite(ctx, { x: 0, y: 0, radius: 10 }, getHelmetDesign(TEAMS.AUBURN), -1);
@@ -245,7 +258,20 @@ test('3/4 view side profiles keep the crown stripe on top and face logos toward 
     assert.equal(text.length, 1, 'Profile shows the visible side decal once');
     assert.ok(lineToX.some(x => Math.sign(x) === direction && Math.abs(x) > 8), 'Facemask points toward movement');
     assert.ok(bezierCurveYs[0][0] < -6 && bezierCurveYs[0][1] < -6, 'Crown stripe follows the top ridge');
-    assert.ok(scales.some(([x, y]) => x === 1 && y === 1.35), 'Profile keeps the forward-facing helmet height');
+    assert.ok(scales.some(([x, y]) => x === 1.12 && y === 1.35), 'Profile is wider while keeping its forward-facing helmet height');
+  }
+});
+
+test('3/4 profile facing stays stable through small end-of-play velocity changes', () => {
+  const entity = { x: 0, y: 0, radius: 10, vx: 0.5, vy: 0.02 };
+  const design = getHelmetDesign(TEAMS.AUBURN);
+
+  for (const velocity of [[0.5, 0.02], [0.39, -0.18], [0.34, 0.12]] as const) {
+    entity.vx = velocity[0];
+    entity.vy = velocity[1];
+    const { ctx, scales } = createRecordingContext();
+    drawHelmetSprite(ctx, entity, design, -1, 1, 'THREE_QUARTER');
+    assert.ok(scales.some(([x, y]) => x === 1.12 && y === 1.35), 'Small velocity changes do not switch out of profile');
   }
 });
 

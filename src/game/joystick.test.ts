@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { getCanvasRenderScale, getCameraYForLineOfScrimmage, mountFootballGame, type GameEngineHandle } from './engine';
+import { getCanvasRenderScale, getCameraYForAction, getCameraYForLineOfScrimmage, getPlayerForwardDirection, mountFootballGame, type GameEngineHandle } from './engine';
 import { createSimulationClock, getDesignedRunLateralBias } from './movement';
 
 test('camera keeps the line of scrimmage near the bottom on offense and near the top on defense', () => {
@@ -14,6 +14,21 @@ test('camera keeps the line of scrimmage near the bottom on offense and near the
 
   assert.ok(Math.abs(getScreenFraction(true) - 0.68) < 0.000001);
   assert.ok(Math.abs(getScreenFraction(false) - 1 / 3) < 0.000001);
+});
+
+test('camera frames live action near the vertical center', () => {
+  const focusY = 780;
+  const viewHeight = 450;
+  const pitch = 0.72;
+  const cameraY = getCameraYForAction(focusY, viewHeight, pitch);
+
+  assert.ok(Math.abs((focusY - cameraY) * pitch / viewHeight - 0.5) < 0.000001);
+});
+
+test('player facing follows team ownership when kickoff roles differ from possession', () => {
+  assert.equal(getPlayerForwardDirection('P2', 'P1', -1, -1), 1, 'The P2 kickoff team faces its direction of play');
+  assert.equal(getPlayerForwardDirection('P1', 'P1', -1, 1), -1, 'The P1 return team faces its direction of play');
+  assert.equal(getPlayerForwardDirection(undefined, 'P1', -1, 1), 1, 'Untagged players retain their role-based direction');
 });
 
 test('canvas backing resolution follows display scale with a bounded pixel ratio', () => {

@@ -648,18 +648,7 @@ export default function App() {
                 </span>
               )}
             </div>
-          </div>
-
-          {/* P1 YOU Score & Quick Controls */}
-          <div className="flex min-w-0 flex-col items-center gap-1.5 text-center">
-            <span className="rounded-sm px-0.5 font-extrabold text-[0.60rem]" style={getTeamTextStyle(p1TeamState.primaryColor)}>
-              {p1TeamState.name} (YOU)
-            </span>
-            <span className="text-white text-base font-black bg-emerald-950/80 border border-emerald-500/50 px-2 py-0.5 rounded leading-none">
-              {userScore}
-            </span>
-
-            <div className="flex items-center gap-1 ml-1 border-l border-white/20 pl-1">
+            <div className="mt-0.5 flex items-center justify-center gap-1 border-t border-white/15 pt-0.5">
               <button
                 onClick={toggleSound}
                 className="p-1 text-[#ffcc00] hover:text-white transition cursor-pointer"
@@ -695,6 +684,16 @@ export default function App() {
                 </button>
               )}
             </div>
+          </div>
+
+          {/* P1 YOU Score & Quick Controls */}
+          <div className="flex min-w-0 flex-col items-center gap-1.5 text-center">
+            <span className="rounded-sm px-0.5 font-extrabold text-[0.60rem]" style={getTeamTextStyle(p1TeamState.primaryColor)}>
+              {p1TeamState.name} (YOU)
+            </span>
+            <span className="text-white text-base font-black bg-emerald-950/80 border border-emerald-500/50 px-2 py-0.5 rounded leading-none">
+              {userScore}
+            </span>
           </div>
         </div>
       </header>

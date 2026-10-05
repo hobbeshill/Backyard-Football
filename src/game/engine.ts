@@ -76,6 +76,20 @@ export function getCameraYForLineOfScrimmage(
   return lineOfScrimmageY - (viewHeight * screenFraction / pitch);
 }
 
+export function getPlayerForwardDirection(
+  playerTeam: 'P1' | 'P2' | undefined,
+  activeOffense: 'P1' | 'P2',
+  attackDirection: number,
+  fallbackDirection: number
+): number {
+  if (!playerTeam) return fallbackDirection;
+  return playerTeam === activeOffense ? attackDirection : -attackDirection;
+}
+
+export function getCameraYForAction(focusY: number, viewHeight: number, pitch: number): number {
+  return focusY - (viewHeight * 0.5 / pitch);
+}
+
 export interface GameEngineCallbacks {
   onCameraPerspectiveChange?: (mode: CameraPerspectiveMode) => void;
   setP2OffPlayState: (key: string) => void;
@@ -3334,11 +3348,27 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     return true;
   }
 
+  function updateCamera() {
+    const focusY = ball?.y ?? fumbleBall?.y ?? (
+      phase === 'RUNNING' ? activeEntity?.y :
+      phase === 'HANDOFF' ? qb.y :
+      undefined
+    );
+    if (focusY === undefined) return;
+
+    const targetCameraY = Math.max(cameraWorldTop, Math.min(
+      cameraWorldBottom - logicalCanvasHeight,
+      getCameraYForAction(focusY, logicalCanvasHeight, getCameraPitchFactor())
+    ));
+    cameraY += (targetCameraY - cameraY) * 0.12;
+  }
+
   function update() {
     const entities = getSessionEntities().map(([, entity]) => entity);
     const positions = entities.map(entity => ({ x: entity.x, y: entity.y }));
     const livePlay = !['PRE_SNAP', 'DEAD', 'KICKOFF'].includes(phase);
     updateGameplay();
+    updateCamera();
     const activeKeys = new Set<string>();
     entities.forEach((entity, index) => {
       if ((entity.diveCooldownTimer || 0) > 0) entity.diveCooldownTimer!--;
@@ -5538,14 +5568,14 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     }
   }
 
-  function drawHelmet(entity: Entity, design: HelmetDesign, forwardDirection: number) {
+  function drawHelmet(entity: Entity, design: HelmetDesign, forwardDirection: number, faceForwardDirection = false) {
     ctx!.save();
     if (cameraPerspectiveMode === 'THREE_QUARTER') {
       ctx!.translate(entity.x, entity.y);
       ctx!.scale(1, 1 / 0.72);
       ctx!.translate(-entity.x, -entity.y);
     }
-    drawHelmetSprite(ctx!, entity, design, forwardDirection, touchOptimized ? 1.23 : 1.08, cameraPerspectiveMode);
+    drawHelmetSprite(ctx!, entity, design, forwardDirection, touchOptimized ? 1.23 : 1.08, cameraPerspectiveMode, faceForwardDirection);
     if (entity.stamina !== undefined) {
       const stamina = entity.stamina;
       ctx!.fillStyle = '#171717';
@@ -5756,23 +5786,30 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       const teamKey = entity.team || (defaultRole === 'offense' ? activeOffense : activeDefense);
       return teamKey === 'P1' ? p1Helmet : p2Helmet;
     };
+    const getEntityForwardDirection = (entity: Entity, defaultRole: 'offense' | 'defense') =>
+      getPlayerForwardDirection(
+        entity.team,
+        activeOffense,
+        attackDirection,
+        defaultRole === 'offense' ? attackDirection : -attackDirection
+      );
 
     const playersByDepth: Array<{ entity: Entity; role: 'offense' | 'defense'; forwardDirection: number }> = [
-      { entity: qb, role: 'offense', forwardDirection: attackDirection },
-      ...linemen.map(entity => ({ entity, role: 'offense' as const, forwardDirection: attackDirection })),
-      ...(centerReceiver ? [{ entity: centerReceiver, role: 'offense' as const, forwardDirection: attackDirection }] : []),
-      ...receivers.map(entity => ({ entity, role: 'offense' as const, forwardDirection: attackDirection })),
-      ...(rb ? [{ entity: rb, role: 'offense' as const, forwardDirection: attackDirection }] : []),
+      { entity: qb, role: 'offense', forwardDirection: getEntityForwardDirection(qb, 'offense') },
+      ...linemen.map(entity => ({ entity, role: 'offense' as const, forwardDirection: getEntityForwardDirection(entity, 'offense') })),
+      ...(centerReceiver ? [{ entity: centerReceiver, role: 'offense' as const, forwardDirection: getEntityForwardDirection(centerReceiver, 'offense') }] : []),
+      ...receivers.map(entity => ({ entity, role: 'offense' as const, forwardDirection: getEntityForwardDirection(entity, 'offense') })),
+      ...(rb ? [{ entity: rb, role: 'offense' as const, forwardDirection: getEntityForwardDirection(rb, 'offense') }] : []),
       ...defenders.filter((entity): entity is Entity => Boolean(entity)).map(entity => ({
         entity,
         role: 'defense' as const,
-        forwardDirection: entity === activeEntity ? attackDirection : -attackDirection
+        forwardDirection: getEntityForwardDirection(entity, 'defense')
       }))
     ];
     playersByDepth
       .sort((first, second) => first.entity.y - second.entity.y)
       .forEach(({ entity, role, forwardDirection }) => {
-        drawHelmet(entity, getEntityHelmet(entity, role), forwardDirection);
+        drawHelmet(entity, getEntityHelmet(entity, role), forwardDirection, entity === qb && phase === 'QB_DROP');
       });
 
     if (activeEntity === qb || (qb.powerBoostTimer || 0) > 0) {

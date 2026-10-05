@@ -31,10 +31,52 @@ const TEAM_DECAL_CROPS = [
   { x: 2157, y: 1160, width: 620, height: 266 }
 ];
 const HELMET_VISUAL_RADIUS = 10;
+const PROFILE_WIDTH_SCALE = 1.12;
 const PROFILE_HEIGHT_SCALE = 1.35;
 const PROFILE_HEIGHT_OFFSET = 0.13;
 const helmetDecalCache = new Map<number, HTMLCanvasElement>();
+const threeQuarterFacingByEntity = new WeakMap<object, { forwardDirection: number; profileDirection: number; facingAway: boolean }>();
 let helmetDecalSheet: HTMLImageElement | null = null;
+
+function getThreeQuarterFacing(
+  entity: Pick<Entity, 'vx' | 'vy'>,
+  forwardDirection: number,
+  faceForwardDirection: boolean
+): { profileDirection: number; facingAway: boolean } {
+  if (faceForwardDirection) {
+    const facing = { profileDirection: 0, facingAway: forwardDirection === -1 };
+    threeQuarterFacingByEntity.set(entity, { forwardDirection, ...facing });
+    return facing;
+  }
+
+  const velocityX = entity.vx || 0;
+  const velocityY = entity.vy || 0;
+  const speed = Math.hypot(velocityX, velocityY);
+  const previous = threeQuarterFacingByEntity.get(entity);
+  let profileDirection = 0;
+  let facingAway = false;
+
+  if (previous?.forwardDirection === forwardDirection) {
+    profileDirection = previous.profileDirection;
+    facingAway = previous.facingAway;
+    if (speed > 0.65) {
+      if (Math.abs(velocityX) > Math.abs(velocityY) * 1.15 && Math.abs(velocityX) > 0.75) {
+        profileDirection = Math.sign(velocityX);
+        facingAway = false;
+      } else if (Math.abs(velocityY) > Math.abs(velocityX) * 1.15 && Math.abs(velocityY) > 0.75) {
+        profileDirection = 0;
+        facingAway = velocityY < 0;
+      }
+    }
+  } else {
+    const moving = speed > 0.4;
+    profileDirection = moving && Math.abs(velocityX) > Math.abs(velocityY) ? Math.sign(velocityX) : 0;
+    facingAway = profileDirection ? false : moving ? velocityY < -0.15 : forwardDirection === -1;
+  }
+
+  threeQuarterFacingByEntity.set(entity, { forwardDirection, profileDirection, facingAway });
+  return { profileDirection, facingAway };
+}
 
 function getHelmetDecal(index: number): HTMLCanvasElement | null {
   if (typeof Image === 'undefined' || typeof document === 'undefined') return null;
@@ -150,14 +192,13 @@ export function drawThreeQuarterHelmetSprite(
   entity: Pick<Entity, 'x' | 'y' | 'radius' | 'vx' | 'vy'>,
   design: HelmetDesign,
   forwardDirection: number,
-  sizeScale = 1
+  sizeScale = 1,
+  faceForwardDirection = false
 ) {
   const radius = HELMET_VISUAL_RADIUS * 1.15 * sizeScale;
   const velocityX = entity.vx || 0;
-  const velocityY = entity.vy || 0;
-  const moving = Math.hypot(velocityX, velocityY) > 0.4;
-  const profileDirection = moving && Math.abs(velocityX) > Math.abs(velocityY) ? Math.sign(velocityX) : 0;
-  const facingAway = profileDirection ? false : moving ? velocityY < -0.15 : forwardDirection === -1;
+  const moving = Math.hypot(velocityX, entity.vy || 0) > 0.4;
+  const { profileDirection, facingAway } = getThreeQuarterFacing(entity, forwardDirection, faceForwardDirection);
 
   ctx.save();
   ctx.translate(entity.x, entity.y);
@@ -175,7 +216,7 @@ export function drawThreeQuarterHelmetSprite(
 
   if (profileDirection) {
     ctx.translate(0, -radius * PROFILE_HEIGHT_OFFSET);
-    ctx.scale(1, PROFILE_HEIGHT_SCALE);
+    ctx.scale(PROFILE_WIDTH_SCALE, PROFILE_HEIGHT_SCALE);
     ctx.beginPath();
     ctx.moveTo(-profileDirection * radius * 0.78, radius * 0.10);
     ctx.quadraticCurveTo(-profileDirection * radius * 0.94, -radius * 0.32, -profileDirection * radius * 0.62, -radius * 0.68);
@@ -435,17 +476,18 @@ export function drawHelmetSprite(
   design: HelmetDesign,
   forwardDirection: number,
   sizeScale = 1,
-  viewMode: 'TOP_DOWN' | 'THREE_QUARTER' = 'TOP_DOWN'
+  viewMode: 'TOP_DOWN' | 'THREE_QUARTER' = 'TOP_DOWN',
+  faceForwardDirection = false
 ) {
   if (viewMode === 'THREE_QUARTER') {
-    drawThreeQuarterHelmetSprite(ctx, entity, design, forwardDirection, sizeScale);
+    drawThreeQuarterHelmetSprite(ctx, entity, design, forwardDirection, sizeScale, faceForwardDirection);
     return;
   }
   const radius = HELMET_VISUAL_RADIUS * 1.15 * sizeScale;
   const velocityX = entity.vx || 0;
   const velocityY = entity.vy || 0;
   const moving = Math.hypot(velocityX, velocityY) > 0.5;
-  const rotation = moving
+  const rotation = moving && !faceForwardDirection
     ? Math.atan2(velocityX, -velocityY)
     : forwardDirection === -1 ? 0 : Math.PI;
   const drawShellPath = () => {
