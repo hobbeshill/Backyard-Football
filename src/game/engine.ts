@@ -51,6 +51,8 @@ export interface GameEngineHandle {
   diveTackle: () => void;
   getReceivers: () => Entity[];
   isJoystickActiveForTest?: () => boolean;
+  getQuarterbackScreenPositionForTest?: () => { x: number; y: number };
+  getReceiverScreenPositionForTest?: (index: number) => { x: number; y: number } | null;
   cameraPerspective?: CameraPerspectiveMode;
   setCameraPerspective?: (mode: CameraPerspectiveMode) => void;
   getCameraPerspective?: () => CameraPerspectiveMode;
@@ -70,7 +72,7 @@ export function getCameraYForLineOfScrimmage(
   pitch: number,
   userOnOffense: boolean
 ): number {
-  const screenFraction = userOnOffense ? 2 / 3 : 1 / 3;
+  const screenFraction = userOnOffense ? 0.68 : 1 / 3;
   return lineOfScrimmageY - (viewHeight * screenFraction / pitch);
 }
 
@@ -161,9 +163,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   const cameraWorldBottom = fieldHeight + cameraRunoff;
 
   let cameraY = 0;
-  let currentViewHeight = 450;
-  let cameraScale = 1.0;
-  let cameraOffsetX = 0;
+  const cameraScale = 1.0;
+  const cameraOffsetX = 0;
   let cameraPerspectiveMode: CameraPerspectiveMode = (() => {
     try {
       const stored = localStorage.getItem('football_camera_perspective');
@@ -277,6 +278,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   // Human AI QB Progression, Vision Cone & Reaction Latency
   let cpuQbProgressionIndex = 0;
   let cpuQbReadTimer = 0;
+  let cpuQbPressureFrames = 0;
   let cpuQbThrowWindupTimer = 0;
   let cpuQbPendingThrowTarget: Entity | null = null;
   let cpuQbGazeTarget: Entity | null = null;
@@ -1905,7 +1907,10 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     linemen.forEach(l => { l.team = kickingTeam; });
     defenders.forEach(d => { d.team = receivingTeam; });
 
-    cameraY = Math.max(cameraWorldTop, Math.min(cameraWorldBottom - 450, lineOfScrimmageY - 225));
+    cameraY = Math.max(cameraWorldTop, Math.min(
+      cameraWorldBottom - 450,
+      getCameraYForLineOfScrimmage(lineOfScrimmageY, 450, getCameraPitchFactor(), activeOffense === 'P1')
+    ));
     setDownDistanceText(`KICKOFF - ${kickTeam.name.toUpperCase()} KICKING`);
     setIsKickoffState?.(true, kickingTeam, receivingTeam);
     setIs4thDownState?.(false);
@@ -2024,6 +2029,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     isSnapGestureActive = false;
     cpuQbProgressionIndex = 0;
     cpuQbReadTimer = 0;
+    cpuQbPressureFrames = 0;
     cpuQbThrowWindupTimer = 0;
     cpuQbPendingThrowTarget = null;
     cpuQbGazeTarget = null;
@@ -2047,11 +2053,10 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     qb.jukeCooldownTimer = 0;
     qb.jukeTimer = 0;
     qb.hasBall = false;
-    currentViewHeight = 450;
-    cameraScale = 1.0;
-    cameraOffsetX = 0;
-
-    cameraY = Math.max(cameraWorldTop, Math.min(cameraWorldBottom - 450, lineOfScrimmageY - 225));
+    cameraY = Math.max(cameraWorldTop, Math.min(
+      cameraWorldBottom - 450,
+      getCameraYForLineOfScrimmage(lineOfScrimmageY, 450, getCameraPitchFactor(), activeOffense === 'P1')
+    ));
     updateDownDisplay();
 
     if (activeOffense === 'P2') {
@@ -2294,6 +2299,11 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     p2Team,
     getReceivers: () => receivers,
     isJoystickActiveForTest: () => joystick.active,
+    getQuarterbackScreenPositionForTest: () => worldToCanvas(qb.x, qb.y),
+    getReceiverScreenPositionForTest: (index: number) => {
+      const receiver = receivers[index];
+      return receiver ? worldToCanvas(receiver.x, receiver.y) : null;
+    },
     diveTackle,
     selectP1Team: (teamId: string) => {
       p1Team = getTeam(teamId);
@@ -2903,7 +2913,23 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         const distToRb = rb ? Math.hypot(rb.x - px, rb.y - py) : Infinity;
         if (distToQb < 32 && distToQb < distToRb - 10) {
           startReadyPlay();
-          isSnapGestureActive = true;
+          const phaseAfterSnap: string = phase;
+          if (activeOffense === 'P1' && (phaseAfterSnap === 'QB_DROP' || phaseAfterSnap === 'HANDOFF')) {
+            const qbPosition = worldToCanvas(qb.x, qb.y);
+            const pointerPosition = getCanvasCoords(e.clientX, e.clientY);
+            joystick.active = true;
+            joystick.pointerId = e.pointerId;
+            joystick.baseX = qbPosition.x;
+            joystick.baseY = qbPosition.y;
+            joystick.currentX = pointerPosition.x;
+            joystick.currentY = pointerPosition.y;
+            joystick.inputX = 0;
+            joystick.inputY = 0;
+            joystick.distance = 0;
+            joystick.alpha = 1.0;
+          } else {
+            isSnapGestureActive = true;
+          }
           return;
         }
       }
@@ -2980,11 +3006,14 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     const isLiveMovementPhase = (phase === 'QB_DROP' || phase === 'HANDOFF' || phase === 'RUNNING');
     if (typeof joystick !== 'undefined' && isLiveMovementPhase && !joystick.active) {
       const cPos = typeof getCanvasCoords === 'function' ? getCanvasCoords(e.clientX, e.clientY) : { x: e.clientX, y: e.clientY };
-      if (cPos.y >= logicalCanvasHeight / 2) {
+      const isQuarterbackTouch = phase === 'QB_DROP' && activeOffense === 'P1' &&
+        Math.hypot(qb.x - px, qb.y - py) < qb.radius + receiverHitPadding;
+      if (isQuarterbackTouch || cPos.y >= logicalCanvasHeight / 2) {
+        const basePosition = isQuarterbackTouch ? worldToCanvas(qb.x, qb.y) : cPos;
         joystick.active = true;
         joystick.pointerId = e.pointerId;
-        joystick.baseX = cPos.x;
-        joystick.baseY = cPos.y;
+        joystick.baseX = basePosition.x;
+        joystick.baseY = basePosition.y;
         joystick.currentX = cPos.x;
         joystick.currentY = cPos.y;
         joystick.inputX = 0;
@@ -3245,7 +3274,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       return;
     }
 
-    if (phase === 'QB_DROP' && activeOffense === 'P1') {
+    if (!wasJoystick && phase === 'QB_DROP' && activeOffense === 'P1') {
       const releaseWorld = screenToWorld(e.clientX, e.clientY);
       const receiverAtRelease = typeof getTappedReceiver === 'function' ? getTappedReceiver(screenEnd.x, screenEnd.y, releaseWorld.x, releaseWorld.y) : null;
       if (receiverAtRelease && typeof executeUserPass === 'function') {
@@ -3563,7 +3592,9 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         if (!defender || defender.isEngagedWithBlocker) return;
         nearestUnblockedDefender = Math.min(nearestUnblockedDefender, Math.hypot(defender.x - qb.x, defender.y - qb.y));
       });
-      const isUnderHeavyPressure = isCpuPressureRecognized(nearestUnblockedDefender < 65, playClock);
+      const hasImmediatePressure = nearestUnblockedDefender < 65;
+      cpuQbPressureFrames = hasImmediatePressure ? cpuQbPressureFrames + 1 : 0;
+      const isUnderHeavyPressure = isCpuPressureRecognized(hasImmediatePressure, playClock);
 
       // NFL Progression Read Framework:
       // Primary Read (Outside WRs): receivers[0], receivers[1]
@@ -3946,6 +3977,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         isDeepShotOpportunity,
         hasOpenBreak: openBreakWR !== null,
         isUnderHeavyPressure,
+        pressureFrames: cpuQbPressureFrames,
         playClock,
         bestScore,
         isVerticalPlay,
@@ -5427,135 +5459,6 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       }
     }
 
-    // --- DYNAMIC CAMERA & VIEWPORT AUTO-ZOOM ---
-    const baseScrimmageCamY = Math.max(cameraWorldTop, Math.min(cameraWorldBottom - 450, lineOfScrimmageY - 225));
-    let targetViewHeight = 450;
-    let targetCamY = baseScrimmageCamY;
-
-    if (cameraPerspectiveMode === 'THREE_QUARTER') {
-      // 3/4 Perspective Camera: Elevated behind the QB looking down the field
-      const qbBehindY = attackDirection === -1 ? (qb.y - 325) : (qb.y - 125);
-      if (phase === 'PRE_SNAP' || phase === 'KICKOFF') {
-        targetViewHeight = 450;
-        targetCamY = qbBehindY;
-      } else if (ball && (ball.isKickoff || ball.isPunt)) {
-        targetCamY = attackDirection === -1 ? ball.y - 300 : ball.y - 150;
-        targetViewHeight = 460;
-      } else if (phase === 'QB_DROP') {
-        targetViewHeight = 450;
-        targetCamY = qbBehindY;
-      } else if (phase === 'THROWN' && ball) {
-        targetViewHeight = 450;
-        targetCamY = attackDirection === -1 ? ball.y - 250 : ball.y - 200;
-      } else if (phase === 'RUNNING') {
-        const trackingEntity = activeEntity || qb;
-        targetViewHeight = 450;
-        targetCamY = attackDirection === -1 ? trackingEntity.y - 310 : trackingEntity.y - 140;
-      } else if (phase === 'FUMBLE' && fumbleBall) {
-        targetViewHeight = 450;
-        targetCamY = attackDirection === -1 ? fumbleBall.y - 280 : fumbleBall.y - 170;
-      } else {
-        targetViewHeight = 450;
-        targetCamY = baseScrimmageCamY;
-      }
-    } else if (phase === 'PRE_SNAP' || phase === 'KICKOFF') {
-      targetViewHeight = 450;
-      targetCamY = baseScrimmageCamY;
-    } else if (ball && (ball.isKickoff || ball.isPunt)) {
-      targetCamY = Math.max(cameraWorldTop, Math.min(cameraWorldBottom - 450, ball.y - 225));
-      targetViewHeight = 480;
-    } else if (phase === 'QB_DROP') {
-      // Keep the QB and live routes framed so receivers stay available as tap targets.
-      const routeReceivers = [...receivers, centerReceiver, rb]
-        .filter((receiver): receiver is Entity => Boolean(receiver && !receiver.isBlocker && receiver.routeType !== 'BLOCK'));
-      const topY = Math.min(qb.y, ...routeReceivers.map(receiver => receiver.y)) - 55;
-      const bottomY = Math.max(qb.y, ...routeReceivers.map(receiver => receiver.y)) + 55;
-      const baselineBottomY = baseScrimmageCamY + 450;
-      if (topY < baseScrimmageCamY || bottomY > baselineBottomY) {
-        targetViewHeight = Math.max(450, Math.min(900, bottomY - topY));
-        targetCamY = attackDirection === -1 ? bottomY - targetViewHeight : topY;
-      } else {
-        targetViewHeight = 450;
-        targetCamY = baseScrimmageCamY;
-      }
-      if (activeOffense === 'P1') {
-        const routeReceivers = [...receivers, centerReceiver]
-          .filter((receiver): receiver is Entity => Boolean(receiver && !receiver.isBlocker && receiver.routeType !== 'BLOCK'));
-        const routeTopY = Math.min(qb.y, ...routeReceivers.map(receiver => receiver.y)) - 55;
-        const routeBottomY = Math.max(qb.y, ...routeReceivers.map(receiver => receiver.y)) + 55;
-        const frameTopY = Math.min(targetCamY, routeTopY);
-        const frameBottomY = Math.max(targetCamY + targetViewHeight, routeBottomY);
-        if (frameTopY < targetCamY || frameBottomY > targetCamY + targetViewHeight) {
-          targetViewHeight = Math.max(450, Math.min(1000, frameBottomY - frameTopY));
-          targetCamY = frameTopY;
-        }
-      }
-    } else if (phase === 'THROWN') {
-      // Track the ball during flight if it travels beyond the current screen bounds.
-      if (ball) {
-        const edgeMargin = 45;
-        if (attackDirection === -1) {
-          if (ball.y < baseScrimmageCamY + edgeMargin) {
-            const neededTopY = ball.y - edgeMargin;
-            const neededBottomY = Math.max(qb.y + 40, baseScrimmageCamY + 450);
-            const neededHeight = neededBottomY - neededTopY;
-            targetViewHeight = Math.max(450, Math.min(850, neededHeight));
-            targetCamY = neededBottomY - targetViewHeight;
-          } else {
-            targetViewHeight = 450;
-            targetCamY = baseScrimmageCamY;
-          }
-        } else {
-          if (ball.y > baseScrimmageCamY + 450 - edgeMargin) {
-            const neededBottomY = ball.y + edgeMargin;
-            const neededTopY = Math.min(qb.y - 40, baseScrimmageCamY);
-            const neededHeight = neededBottomY - neededTopY;
-            targetViewHeight = Math.max(450, Math.min(850, neededHeight));
-            targetCamY = neededTopY;
-          } else {
-            targetViewHeight = 450;
-            targetCamY = baseScrimmageCamY;
-          }
-        }
-      } else {
-        targetViewHeight = 450;
-        targetCamY = baseScrimmageCamY;
-      }
-    } else if (phase === 'RUNNING') {
-      // Ball carrier action: zoom back in smoothly to follow the runner
-      targetViewHeight = 450;
-      const trackingEntity = activeEntity || qb;
-      targetCamY = trackingEntity.y - 220;
-    } else if (phase === 'FUMBLE' && fumbleBall) {
-      // Scramble for loose fumble: smoothly track the bouncing football
-      targetViewHeight = 450;
-      targetCamY = fumbleBall.y - 220;
-    } else {
-      targetViewHeight = 450;
-      targetCamY = baseScrimmageCamY;
-    }
-
-    if (phase === 'PRE_SNAP') {
-      targetCamY = getCameraYForLineOfScrimmage(
-        lineOfScrimmageY,
-        targetViewHeight,
-        getCameraPitchFactor(),
-        activeOffense === 'P1'
-      );
-    }
-
-    // Smoothly interpolate view height and calculate zoom scale and centering offset
-    currentViewHeight += (targetViewHeight - currentViewHeight) * 0.12;
-    cameraScale = logicalCanvasHeight / currentViewHeight;
-    cameraOffsetX = (logicalCanvasWidth - fieldWidth * cameraScale) / 2;
-
-    // Clamp camera vertical position to field boundaries
-    const maxCamY = cameraWorldBottom - currentViewHeight;
-    const minCamY = cameraWorldTop;
-    targetCamY = Math.max(minCamY, Math.min(maxCamY, targetCamY));
-    cameraY += (targetCamY - cameraY) * 0.10;
-    cameraY = Math.max(minCamY, Math.min(maxCamY, cameraY));
-
     const reachedEndZone = (attackDirection === -1 && activeEntity && activeEntity.y <= endZoneHeight) || (attackDirection === 1 && activeEntity && activeEntity.y >= fieldHeight - endZoneHeight);
     if (phase === 'RUNNING' && activeEntity && reachedEndZone) {
       screenShakeTimer = 40;
@@ -5854,7 +5757,24 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       return teamKey === 'P1' ? p1Helmet : p2Helmet;
     };
 
-    drawHelmet(qb, getEntityHelmet(qb, 'offense'), attackDirection);
+    const playersByDepth: Array<{ entity: Entity; role: 'offense' | 'defense'; forwardDirection: number }> = [
+      { entity: qb, role: 'offense', forwardDirection: attackDirection },
+      ...linemen.map(entity => ({ entity, role: 'offense' as const, forwardDirection: attackDirection })),
+      ...(centerReceiver ? [{ entity: centerReceiver, role: 'offense' as const, forwardDirection: attackDirection }] : []),
+      ...receivers.map(entity => ({ entity, role: 'offense' as const, forwardDirection: attackDirection })),
+      ...(rb ? [{ entity: rb, role: 'offense' as const, forwardDirection: attackDirection }] : []),
+      ...defenders.filter((entity): entity is Entity => Boolean(entity)).map(entity => ({
+        entity,
+        role: 'defense' as const,
+        forwardDirection: entity === activeEntity ? attackDirection : -attackDirection
+      }))
+    ];
+    playersByDepth
+      .sort((first, second) => first.entity.y - second.entity.y)
+      .forEach(({ entity, role, forwardDirection }) => {
+        drawHelmet(entity, getEntityHelmet(entity, role), forwardDirection);
+      });
+
     if (activeEntity === qb || (qb.powerBoostTimer || 0) > 0) {
       ctx.strokeStyle = (qb.powerBoostTimer || 0) > 0 ? '#00ffff' : '#ff00ff';
       ctx.lineWidth = 2.5 / cameraScale;
@@ -5973,14 +5893,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       ctx.restore();
     }
 
-    // Linemen
-    linemen.forEach(l => {
-      drawHelmet(l, getEntityHelmet(l, 'offense'), attackDirection);
-    });
-
     // Center Receiver
     if (centerReceiver) {
-      drawHelmet(centerReceiver, getEntityHelmet(centerReceiver, 'offense'), attackDirection);
       if ((centerReceiver.flash || 0) > 0) {
         ctx.strokeStyle = '#00ff00';
         ctx.lineWidth = 2.5 / cameraScale;
@@ -6006,7 +5920,6 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
     // Receivers
     receivers.forEach(r => {
-      drawHelmet(r, getEntityHelmet(r, 'offense'), attackDirection);
       if ((r.flash || 0) > 0) {
         ctx.strokeStyle = '#00ff00';
         ctx.lineWidth = 2.5 / cameraScale;
@@ -6048,7 +5961,6 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
     // Running Back
     if (rb) {
-      drawHelmet(rb, getEntityHelmet(rb, 'offense'), attackDirection);
       if (activeEntity === rb || (rb.powerBoostTimer || 0) > 0) {
         ctx.strokeStyle = (rb.powerBoostTimer || 0) > 0 ? '#00ffff' : '#ff00ff';
         ctx.lineWidth = 2.5 / cameraScale;
@@ -6107,7 +6019,6 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         ctx.stroke();
         ctx.restore();
       }
-      drawHelmet(d, getEntityHelmet(d, 'defense'), (d === activeEntity ? attackDirection : -attackDirection));
       if ((isInterceptionReturn || isSpecialTeamsReturn) && d === activeEntity) {
         ctx.save();
         ctx.strokeStyle = '#00ffff';

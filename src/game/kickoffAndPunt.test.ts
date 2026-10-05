@@ -85,20 +85,23 @@ test('fourth-down Go For It waits for a deliberate pass after the snap', (contex
       assert.ok(handler);
       handler({ clientX: x, clientY: y } as PointerEvent);
     };
-    send('pointerdown', 170, 273);
+    const qbPosition = game.getQuarterbackScreenPositionForTest?.();
+    assert.ok(qbPosition);
+    send('pointerdown', qbPosition.x, qbPosition.y);
     assert.equal(game.phase, 'QB_DROP');
-    send('pointermove', 170, 333);
-    send('pointerup', 170, 333);
-    assert.equal(game.phase, 'QB_DROP', 'Releasing the snap gesture must never throw the ball');
-    send('pointerdown', 170, 273);
-    send('pointerup', 170, 333);
-    assert.equal(game.phase, 'THROWN', 'A deliberate pull should still throw');
+    send('pointermove', qbPosition.x, qbPosition.y + 60);
+    send('pointerup', qbPosition.x, qbPosition.y + 60);
+    assert.equal(game.phase, 'QB_DROP', 'Pulling back from the QB should control the drop, not throw');
     game.resetDrill();
-    send('pointerdown', 170, 273);
-    send('pointerup', 170, 333);
+    const resetQbPosition = game.getQuarterbackScreenPositionForTest?.();
+    assert.ok(resetQbPosition);
+    send('pointerdown', resetQbPosition.x, resetQbPosition.y);
+    send('pointerup', resetQbPosition.x, resetQbPosition.y + 60);
     assert.equal(game.phase, 'QB_DROP');
-    send('pointerdown', 50, 225);
-    send('pointerup', 50, 225);
+    const receiverPosition = game.getReceiverScreenPositionForTest?.(0);
+    assert.ok(receiverPosition);
+    send('pointerdown', receiverPosition.x, receiverPosition.y);
+    send('pointerup', receiverPosition.x, receiverPosition.y);
     assert.equal(game.phase, 'THROWN', 'A fresh receiver tap should throw after the snap');
   } finally {
     cleanup?.();
@@ -120,6 +123,9 @@ test('CPU punts by default but goes for it in short, scoring, and late-trailing 
   assert.equal(shouldCpuGoForItOnFourthDown({ ...routineFourthDown, distanceToEndzoneYards: 15, yardsToGo: 3 }), true);
   assert.equal(shouldCpuGoForItOnFourthDown({ ...routineFourthDown, distanceToEndzoneYards: 80, yardsToGo: 10, quarter: 4, secondsRemaining: 45, scoreDifferential: -1 }), true);
   assert.equal(shouldCpuGoForItOnFourthDown({ ...routineFourthDown, distanceToEndzoneYards: 80, yardsToGo: 1, quarter: 4, secondsRemaining: 45, scoreDifferential: 1 }), false);
+  assert.equal(shouldCpuGoForItOnFourthDown({ ...routineFourthDown, distanceToEndzoneYards: 65, yardsToGo: 1, quarter: 3 }), true);
+  assert.equal(shouldCpuGoForItOnFourthDown({ ...routineFourthDown, distanceToEndzoneYards: 60, yardsToGo: 2, quarter: 4, secondsRemaining: 30 }), true);
+  assert.equal(shouldCpuGoForItOnFourthDown({ ...routineFourthDown, distanceToEndzoneYards: 60, yardsToGo: 2, quarter: 4, secondsRemaining: 30, scoreDifferential: 7 }), false);
 });
 
 test('CPU defensive audibles do not replace a selected punt', () => {

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { getCanvasRenderScale, getCameraYForLineOfScrimmage, mountFootballGame, type GameEngineHandle } from './engine';
 import { createSimulationClock, getDesignedRunLateralBias } from './movement';
 
-test('camera places the line of scrimmage in the lower third on offense and upper third on defense', () => {
+test('camera keeps the line of scrimmage near the bottom on offense and near the top on defense', () => {
   const lineOfScrimmageY = 500;
   const viewHeight = 450;
   const pitch = 0.72;
@@ -12,7 +12,7 @@ test('camera places the line of scrimmage in the lower third on offense and uppe
     return (lineOfScrimmageY - cameraY) * pitch / viewHeight;
   };
 
-  assert.ok(Math.abs(getScreenFraction(true) - 2 / 3) < 0.000001);
+  assert.ok(Math.abs(getScreenFraction(true) - 0.68) < 0.000001);
   assert.ok(Math.abs(getScreenFraction(false) - 1 / 3) < 0.000001);
 });
 
@@ -208,9 +208,14 @@ test('relative joystick controls QB in pocket and does not interfere with tappin
     const upHandler = (canvas as any)._listeners.get('pointerup');
     assert.ok(downHandler && moveHandler && upHandler);
 
-    downHandler({ clientX: 170, clientY: 273, pointerId: 1 } as PointerEvent);
-    upHandler({ clientX: 170, clientY: 273, pointerId: 1 } as PointerEvent);
+    const qbPosition = game.getQuarterbackScreenPositionForTest?.();
+    assert.ok(qbPosition);
+    downHandler({ clientX: qbPosition.x, clientY: qbPosition.y, pointerId: 1 } as PointerEvent);
     assert.equal(game.phase, 'QB_DROP');
+    assert.equal(game.isJoystickActiveForTest?.(), true, 'The QB snap touch should continue as the joystick');
+    moveHandler({ clientX: qbPosition.x, clientY: qbPosition.y + 40, pointerId: 1 } as PointerEvent);
+    upHandler({ clientX: qbPosition.x, clientY: qbPosition.y + 40, pointerId: 1 } as PointerEvent);
+    assert.equal(game.phase, 'QB_DROP', 'Pulling back from the QB should not throw');
     assert.equal(game.isJoystickActiveForTest?.(), false);
 
     downHandler({ clientX: 80, clientY: 100, pointerId: 9 } as PointerEvent);
@@ -224,9 +229,10 @@ test('relative joystick controls QB in pocket and does not interfere with tappin
     moveHandler({ clientX: 110, clientY: 320, pointerId: 10 } as PointerEvent);
 
     // 3. While joystick is active, tap WR with a second finger (pointerId: 20)
-    // Outside WR is at roughly (40, 225)
-    downHandler({ clientX: 40, clientY: 225, pointerId: 20 } as PointerEvent);
-    upHandler({ clientX: 40, clientY: 225, pointerId: 20 } as PointerEvent);
+    const receiverPosition = game.getReceiverScreenPositionForTest?.(0);
+    assert.ok(receiverPosition);
+    downHandler({ clientX: receiverPosition.x, clientY: receiverPosition.y, pointerId: 20 } as PointerEvent);
+    upHandler({ clientX: receiverPosition.x, clientY: receiverPosition.y, pointerId: 20 } as PointerEvent);
 
     // Pass should be thrown immediately to the WR without joystick interference!
     assert.equal(game.phase, 'THROWN');
@@ -256,9 +262,13 @@ test('tapping a receiver to pass does not activate the joystick by itself', () =
     game.resetDrill();
     const pointerDown = (canvas as any)._listeners.get('pointerdown');
     const pointerUp = (canvas as any)._listeners.get('pointerup');
-    pointerDown({ clientX: 170, clientY: 273, pointerId: 1 } as PointerEvent);
-    pointerUp({ clientX: 170, clientY: 273, pointerId: 1 } as PointerEvent);
-    pointerDown({ clientX: 40, clientY: 225, pointerId: 2 } as PointerEvent);
+    const qbPosition = game.getQuarterbackScreenPositionForTest?.();
+    assert.ok(qbPosition);
+    pointerDown({ clientX: qbPosition.x, clientY: qbPosition.y, pointerId: 1 } as PointerEvent);
+    pointerUp({ clientX: qbPosition.x, clientY: qbPosition.y, pointerId: 1 } as PointerEvent);
+    const receiverPosition = game.getReceiverScreenPositionForTest?.(0);
+    assert.ok(receiverPosition);
+    pointerDown({ clientX: receiverPosition.x, clientY: receiverPosition.y, pointerId: 2 } as PointerEvent);
     assert.equal(game.phase, 'THROWN');
     assert.equal(game.isJoystickActiveForTest?.(), false);
   } finally {
@@ -448,9 +458,11 @@ test('controlled player speed matches teammate speed scale', () => {
     const downHandler = (canvas as any)._listeners.get('pointerdown');
     const moveHandler = (canvas as any)._listeners.get('pointermove');
     const upHandler = (canvas as any)._listeners.get('pointerup');
+    const qbPosition = game.getQuarterbackScreenPositionForTest?.();
+    assert.ok(qbPosition);
 
-    downHandler({ clientX: 170, clientY: 273, pointerId: 1 } as PointerEvent);
-    upHandler({ clientX: 170, clientY: 273, pointerId: 1 } as PointerEvent);
+    downHandler({ clientX: qbPosition.x, clientY: qbPosition.y, pointerId: 1 } as PointerEvent);
+    upHandler({ clientX: qbPosition.x, clientY: qbPosition.y, pointerId: 1 } as PointerEvent);
     assert.equal(game.phase, 'QB_DROP');
 
     // Move joystick
@@ -623,10 +635,12 @@ test('joystick release does not trigger accidental swipe juke during ball carrie
     const downHandler = (canvas as any)._listeners.get('pointerdown');
     const moveHandler = (canvas as any)._listeners.get('pointermove');
     const upHandler = (canvas as any)._listeners.get('pointerup');
+    const qbPosition = game.getQuarterbackScreenPositionForTest?.();
+    assert.ok(qbPosition);
 
     // Snap to handoff
-    downHandler({ clientX: 170, clientY: 273, pointerId: 1 } as PointerEvent);
-    upHandler({ clientX: 170, clientY: 273, pointerId: 1 } as PointerEvent);
+    downHandler({ clientX: qbPosition.x, clientY: qbPosition.y, pointerId: 1 } as PointerEvent);
+    upHandler({ clientX: qbPosition.x, clientY: qbPosition.y, pointerId: 1 } as PointerEvent);
 
     // Touch joystick to steer
     downHandler({ clientX: 100, clientY: 300, pointerId: 5 } as PointerEvent);
@@ -822,8 +836,10 @@ test('Ready starts user defense while QB tap starts user offense', () => {
     game.setPossessionForTest?.('P1');
     game.resetDrill();
     assert.equal(game.phase, 'PRE_SNAP');
-    downHandler({ clientX: 170, clientY: 273, pointerId: 2 } as PointerEvent);
-    upHandler({ clientX: 170, clientY: 273, pointerId: 2 } as PointerEvent);
+    const qbPosition = game.getQuarterbackScreenPositionForTest?.();
+    assert.ok(qbPosition);
+    downHandler({ clientX: qbPosition.x, clientY: qbPosition.y, pointerId: 2 } as PointerEvent);
+    upHandler({ clientX: qbPosition.x, clientY: qbPosition.y, pointerId: 2 } as PointerEvent);
     assert.ok(game.phase === 'QB_DROP' || game.phase === 'HANDOFF');
   } finally {
     cleanup?.();

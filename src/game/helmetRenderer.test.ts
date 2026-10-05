@@ -230,7 +230,7 @@ test('rear-facing 3/4 helmets show neither side logos nor the front facemask', (
 
 test('3/4 view side profiles keep the crown stripe on top and face logos toward the camera', () => {
   for (const direction of [-1, 1]) {
-    const { ctx, ellipses, lineToX, movePoints, text, bezierCurveYs } = createRecordingContext();
+    const { ctx, ellipses, lineToX, movePoints, text, bezierCurveYs, scales } = createRecordingContext();
     drawHelmetSprite(
       ctx,
       { x: 0, y: 0, radius: 10, vx: direction * 2, vy: 0 },
@@ -245,6 +245,7 @@ test('3/4 view side profiles keep the crown stripe on top and face logos toward 
     assert.equal(text.length, 1, 'Profile shows the visible side decal once');
     assert.ok(lineToX.some(x => Math.sign(x) === direction && Math.abs(x) > 8), 'Facemask points toward movement');
     assert.ok(bezierCurveYs[0][0] < -6 && bezierCurveYs[0][1] < -6, 'Crown stripe follows the top ridge');
+    assert.ok(scales.some(([x, y]) => x === 1 && y === 1.35), 'Profile keeps the forward-facing helmet height');
   }
 });
 

@@ -18,12 +18,21 @@ export interface CpuFourthDownSituation {
 }
 
 export function shouldCpuGoForItOnFourthDown(situation: CpuFourthDownSituation): boolean {
-  const isTrailingLate = situation.scoreDifferential < 0 &&
-    situation.quarter === 4 && situation.secondsRemaining <= 45;
   const isGoalLineOpportunity = situation.distanceToEndzoneYards <= 15 && situation.yardsToGo <= 3;
+  if (isGoalLineOpportunity) return true;
+
+  const isLateGame = situation.quarter === 4 && situation.secondsRemaining <= 45;
+  if (isLateGame && situation.scoreDifferential < 0) return true;
+  if (isLateGame && situation.scoreDifferential > 0) return false;
+
+  if (isLateGame && situation.scoreDifferential === 0 &&
+    situation.distanceToEndzoneYards <= 60 && situation.yardsToGo <= 2) return true;
+
   const isShortInScoringRange = situation.distanceToEndzoneYards <= 35 && situation.yardsToGo <= 2;
-  const isShortNearMidfield = situation.distanceToEndzoneYards <= 50 && situation.yardsToGo <= 1;
-  return isTrailingLate || isGoalLineOpportunity || isShortInScoringRange || isShortNearMidfield;
+  const isShortNearMidfield = situation.distanceToEndzoneYards <= 55 && situation.yardsToGo <= 1;
+  const isShortInSecondHalf = situation.distanceToEndzoneYards <= 70 &&
+    situation.yardsToGo <= 1 && situation.quarter >= 3;
+  return isShortInScoringRange || isShortNearMidfield || isShortInSecondHalf;
 }
 
 export interface CpuCarrierMoveResult {
@@ -62,7 +71,7 @@ export function shouldCpuReleasePass(situation: CpuPassReleaseSituation): boolea
 }
 
 export function isCpuPressureRecognized(isUnderHeavyPressure: boolean, playClock: number): boolean {
-  return isUnderHeavyPressure && playClock >= 24;
+  return isUnderHeavyPressure && playClock >= 8;
 }
 
 export interface CpuScrambleSituation {
@@ -221,11 +230,17 @@ export function evaluateCpuOffensiveAudibles(
       rb.x = rb.startX;
       result.rbFlipped = true;
     }
-    // Exploit user all-out blitz: Hot route an outside receiver to GO to attack 1-on-1 single coverage deep
-    const deepWr = receivers.find(r => r && !r.isBlocker);
-    if (deepWr) {
-      deepWr.routeType = 'GO';
-      deepWr.routeIndex = Math.max(0, outsideRoutes.indexOf('GO'));
+    // Leave a quick outlet against the extra rushers and keep a vertical route to punish vacated coverage.
+    const eligibleReceivers = receivers.filter(receiver => receiver && !receiver.isBlocker);
+    const hotReceiver = eligibleReceivers[0];
+    if (hotReceiver) {
+      hotReceiver.routeType = hotReceiver.x < fieldWidth / 2 ? 'SLANT-R' : 'SLANT-L';
+      hotReceiver.routeIndex = Math.max(0, outsideRoutes.indexOf(hotReceiver.routeType));
+    }
+    const deepReceiver = eligibleReceivers[1];
+    if (deepReceiver) {
+      deepReceiver.routeType = 'GO';
+      deepReceiver.routeIndex = Math.max(0, outsideRoutes.indexOf('GO'));
     }
     result.audibleMessage = 'CPU AUDIBLE: USER BLITZ COUNTERED! MAX PROTECT & DEEP SHOT 🛡️🚀';
     return result;

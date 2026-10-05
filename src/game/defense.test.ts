@@ -317,8 +317,8 @@ test('CPU releases open, pressured, and overdue passes before scrambling', () =>
 
 test('CPU pressure reads allow a short reaction window before forcing a throw', () => {
   assert.equal(isCpuPressureRecognized(false, 40), false);
-  assert.equal(isCpuPressureRecognized(true, 23), false);
-  assert.equal(isCpuPressureRecognized(true, 24), true);
+  assert.equal(isCpuPressureRecognized(true, 7), false);
+  assert.equal(isCpuPressureRecognized(true, 8), true);
 });
 
 test('CPU vertical calls wait for downfield windows but escape pressure and eventually release', () => {
@@ -1085,7 +1085,7 @@ test('CPU defense assigns QB_SPY when opponent has scrambled or run with QB', as
   assert.equal(spyAssignments.length, 1, 'Should assign a linebacker to QB_SPY to contain scrambling QB');
 });
 
-test('CPU offense counters user blitzes by assigning protection and hot-routing deep vertical strike (GO)', async () => {
+test('CPU offense counters user blitzes with max protection, a hot slant, and a deep strike', async () => {
   const { evaluateCpuOffensiveAudibles } = await import('./ai');
   const receivers: Entity[] = [
     { x: 50, y: 500, radius: 10, routeType: 'SLANT-L' },
@@ -1114,8 +1114,24 @@ test('CPU offense counters user blitzes by assigning protection and hot-routing 
 
   assert.ok(rb.isBlocker, 'RB should be assigned to pass block');
   assert.ok(centerReceiver.isBlocker, 'Center receiver should be assigned to pass block');
-  assert.equal(receivers[0].routeType, 'GO', 'Outside receiver should be hot-routed to deep GO streak');
+  assert.equal(receivers[0].routeType, 'SLANT-R', 'Outside receiver should have a quick hot route');
+  assert.equal(receivers[1].routeType, 'GO', 'Second receiver should attack the vacated deep coverage');
   assert.ok(result.audibleMessage?.includes('USER BLITZ COUNTERED'), 'Audible message should announce blitz countered');
+});
+
+test('CPU releases the deep read after sustained pressure instead of waiting for the vertical-play timeout', () => {
+  assert.equal(shouldCpuReleasePass({
+    hasTarget: true,
+    isDeepShotOpportunity: false,
+    hasOpenBreak: false,
+    isUnderHeavyPressure: true,
+    pressureFrames: 10,
+    playClock: 18,
+    bestScore: 10,
+    isVerticalPlay: true,
+    targetDepthYards: 5,
+    targetSeparation: 3
+  }), true);
 });
 
 test('CPU defense assigns both QB_SPY and an edge contain rusher when opponent spams QB runs', async () => {

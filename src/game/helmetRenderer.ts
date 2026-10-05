@@ -31,6 +31,8 @@ const TEAM_DECAL_CROPS = [
   { x: 2157, y: 1160, width: 620, height: 266 }
 ];
 const HELMET_VISUAL_RADIUS = 10;
+const PROFILE_HEIGHT_SCALE = 1.35;
+const PROFILE_HEIGHT_OFFSET = 0.13;
 const helmetDecalCache = new Map<number, HTMLCanvasElement>();
 let helmetDecalSheet: HTMLImageElement | null = null;
 
@@ -172,6 +174,8 @@ export function drawThreeQuarterHelmetSprite(
   ctx.translate(moving ? Math.max(-1, Math.min(1, velocityX / 1.5)) * radius * 0.15 : 0, -radius * 0.20);
 
   if (profileDirection) {
+    ctx.translate(0, -radius * PROFILE_HEIGHT_OFFSET);
+    ctx.scale(1, PROFILE_HEIGHT_SCALE);
     ctx.beginPath();
     ctx.moveTo(-profileDirection * radius * 0.78, radius * 0.10);
     ctx.quadraticCurveTo(-profileDirection * radius * 0.94, -radius * 0.32, -profileDirection * radius * 0.62, -radius * 0.68);
