@@ -85,18 +85,14 @@ test('fourth-down Go For It waits for a deliberate pass after the snap', (contex
       assert.ok(handler);
       handler({ clientX: x, clientY: y } as PointerEvent);
     };
-    const qbPosition = game.getQuarterbackScreenPositionForTest?.();
-    assert.ok(qbPosition);
-    send('pointerdown', qbPosition.x, qbPosition.y);
+    send('pointerdown', 90, 364);
     assert.equal(game.phase, 'QB_DROP');
-    send('pointermove', qbPosition.x, qbPosition.y + 60);
-    send('pointerup', qbPosition.x, qbPosition.y + 60);
-    assert.equal(game.phase, 'QB_DROP', 'Pulling back from the QB should control the drop, not throw');
+    send('pointermove', 220, 404);
+    send('pointerup', 220, 404);
+    assert.equal(game.phase, 'QB_DROP', 'Moving the joystick should control the drop, not throw');
     game.resetDrill();
-    const resetQbPosition = game.getQuarterbackScreenPositionForTest?.();
-    assert.ok(resetQbPosition);
-    send('pointerdown', resetQbPosition.x, resetQbPosition.y);
-    send('pointerup', resetQbPosition.x, resetQbPosition.y + 60);
+    send('pointerdown', 90, 364);
+    send('pointerup', 220, 404);
     assert.equal(game.phase, 'QB_DROP');
     const receiverPosition = game.getReceiverScreenPositionForTest?.(0);
     assert.ok(receiverPosition);
@@ -714,8 +710,4 @@ test('swiping left or right on the RB calls a running play while tapping toggles
 
   if (cleanup) cleanup();
 });
-
-
-
-
 

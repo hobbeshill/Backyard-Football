@@ -243,7 +243,7 @@ test('rear-facing 3/4 helmets show neither side logos nor the front facemask', (
 
 test('3/4 view side profiles keep the crown stripe on top and face logos toward the camera', () => {
   for (const direction of [-1, 1]) {
-    const { ctx, ellipses, lineToX, movePoints, text, bezierCurveYs, scales } = createRecordingContext();
+    const { ctx, ellipses, lineToX, movePoints, text, bezierCurveYs, scales, quadraticEndY } = createRecordingContext();
     drawHelmetSprite(
       ctx,
       { x: 0, y: 0, radius: 10, vx: direction * 2, vy: 0 },
@@ -258,7 +258,12 @@ test('3/4 view side profiles keep the crown stripe on top and face logos toward 
     assert.equal(text.length, 1, 'Profile shows the visible side decal once');
     assert.ok(lineToX.some(x => Math.sign(x) === direction && Math.abs(x) > 8), 'Facemask points toward movement');
     assert.ok(bezierCurveYs[0][0] < -6 && bezierCurveYs[0][1] < -6, 'Crown stripe follows the top ridge');
-    assert.ok(scales.some(([x, y]) => x === 1.12 && y === 1.35), 'Profile is wider while keeping its forward-facing helmet height');
+    const [scaleX, scaleY] = scales.find(([x, y]) => x !== 1 || y !== 1)!;
+    const radius = 10 * 1.15;
+    const shellHeight = (Math.max(...quadraticEndY) - Math.min(...quadraticEndY)) * scaleY;
+    const rearShellHeight = radius * 1.90;
+    assert.ok(Math.abs(shellHeight - rearShellHeight) / rearShellHeight < 0.05, 'Profile shell matches the front/rear helmet height');
+    assert.ok(scaleX * 1.66 * radius > shellHeight, 'Profile shell is longer front-to-back than it is tall');
   }
 });
 
@@ -271,7 +276,7 @@ test('3/4 profile facing stays stable through small end-of-play velocity changes
     entity.vy = velocity[1];
     const { ctx, scales } = createRecordingContext();
     drawHelmetSprite(ctx, entity, design, -1, 1, 'THREE_QUARTER');
-    assert.ok(scales.some(([x, y]) => x === 1.12 && y === 1.35), 'Small velocity changes do not switch out of profile');
+    assert.ok(scales.some(([x, y]) => x === 1.22 && y === 1.28), 'Small velocity changes do not switch out of profile');
   }
 });
 
@@ -294,4 +299,32 @@ test('Texas longhorn remains a graphic side decal in profile view', () => {
 
   assert.ok(lineToX.length > 0, 'Longhorn is drawn as a graphic shape');
   assert.deepEqual(text, [], 'Texas uses its graphic decal, not substitute text');
+});
+
+test('quarterback helmet turns with lateral movement but never faces his own end zone', () => {
+  const design = getHelmetDesign(TEAMS.AUBURN);
+  const draw = (entity: { x: number; y: number; radius: number; vx: number; vy: number }, forwardDirection: number) => {
+    const recording = createRecordingContext();
+    drawHelmetSprite(recording.ctx, entity, design, forwardDirection, 1, 'THREE_QUARTER', true);
+    return recording;
+  };
+
+  for (const forwardDirection of [-1, 1]) {
+    const qb = { x: 0, y: 0, radius: 10, vx: 0, vy: 0 };
+    const facingForwardTextCount = forwardDirection === 1 ? 2 : 0;
+    assert.equal(draw(qb, forwardDirection).text.length, facingForwardTextCount, 'Stationary QB faces downfield');
+
+    qb.vx = 2;
+    assert.ok(draw(qb, forwardDirection).scales.some(([x, y]) => x === 1.22 && y === 1.28), 'QB turns to profile moving right');
+    assert.ok(draw(qb, forwardDirection).lineToX.some(x => x > 8), 'Facemask points right');
+
+    qb.vx = -2;
+    assert.ok(draw(qb, forwardDirection).lineToX.some(x => x < -8), 'Facemask points left');
+
+    qb.vx = 0;
+    qb.vy = -forwardDirection * 2;
+    const backpedal = draw(qb, forwardDirection);
+    assert.equal(backpedal.text.length, facingForwardTextCount, 'Backpedaling QB still faces downfield');
+    assert.equal(backpedal.scales.some(([x, y]) => x === 1.22 && y === 1.28), false);
+  }
 });

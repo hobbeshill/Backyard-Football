@@ -61,13 +61,13 @@ export function shouldCpuReleasePass(situation: CpuPassReleaseSituation): boolea
     if (pressureReactionComplete) return true;
     const hasDevelopedTarget = (situation.targetDepthYards ?? 0) >= 15 &&
       (situation.targetSeparation ?? 0) >= 14 && situation.bestScore > 35;
-    return (situation.playClock >= 48 && hasDevelopedTarget) || situation.playClock >= 200;
+    return (situation.playClock >= 60 && hasDevelopedTarget) || situation.playClock >= 240;
   }
   return situation.isDeepShotOpportunity ||
-    (situation.hasOpenBreak && situation.playClock >= 22) ||
+    (situation.hasOpenBreak && situation.playClock >= 32) ||
     pressureReactionComplete ||
-    (situation.playClock >= 28 && situation.bestScore > 15) ||
-    situation.playClock >= 42;
+    (situation.playClock >= 44 && situation.bestScore > 15) ||
+    situation.playClock >= 66;
 }
 
 export function isCpuPressureRecognized(isUnderHeavyPressure: boolean, playClock: number): boolean {
@@ -83,7 +83,7 @@ export interface CpuScrambleSituation {
 
 export function shouldCpuScramble(situation: CpuScrambleSituation, random: () => number = Math.random): boolean {
   if (situation.playClock < 28 || situation.bestScore > 30 || situation.hasOpenBreak) return false;
-  const chance = situation.isUnderHeavyPressure ? 0.3 : situation.playClock >= 48 ? 0.08 : 0;
+  const chance = situation.isUnderHeavyPressure ? 0.3 : situation.playClock >= 60 ? 0.08 : 0;
   return random() < chance;
 }
 

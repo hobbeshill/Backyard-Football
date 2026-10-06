@@ -31,9 +31,9 @@ const TEAM_DECAL_CROPS = [
   { x: 2157, y: 1160, width: 620, height: 266 }
 ];
 const HELMET_VISUAL_RADIUS = 10;
-const PROFILE_WIDTH_SCALE = 1.12;
-const PROFILE_HEIGHT_SCALE = 1.35;
-const PROFILE_HEIGHT_OFFSET = 0.13;
+const PROFILE_WIDTH_SCALE = 1.22;
+const PROFILE_HEIGHT_SCALE = 1.28;
+const PROFILE_HEIGHT_OFFSET = -0.14;
 const helmetDecalCache = new Map<number, HTMLCanvasElement>();
 const threeQuarterFacingByEntity = new WeakMap<object, { forwardDirection: number; profileDirection: number; facingAway: boolean }>();
 let helmetDecalSheet: HTMLImageElement | null = null;
@@ -44,7 +44,20 @@ function getThreeQuarterFacing(
   faceForwardDirection: boolean
 ): { profileDirection: number; facingAway: boolean } {
   if (faceForwardDirection) {
-    const facing = { profileDirection: 0, facingAway: forwardDirection === -1 };
+    // Quarterback: turns to profile on lateral movement but never faces his own end zone.
+    const lateralSpeed = Math.abs(entity.vx || 0);
+    const verticalSpeed = Math.abs(entity.vy || 0);
+    const previousProfile = threeQuarterFacingByEntity.get(entity);
+    const keepProfile = previousProfile?.forwardDirection === forwardDirection &&
+      previousProfile.profileDirection !== 0 &&
+      Math.sign(entity.vx || 0) === previousProfile.profileDirection &&
+      lateralSpeed > 0.3 && lateralSpeed > verticalSpeed * 0.8;
+    const turnToProfile = lateralSpeed > 0.5 && lateralSpeed > verticalSpeed * 1.15;
+    const facing = {
+      profileDirection: keepProfile || turnToProfile ? Math.sign(entity.vx || 0) : 0,
+      facingAway: false
+    };
+    facing.facingAway = facing.profileDirection === 0 && forwardDirection === -1;
     threeQuarterFacingByEntity.set(entity, { forwardDirection, ...facing });
     return facing;
   }
@@ -185,7 +198,7 @@ function drawHelmetTeamDecalAt(
 }
 
 function drawHelmetTeamDecal(ctx: HelmetDrawingContext, design: HelmetDesign, direction: number, radius: number): boolean {
-  return drawHelmetTeamDecalAt(ctx, design, radius, -direction * radius * 0.10, radius * 0.08, 1.42, 1.0);
+  return drawHelmetTeamDecalAt(ctx, design, radius, -direction * radius * 0.12, -radius * 0.20, 1.42, 1.0);
 }
 export function drawThreeQuarterHelmetSprite(
   ctx: HelmetDrawingContext,
@@ -218,17 +231,17 @@ export function drawThreeQuarterHelmetSprite(
     ctx.translate(0, -radius * PROFILE_HEIGHT_OFFSET);
     ctx.scale(PROFILE_WIDTH_SCALE, PROFILE_HEIGHT_SCALE);
     ctx.beginPath();
-    ctx.moveTo(-profileDirection * radius * 0.78, radius * 0.10);
-    ctx.quadraticCurveTo(-profileDirection * radius * 0.94, -radius * 0.32, -profileDirection * radius * 0.62, -radius * 0.68);
-    ctx.quadraticCurveTo(-profileDirection * radius * 0.34, -radius * 0.96, profileDirection * radius * 0.08, -radius * 0.93);
-    ctx.quadraticCurveTo(profileDirection * radius * 0.52, -radius * 0.91, profileDirection * radius * 0.68, -radius * 0.55);
-    ctx.quadraticCurveTo(profileDirection * radius * 0.78, -radius * 0.34, profileDirection * radius * 0.70, -radius * 0.12);
-    ctx.lineTo(profileDirection * radius * 0.82, -radius * 0.08);
-    ctx.lineTo(profileDirection * radius * 0.79, radius * 0.03);
-    ctx.quadraticCurveTo(profileDirection * radius * 0.58, radius * 0.08, profileDirection * radius * 0.48, radius * 0.30);
-    ctx.lineTo(profileDirection * radius * 0.37, radius * 0.56);
-    ctx.quadraticCurveTo(-profileDirection * radius * 0.02, radius * 0.70, -profileDirection * radius * 0.40, radius * 0.54);
-    ctx.quadraticCurveTo(-profileDirection * radius * 0.73, radius * 0.44, -profileDirection * radius * 0.78, radius * 0.10);
+    // Side-view shell: domed crown, rear flare at the neck, and a jaw flap dropping toward the facemask.
+    ctx.moveTo(-profileDirection * radius * 0.82, radius * 0.36);
+    ctx.quadraticCurveTo(-profileDirection * radius * 0.98, -radius * 0.12, -profileDirection * radius * 0.74, -radius * 0.58);
+    ctx.quadraticCurveTo(-profileDirection * radius * 0.42, -radius * 0.98, profileDirection * radius * 0.08, -radius * 0.93);
+    ctx.quadraticCurveTo(profileDirection * radius * 0.56, -radius * 0.88, profileDirection * radius * 0.70, -radius * 0.44);
+    ctx.lineTo(profileDirection * radius * 0.74, -radius * 0.20);
+    ctx.lineTo(profileDirection * radius * 0.56, -radius * 0.16);
+    ctx.quadraticCurveTo(profileDirection * radius * 0.48, radius * 0.06, profileDirection * radius * 0.62, radius * 0.30);
+    ctx.quadraticCurveTo(profileDirection * radius * 0.60, radius * 0.54, profileDirection * radius * 0.34, radius * 0.52);
+    ctx.quadraticCurveTo(profileDirection * radius * 0.04, radius * 0.50, -profileDirection * radius * 0.16, radius * 0.30);
+    ctx.quadraticCurveTo(-profileDirection * radius * 0.48, radius * 0.46, -profileDirection * radius * 0.82, radius * 0.36);
     ctx.closePath();
     ctx.fillStyle = design.shell;
     ctx.fill();
@@ -266,7 +279,7 @@ export function drawThreeQuarterHelmetSprite(
 
     if (!drawHelmetTeamDecal(ctx, design, profileDirection, radius) && (design.decalBackground || design.decalMark || design.decalShape)) {
       ctx.save();
-      ctx.translate(-profileDirection * radius * 0.10, radius * 0.08);
+      ctx.translate(-profileDirection * radius * 0.12, -radius * 0.20);
       if (design.decalBackground) {
         ctx.beginPath();
         ctx.ellipse(0, 0, radius * 0.30, radius * 0.24, 0, 0, Math.PI * 2);
@@ -290,19 +303,21 @@ export function drawThreeQuarterHelmetSprite(
 
     ctx.fillStyle = 'rgba(15, 23, 42, 0.95)';
     ctx.beginPath();
-    ctx.ellipse(profileDirection * radius * 0.62, radius * 0.02, radius * 0.22, radius * 0.12, 0, 0, Math.PI * 2);
+    ctx.ellipse(profileDirection * radius * 0.60, -radius * 0.02, radius * 0.12, radius * 0.16, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.strokeStyle = '#111827';
-    ctx.lineWidth = Math.max(2.2, radius * 0.18);
+    ctx.lineWidth = Math.max(2.2, radius * 0.16);
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
+    // Facemask cage: brow and jaw attachments with bars projecting forward of the shell.
     ctx.beginPath();
-    ctx.moveTo(profileDirection * radius * 0.45, -radius * 0.13);
-    ctx.lineTo(profileDirection * radius * 0.80, -radius * 0.17);
-    ctx.lineTo(profileDirection * radius * 0.90, radius * 0.12);
-    ctx.lineTo(profileDirection * radius * 0.62, radius * 0.31);
-    ctx.moveTo(profileDirection * radius * 0.53, -radius * 0.10);
-    ctx.lineTo(profileDirection * radius * 0.57, radius * 0.39);
+    ctx.moveTo(profileDirection * radius * 0.70, -radius * 0.20);
+    ctx.lineTo(profileDirection * radius * 0.94, -radius * 0.16);
+    ctx.lineTo(profileDirection * radius * 0.98, radius * 0.28);
+    ctx.lineTo(profileDirection * radius * 0.80, radius * 0.52);
+    ctx.lineTo(profileDirection * radius * 0.56, radius * 0.44);
+    ctx.moveTo(profileDirection * radius * 0.60, radius * 0.10);
+    ctx.lineTo(profileDirection * radius * 0.97, radius * 0.08);
     ctx.stroke();
     ctx.strokeStyle = design.facemask;
     ctx.lineWidth = Math.max(1.2, radius * 0.09);

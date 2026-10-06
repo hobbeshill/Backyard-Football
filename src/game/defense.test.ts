@@ -4,7 +4,7 @@ import { isCpuPressureRecognized, scoreRunBlockTarget, shouldCpuReleasePass, sho
 import { alignDefenderAcrossFromReceiver, alignDefenderAcrossFromRunningBack, alignDefenderToZone, alignDefenders, chooseCpuDefensiveAssignments, constrainDefendersToFieldSide, getBlitzAlignmentY, getBracketCoverageTarget, getDefensiveLineAlignmentY, matchCpuDefendersToReceivers, separateDefenderAlignments } from './defense';
 import { getCarrierFumbleChance } from './fumbles';
 import { calculateYardsToGo, canDefenderDeflectPass, canTackleQuarterback, findTappedPassReceiver, getCatchCompletionChance, getDefenderPassReachHeight, getDriveStartY, getSnapBallPosition, getPassArcHeight, getPassArcMaxHeight, getPassFlightFrames, getPassLeadTarget, getRoutePassLeadTarget, isSafety, resolveCatchContestOutcome, resolvePlayResult } from './rules';
-import { canEngagePassBlock, clampPlayerToFieldY, getFatigueSpeedMultiplier, getPassBlockHoldFrames, getRunPursuitMovement, isRusherActivelyBlocked, moveToward, shouldHoldPassBlock, updatePlayerStamina, updateReceiverTargetStamina, updateRouteMovement } from './movement';
+import { canEngagePassBlock, clampPlayerToFieldY, GAME_SPEED_SCALE, getBallCarrierRunSpeed, getFatigueSpeedMultiplier, getPassBlockBaseHoldFrames, getPassBlockHoldFrames, getRunDirectionSpeedFactor, getRunPursuitMovement, getUserDefenderSpeed, isRusherActivelyBlocked, moveToward, shouldHoldPassBlock, updatePlayerStamina, updateReceiverTargetStamina, updateRouteMovement, USER_CONTROL_SPEED_MULTIPLIER } from './movement';
 import type { Entity } from './types';
 
 test('coverage reduces catches smoothly and touching players are not wide open', () => {
@@ -54,8 +54,17 @@ test('defender run pursuit starts at base speed and ramps up over time', () => {
   assert.ok(initial.acceleration < 0.13, 'Pursuit acceleration should start gradually');
   assert.ok(later.speed > initial.speed);
   assert.ok(later.acceleration > initial.acceleration);
-  assert.equal(maxed.speed, 2.68);
+  assert.equal(maxed.speed, 2.98);
   assert.equal(maxed.acceleration, 0.4);
+});
+
+test('user-controlled players get a modest speed edge while max pursuit remains faster', () => {
+  assert.equal(USER_CONTROL_SPEED_MULTIPLIER, 1.12);
+
+  const maxPursuitSpeed = getRunPursuitMovement(0.88, 1000).speed * 0.68 * GAME_SPEED_SCALE;
+  const boostedCarrierSpeed = getBallCarrierRunSpeed(false, true) * 0.78 * GAME_SPEED_SCALE * USER_CONTROL_SPEED_MULTIPLIER;
+  assert.ok(boostedCarrierSpeed > getBallCarrierRunSpeed(false, true) * 0.78 * GAME_SPEED_SCALE);
+  assert.ok(maxPursuitSpeed > boostedCarrierSpeed, 'A fully accelerated standard defender should still be able to catch the fastest controlled carrier');
 });
 
 test('fatigue follows workload and endurance, with bounded recovery and speed penalties', () => {
@@ -123,6 +132,9 @@ test('pass protection engagement checks real contact without moving either playe
 test('pass blockers can be shed and nearby unengaged blockers do not prevent sacks', () => {
   const blocker: Entity = { x: 170, y: 500, radius: 10 };
   const rusher: Entity = { x: 170, y: 526, radius: 10 };
+  assert.equal(getPassBlockBaseHoldFrames(), 155);
+  const sharedBlitzerHoldFrames = getPassBlockHoldFrames(getPassBlockBaseHoldFrames(), 1, 1);
+  assert.equal(sharedBlitzerHoldFrames, 155, 'Every blitzer uses the same blocker duration');
   assert.equal(getPassBlockHoldFrames(100, 1.2, 1), 120);
   assert.equal(getPassBlockHoldFrames(100, 0.6, 1.5), 45);
 
@@ -138,6 +150,22 @@ test('pass blockers can be shed and nearby unengaged blockers do not prevent sac
   assert.equal(isRusherActivelyBlocked(rusher, [blocker]), true);
   blocker.x = 230;
   assert.equal(isRusherActivelyBlocked(rusher, [blocker]), false);
+});
+
+test('forward ball-carrier input is not penalized relative to backward input', () => {
+  for (const attackDirection of [-1, 1]) {
+    const forwardInput = attackDirection;
+    const backwardInput = -attackDirection;
+    assert.equal(getRunDirectionSpeedFactor(forwardInput, attackDirection), 1.05);
+    assert.equal(getRunDirectionSpeedFactor(backwardInput, attackDirection), 0.70);
+  }
+});
+
+test('user-controlled defense speed uses the player rating and matches defensive coverage pace', () => {
+  const userSpeed = getUserDefenderSpeed(1.18);
+  const coverageSpeed = 2.05 * 0.68 * GAME_SPEED_SCALE * 1.18;
+  assert.ok(userSpeed > coverageSpeed, 'Direct control should preserve an edge over an AI defender with the same rating');
+  assert.ok(getUserDefenderSpeed(1.18, 0) < userSpeed, 'Fatigue should still reduce direct-control speed');
 });
 
 test('snaps travel from the center in front of the QB to the QB carrying position in either direction', () => {
@@ -307,12 +335,13 @@ test('CPU releases open, pressured, and overdue passes before scrambling', () =>
     bestScore: 0
   };
 
-  assert.equal(shouldCpuReleasePass({ ...situation, hasOpenBreak: true, playClock: 21 }), false);
-  assert.equal(shouldCpuReleasePass({ ...situation, hasOpenBreak: true, playClock: 22 }), true);
+  assert.equal(shouldCpuReleasePass({ ...situation, hasOpenBreak: true, playClock: 31 }), false);
+  assert.equal(shouldCpuReleasePass({ ...situation, hasOpenBreak: true, playClock: 32 }), true);
   assert.equal(shouldCpuReleasePass({ ...situation, isUnderHeavyPressure: true, playClock: 26, pressureFrames: 9 }), false);
   assert.equal(shouldCpuReleasePass({ ...situation, isUnderHeavyPressure: true, playClock: 35, pressureFrames: 10 }), true);
-  assert.equal(shouldCpuReleasePass({ ...situation, playClock: 58 }), true);
-  assert.equal(shouldCpuReleasePass({ ...situation, hasTarget: false, playClock: 58 }), false);
+  assert.equal(shouldCpuReleasePass({ ...situation, playClock: 65 }), false);
+  assert.equal(shouldCpuReleasePass({ ...situation, playClock: 66 }), true);
+  assert.equal(shouldCpuReleasePass({ ...situation, hasTarget: false, playClock: 66 }), false);
 });
 
 test('CPU pressure reads allow a short reaction window before forcing a throw', () => {
@@ -334,14 +363,14 @@ test('CPU vertical calls wait for downfield windows but escape pressure and even
     targetSeparation: 25
   };
   assert.equal(shouldCpuReleasePass(situation), false);
-  assert.equal(shouldCpuReleasePass({ ...situation, playClock: 60 }), false);
-  assert.equal(shouldCpuReleasePass({ ...situation, playClock: 48, targetDepthYards: 18 }), true);
-  assert.equal(shouldCpuReleasePass({ ...situation, playClock: 48, targetDepthYards: 18, targetSeparation: 8 }), false);
+  assert.equal(shouldCpuReleasePass({ ...situation, playClock: 59, targetDepthYards: 18 }), false);
+  assert.equal(shouldCpuReleasePass({ ...situation, playClock: 60, targetDepthYards: 18 }), true);
+  assert.equal(shouldCpuReleasePass({ ...situation, playClock: 60, targetDepthYards: 18, targetSeparation: 8 }), false);
   assert.equal(shouldCpuReleasePass({ ...situation, isUnderHeavyPressure: true, playClock: 35, pressureFrames: 10 }), true);
   assert.equal(shouldCpuReleasePass({ ...situation, playClock: 100 }), false);
-  assert.equal(shouldCpuReleasePass({ ...situation, playClock: 160 }), false);
-  assert.equal(shouldCpuReleasePass({ ...situation, playClock: 200 }), true);
-  assert.equal(shouldCpuReleasePass({ ...situation, hasTarget: false, playClock: 200 }), false);
+  assert.equal(shouldCpuReleasePass({ ...situation, playClock: 200 }), false);
+  assert.equal(shouldCpuReleasePass({ ...situation, playClock: 240 }), true);
+  assert.equal(shouldCpuReleasePass({ ...situation, hasTarget: false, playClock: 240 }), false);
 });
 
 test('protected CPU vertical passes reach deep catch windows with real route speeds', (context) => {
@@ -389,6 +418,8 @@ test('CPU QB scrambles occasionally when pressured and passing options are poor'
 
   assert.equal(shouldCpuScramble(situation, () => 0.1), true);
   assert.equal(shouldCpuScramble(situation, () => 0.4), false);
+  assert.equal(shouldCpuScramble({ ...situation, isUnderHeavyPressure: false, playClock: 59 }, () => 0), false);
+  assert.equal(shouldCpuScramble({ ...situation, isUnderHeavyPressure: false, playClock: 60 }, () => 0), true);
   assert.equal(shouldCpuScramble({ ...situation, hasOpenBreak: true }, () => 0), false);
   assert.equal(shouldCpuScramble({ ...situation, bestScore: 31 }, () => 0), false);
 });
@@ -1376,6 +1407,10 @@ test('offensive double-taps only reposition the RB on offset and scaled canvases
     const isPaused = false, options = {}, tutorialStep = 0;
     const completeTutorialAction = () => {};
     const receiverHitPadding = 20, touchHitPadding = 18;
+    const p1OffPlay = 'SHORT_PASS', logicalCanvasWidth = 340, logicalCanvasHeight = 450;
+    const getCurrentOffenseJoystickAnchor = () => ({ x: 82, y: 292 });
+    const isOffenseJoystickStartZone = (x, y, anchorX, anchorY, width, height) =>
+      Math.abs(x - anchorX) <= width * 0.15 && Math.abs(y - anchorY) <= height * 0.12;
     let rbDoubleTapConsumed = false, lastDefenseSelectTime = 0, lastTapTime = 0;
     let tapThrowTarget = null, gestureEntity = null, isDirtGestureActive = false;
     let touchStartX = 0, touchStartY = 0, touchScreenStartX = 0, touchScreenStartY = 0;
@@ -2087,16 +2122,25 @@ test('Passes cleanly clear the line of scrimmage and cannot be easily batted dow
 test('AI QB throws decisively on rhythm and under pressure without freezing in the pocket', async () => {
   const { shouldCpuReleasePass } = await import('./ai');
 
-  // Situation 1: Open receiver on break triggers early release without waiting for sacks
+  // Situation 1: Give the receiver time to develop before releasing on the break
+  const breakReleaseBeforeDeveloped = shouldCpuReleasePass({
+    hasTarget: true,
+    isDeepShotOpportunity: false,
+    hasOpenBreak: true,
+    isUnderHeavyPressure: false,
+    playClock: 31,
+    bestScore: 25
+  });
+  assert.equal(breakReleaseBeforeDeveloped, false, 'AI QB gives routes more time to develop before releasing');
   const breakRelease = shouldCpuReleasePass({
     hasTarget: true,
     isDeepShotOpportunity: false,
     hasOpenBreak: true,
     isUnderHeavyPressure: false,
-    playClock: 22,
+    playClock: 32,
     bestScore: 25
   });
-  assert.equal(breakRelease, true, 'AI QB releases quickly on receiver break');
+  assert.equal(breakRelease, true, 'AI QB releases on a developed receiver break');
 
   // Situation 2: Under heavy pressure, AI QB gets pass off before being sacked
   const pressureRelease = shouldCpuReleasePass({
@@ -2110,16 +2154,16 @@ test('AI QB throws decisively on rhythm and under pressure without freezing in t
   });
   assert.equal(pressureRelease, true, 'AI QB releases pass to escape sack under heavy pressure');
 
-  // Situation 3: Rhythm release when target is developing
+  // Situation 3: Rhythm release after the route has had time to develop
   const rhythmRelease = shouldCpuReleasePass({
     hasTarget: true,
     isDeepShotOpportunity: false,
     hasOpenBreak: false,
     isUnderHeavyPressure: false,
-    playClock: 28,
+    playClock: 44,
     bestScore: 20
   });
-  assert.equal(rhythmRelease, true, 'AI QB releases a strong read at frame 28');
+  assert.equal(rhythmRelease, true, 'AI QB releases a strong read after the route has developed');
 
   // Situation 4: Quick release under rush pressure at frame 10
   const earlyPressureRelease = shouldCpuReleasePass({
@@ -2133,16 +2177,16 @@ test('AI QB throws decisively on rhythm and under pressure without freezing in t
   });
   assert.equal(earlyPressureRelease, false, 'AI QB has a reaction window when pressure first arrives');
 
-  // Situation 5: Progression release at frame 35 even if target score is modest
+  // Situation 5: Release by the pocket timeout even if no read is ideal
   const progressionRelease = shouldCpuReleasePass({
     hasTarget: true,
     isDeepShotOpportunity: false,
     hasOpenBreak: false,
     isUnderHeavyPressure: false,
-    playClock: 42,
+    playClock: 66,
     bestScore: -5
   });
-  assert.equal(progressionRelease, true, 'AI QB releases by frame 42 to prevent freezing indefinitely');
+  assert.equal(progressionRelease, true, 'AI QB releases by frame 66 to prevent freezing indefinitely');
 });
 
 test('Defenders respond to swipe gestures for blitz, zone, man, and spy assignments', async () => {
@@ -2169,7 +2213,3 @@ test('Defenders respond to swipe gestures for blitz, zone, man, and spy assignme
   const spy = evaluateDirtSwipeGesture(defender, 'DEFENDER', 8, -5, -1);
   assert.equal(spy.value, 'RB_SPY', 'Short swipe assigns RB_SPY');
 });
-
-
-
-

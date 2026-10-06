@@ -1,6 +1,8 @@
 import type { Entity } from './types';
 
 export const GAME_SPEED_SCALE = 0.90;
+export const USER_CONTROL_SPEED_MULTIPLIER = 1.12;
+
 export function getFatigueSpeedMultiplier(stamina = 100): number {
   return 1 - Math.min(1, Math.max(0, (70 - stamina) / 70)) * 0.35;
 }
@@ -42,6 +44,35 @@ export function getDesignedRunLateralBias(playType: string, currentX: number, si
   return Math.max(-1.15, Math.min(1.15, (targetX - currentX) * 0.12));
 }
 
+// Direction-only input: analog sticks and d-pads both produce a unit heading (or none).
+export function getDirectionalInput(x: number, y: number, deadzone = 0.05): { x: number; y: number } {
+  const magnitude = Math.hypot(x, y);
+  if (magnitude <= deadzone) return { x: 0, y: 0 };
+  return { x: x / magnitude, y: y / magnitude };
+}
+
+// User-controlled carriers move exactly where the stick points with no carried momentum.
+export function getUserRunnerVelocity(
+  inputX: number,
+  inputY: number,
+  maxSpeed: number,
+  attackDirection: number
+): { vx: number; vy: number } {
+  const direction = getDirectionalInput(inputX, inputY);
+  if (direction.x === 0 && direction.y === 0) return { vx: 0, vy: maxSpeed * attackDirection };
+  const speed = maxSpeed * getRunDirectionSpeedFactor(direction.y, attackDirection);
+  return { vx: direction.x * speed, vy: direction.y * speed };
+}
+
+export function getRunDirectionSpeedFactor(inputY: number, attackDirection: number): number {
+  return Math.max(0.70, Math.min(1.05, 0.90 + (inputY * attackDirection) * 0.25));
+}
+
+export function getUserDefenderSpeed(speedMultiplier = 1, stamina = 100): number {
+  return 2.05 * 0.68 * GAME_SPEED_SCALE * USER_CONTROL_SPEED_MULTIPLIER *
+    speedMultiplier * getFatigueSpeedMultiplier(stamina);
+}
+
 export function shouldApplyRunBlockStun(blocker: Entity, target: Entity): boolean {
   return !blocker.isEngagedWithBlocker || blocker.blockingDefender !== target;
 }
@@ -57,10 +88,10 @@ export function getReturnPursuitSpeed(returnerHasBall: boolean, pursuitFrames: n
 
 export function getRunPursuitMovement(baseSpeed: number, pursuitFrames: number, roleMultiplier = 1): { speed: number; acceleration: number } {
   const frames = Math.max(0, pursuitFrames);
-  const speedRamp = Math.min(1.8, frames * 0.025);
+  const speedRamp = Math.min(2.1, frames * 0.025);
   const accelerationRamp = Math.min(0.28, frames * 0.003);
   return {
-    speed: Math.min(3.4, (baseSpeed + speedRamp) * roleMultiplier),
+    speed: Math.min(3.6, (baseSpeed + speedRamp) * roleMultiplier),
     acceleration: Math.min(0.50, (0.12 + accelerationRamp) * roleMultiplier)
   };
 }
@@ -71,6 +102,10 @@ export function canEngagePassBlock(blocker: Entity, rusher: Entity): boolean {
 
 export function getPassBlockHoldFrames(baseHoldFrames: number, passProtection: number, passRush: number): number {
   return Math.max(45, Math.min(210, Math.round(baseHoldFrames * passProtection / passRush)));
+}
+
+export function getPassBlockBaseHoldFrames(): number {
+  return 155;
 }
 
 export function shouldHoldPassBlock(blocker: Entity, rusher: Entity, holdFrames: number): boolean {

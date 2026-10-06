@@ -3,7 +3,7 @@ import { defensiveKeys, defensivePlaybook, middleRoutes, offensiveKeys, offensiv
 import { alignDefenderAcrossFromReceiver, alignDefenderAcrossFromRunningBack, alignDefenderToZone, alignDefenders, chooseCpuDefensiveAssignments, constrainDefendersToFieldSide, getBlitzAlignmentY, getBracketCoverageTarget, getDefensiveLineAlignmentY, matchCpuDefendersToReceivers, separateDefenderAlignments } from './defense';
 import { evaluateCpuOffensiveAudibles, evaluateCpuBallCarrierMoves, isCpuPressureRecognized, shouldCpuGoForItOnFourthDown, shouldCpuReleasePass, shouldCpuScramble, scoreRunBlockTarget } from './ai';
 import { createFumbleBall, getCarrierFumbleChance } from './fumbles';
-import { canEngagePassBlock, clampPlayerToFieldY, createSimulationClock, distToSegment, GAME_SPEED_SCALE, getBallCarrierRunSpeed, getDesignedRunLateralBias, getFatigueSpeedMultiplier, getPassBlockHoldFrames, getReturnPursuitSpeed, getReturnTeamBlockers, getRunPursuitMovement, isRusherActivelyBlocked, moveToward, resolveCollisions, shouldApplyRunBlockStun, shouldHoldPassBlock, updatePlayerStamina, updateReceiverTargetStamina, updateRouteMovement } from './movement';
+import { canEngagePassBlock, clampPlayerToFieldY, createSimulationClock, distToSegment, GAME_SPEED_SCALE, getBallCarrierRunSpeed, getDesignedRunLateralBias, getFatigueSpeedMultiplier, getPassBlockBaseHoldFrames, getPassBlockHoldFrames, getDirectionalInput, getReturnPursuitSpeed, getReturnTeamBlockers, getUserRunnerVelocity, getRunPursuitMovement, getUserDefenderSpeed, isRusherActivelyBlocked, moveToward, resolveCollisions, shouldApplyRunBlockStun, shouldHoldPassBlock, updatePlayerStamina, updateReceiverTargetStamina, updateRouteMovement, USER_CONTROL_SPEED_MULTIPLIER } from './movement';
 import { resolvePlayResult, isSafety, calculateBrokenTackleChance, calculateYardsToGo, getDriveStartY, getSnapBallPosition, getPassArcHeight, getPassArcMaxHeight, getPassFlightFrames, findTappedPassReceiver, shouldReleaseUserPass, getPassLeadTarget, getRoutePassLeadTarget, canDefenderDeflectPass, canTackleQuarterback, resolveCatchContestOutcome, evaluateQbThrowAccuracy, getCpuThrowAimVariance, calculateKickoffFlight, calculatePuntFlight, getTouchbackYardLineY, getKickoffLineY, getDefenderPassReachHeight, isPlayerOutOfBounds } from './rules';
 import { sounds } from './sound';
 import { evaluateDirtSwipeGesture, drawDirtSwipeGesture } from './chalkMenu';
@@ -73,7 +73,35 @@ export function getCameraYForLineOfScrimmage(
   userOnOffense: boolean
 ): number {
   const screenFraction = userOnOffense ? 0.68 : 1 / 3;
-  return lineOfScrimmageY - (viewHeight * screenFraction / pitch);
+  const offenseCameraOffset = userOnOffense ? 100 : 0;
+  return lineOfScrimmageY + offenseCameraOffset - (viewHeight * screenFraction / pitch);
+}
+
+// Inner (field-side) edge of the left sideline yard numbers, drawn at x=30 in 28px bold monospace.
+export const FIELD_NUMBERS_INNER_EDGE_X = 64;
+export const OFFENSE_JOYSTICK_INNER_RING_RADIUS = 46 * 0.55;
+
+export function getOffenseJoystickAnchor(
+  runningBackDepthScreenY: number,
+  width = 340,
+  verticalOffset = 76
+): { x: number; y: number } {
+  const scale = width / 340;
+  return {
+    x: (FIELD_NUMBERS_INNER_EDGE_X + OFFENSE_JOYSTICK_INNER_RING_RADIUS) * scale,
+    y: runningBackDepthScreenY + verticalOffset
+  };
+}
+
+export function isOffenseJoystickStartZone(
+  x: number,
+  y: number,
+  anchorX: number,
+  anchorY: number,
+  width = 340,
+  height = 450
+): boolean {
+  return Math.abs(x - anchorX) <= width * 0.15 && Math.abs(y - anchorY) <= height * 0.12;
 }
 
 export function getPlayerForwardDirection(
@@ -287,7 +315,6 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   let passTapTarget: Entity | null = null;
   let passPointerId: number | null = null;
   let throwTargetFeedback: { x: number; y: number; radius: number; maxRadius: number; alpha: number; receiverName: string } | null = null;
-  let isSnapGestureActive = false;
 
   // Human AI QB Progression, Vision Cone & Reaction Latency
   let cpuQbProgressionIndex = 0;
@@ -1862,7 +1889,6 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     passTapTarget = null;
     passPointerId = null;
     throwTargetFeedback = null;
-    isSnapGestureActive = false;
     playClock = 0;
     cpuKickoffDelayTimer = kickingTeam === 'P2' ? 65 : 0;
 
@@ -2040,7 +2066,6 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     passTapTarget = null;
     passPointerId = null;
     throwTargetFeedback = null;
-    isSnapGestureActive = false;
     cpuQbProgressionIndex = 0;
     cpuQbReadTimer = 0;
     cpuQbPressureFrames = 0;
@@ -2703,6 +2728,15 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     };
   }
 
+  function getCurrentOffenseJoystickAnchor(): { x: number; y: number } {
+    // Height is pinned to the RB's formation depth in the pre-snap framing, so the stick never
+    // follows players, alignments, or the live-play camera.
+    const pitch = getCameraPitchFactor();
+    const preSnapCameraY = getCameraYForLineOfScrimmage(lineOfScrimmageY, 450, pitch, true);
+    const runningBackDepthScreenY = (lineOfScrimmageY - (75 * attackDirection) - preSnapCameraY) * (cameraScale * pitch);
+    return getOffenseJoystickAnchor(runningBackDepthScreenY, logicalCanvasWidth);
+  }
+
   function getControlledDefender(): Entity | null {
     if (activeDefense !== 'P1') return null;
     return defenders[0] || null;
@@ -2880,7 +2914,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     if (phase === 'PRE_SNAP') {
       // 1. If on offense, check if user tapped/dragged an interactive player (RB, WR, Center) FIRST!
       if (activeOffense === 'P1') {
-        // RB tap / line gesture: Checked FIRST to guarantee tapping RB never starts the play!
+        // RB tap / line gesture: checked before the snap zone so tapping the RB never starts the play.
         if (rb && Math.hypot(rb.x - px, rb.y - py) < rb.radius + receiverHitPadding) {
           gestureEntity = rb;
           gestureRole = 'RB';
@@ -2923,26 +2957,30 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           return;
         }
 
-        const distToQb = Math.hypot(qb.x - px, qb.y - py);
-        const distToRb = rb ? Math.hypot(rb.x - px, rb.y - py) : Infinity;
-        if (distToQb < 32 && distToQb < distToRb - 10) {
+        // Snap joystick zone: checked after player hit tests so alignments near the stick stay tappable.
+        const pointerPosition = screenPos;
+        const joystickAnchor = getCurrentOffenseJoystickAnchor();
+        if (p1OffPlay !== 'PUNT' && isOffenseJoystickStartZone(
+          pointerPosition.x,
+          pointerPosition.y,
+          joystickAnchor.x,
+          joystickAnchor.y,
+          logicalCanvasWidth,
+          logicalCanvasHeight
+        )) {
           startReadyPlay();
           const phaseAfterSnap: string = phase;
           if (activeOffense === 'P1' && (phaseAfterSnap === 'QB_DROP' || phaseAfterSnap === 'HANDOFF')) {
-            const qbPosition = worldToCanvas(qb.x, qb.y);
-            const pointerPosition = getCanvasCoords(e.clientX, e.clientY);
             joystick.active = true;
             joystick.pointerId = e.pointerId;
-            joystick.baseX = qbPosition.x;
-            joystick.baseY = qbPosition.y;
+            joystick.baseX = pointerPosition.x;
+            joystick.baseY = pointerPosition.y;
             joystick.currentX = pointerPosition.x;
             joystick.currentY = pointerPosition.y;
             joystick.inputX = 0;
             joystick.inputY = 0;
             joystick.distance = 0;
             joystick.alpha = 1.0;
-          } else {
-            isSnapGestureActive = true;
           }
           return;
         }
@@ -3020,14 +3058,15 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     const isLiveMovementPhase = (phase === 'QB_DROP' || phase === 'HANDOFF' || phase === 'RUNNING');
     if (typeof joystick !== 'undefined' && isLiveMovementPhase && !joystick.active) {
       const cPos = typeof getCanvasCoords === 'function' ? getCanvasCoords(e.clientX, e.clientY) : { x: e.clientX, y: e.clientY };
-      const isQuarterbackTouch = phase === 'QB_DROP' && activeOffense === 'P1' &&
-        Math.hypot(qb.x - px, qb.y - py) < qb.radius + receiverHitPadding;
-      if (isQuarterbackTouch || cPos.y >= logicalCanvasHeight / 2) {
-        const basePosition = isQuarterbackTouch ? worldToCanvas(qb.x, qb.y) : cPos;
+      const joystickAnchor = getCurrentOffenseJoystickAnchor();
+      const canStartOffenseJoystick = activeOffense === 'P1' &&
+        isOffenseJoystickStartZone(cPos.x, cPos.y, joystickAnchor.x, joystickAnchor.y, logicalCanvasWidth, logicalCanvasHeight);
+      const canStartDefenseJoystick = activeDefense === 'P1' && cPos.y >= logicalCanvasHeight / 2;
+      if (canStartOffenseJoystick || canStartDefenseJoystick) {
         joystick.active = true;
         joystick.pointerId = e.pointerId;
-        joystick.baseX = basePosition.x;
-        joystick.baseY = basePosition.y;
+        joystick.baseX = cPos.x;
+        joystick.baseY = cPos.y;
         joystick.currentX = cPos.x;
         joystick.currentY = cPos.y;
         joystick.inputX = 0;
@@ -3118,11 +3157,6 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
   const handlePointerUp = (e: PointerEvent) => {
     if (isPaused) return;
-
-    if (typeof isSnapGestureActive !== 'undefined' && isSnapGestureActive) {
-      isSnapGestureActive = false;
-      return;
-    }
 
     const wasJoystick = typeof joystick !== 'undefined' && joystick.active && e.pointerId === joystick.pointerId;
     if (wasJoystick) {
@@ -3944,7 +3978,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       // Dwell Time:
       // Human QBs take 20-28 frames (~0.35-0.45s) to scan a read before moving their eyes.
       // Under heavy pressure, progression speeds up to ~12-16 frames.
-      const dwellThreshold = isUnderHeavyPressure ? 14 : (isVerticalPlay ? 32 : 24);
+      const dwellThreshold = isUnderHeavyPressure ? 14 : (isVerticalPlay ? 36 : 28);
 
       // Evaluate the active read:
       const activeEval = evaluateTarget(activeRead, activeRead === rbCheckdown);
@@ -3975,7 +4009,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       }
 
       // Give the CPU one read-based chance to scramble if its passing options are poor.
-      if (!cpuScrambleDecisionMade && playClock >= (isUnderHeavyPressure ? 30 : 48)) {
+      if (!cpuScrambleDecisionMade && playClock >= (isUnderHeavyPressure ? 30 : 60)) {
         cpuScrambleDecisionMade = true;
         if (shouldCpuScramble({
           playClock,
@@ -4000,7 +4034,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       // Smart release conditions
       const hasCoverageMistakeNow = defenders.some(d => d.coverageMistake && (d.mistakeTimer || 0) > 0);
       const isTargetDeep = Boolean(bestTarget && (bestTarget.routeType === 'GO' || bestTarget.routeType === 'FLAG-L' || bestTarget.routeType === 'FLAG-R' || bestTarget.routeType === 'POST-L' || bestTarget.routeType === 'POST-R' || bestTarget.routeType === 'WHEEL'));
-      const isDeepShotOpportunity = hasCoverageMistakeNow && isTargetDeep && playClock >= 32;
+      const isDeepShotOpportunity = hasCoverageMistakeNow && isTargetDeep && playClock >= 40;
 
       const shouldThrowNow = shouldCpuReleasePass({
         hasTarget: bestTarget !== null,
@@ -4038,7 +4072,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         // Instead of releasing at the exact millisecond with zero windup,
         // the QB plants their back foot and hitches forward (8 frames / ~130ms) before the pass is unleashed.
         // Under heavy pressure or late clock, release immediately to beat the sack.
-        if (isUnderHeavyPressure || playClock >= 45) {
+        if (isUnderHeavyPressure || playClock >= 60) {
           executeCpuThrow(chosenTarget);
         } else {
           cpuQbThrowWindupTimer = 8;
@@ -4088,7 +4122,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           const stepSpeed = (activeEntity.jukeVx || 0) * (curve * 0.9 + 0.25);
           activeEntity.x += stepSpeed * GAME_SPEED_SCALE;
           activeEntity.vx = 0; // Clear lateral velocity during juke so they do not combine!
-        } else if (phase !== 'RUNNING') {
+        } else if (phase !== 'RUNNING' && !(phase === 'QB_DROP' && activeOffense === 'P1' && activeEntity === qb)) {
           if (activeEntity.vx === undefined) activeEntity.vx = 0;
           activeEntity.vx *= 0.88;
           activeEntity.x += activeEntity.vx * 0.8 * GAME_SPEED_SCALE;
@@ -4103,10 +4137,11 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         if (phase === 'QB_DROP') {
           if (activeOffense === 'P1') {
             const joy = getEffectiveJoystickInput();
-            if (joy.active) {
-              const qbSpeed = 1.30 * 0.78 * GAME_SPEED_SCALE * (p1Team.ratings.wrSpeed || 1.0) * getFatigueSpeedMultiplier(qb.stamina);
-              qb.vx = joy.x * qbSpeed;
-              qb.vy = joy.y * qbSpeed;
+            if (joy.active && (joy.x !== 0 || joy.y !== 0)) {
+              const qbSpeed = 1.30 * 0.78 * GAME_SPEED_SCALE * USER_CONTROL_SPEED_MULTIPLIER * (p1Team.ratings.wrSpeed || 1.0) * getFatigueSpeedMultiplier(qb.stamina);
+              const qbDirection = getDirectionalInput(joy.x, joy.y);
+              qb.vx = qbDirection.x * qbSpeed;
+              qb.vy = qbDirection.y * qbSpeed;
               qb.x += qb.vx;
               qb.y += qb.vy;
               qb.x = Math.max(30, Math.min(fieldWidth - 30, qb.x));
@@ -4124,12 +4159,16 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
                 sounds.playJuke();
                 showAnnouncement('QB SCRAMBLES PAST THE LINE! 🏃💨', '#00ffff');
               }
-            } else if ((qb.dropStepTimer || 0) > 0) {
-              qb.dropStepTimer!--;
-              // QB takes a crisp 3-step drop backwards away from the line of scrimmage at the beginning of the play
-              const progress = (qb.dropStepTimer || 0) / 28;
-              const dropSpeed = Math.sin(progress * Math.PI) * 1.35;
-              qb.y -= (dropSpeed * GAME_SPEED_SCALE * attackDirection);
+            } else {
+              qb.vx = 0;
+              qb.vy = 0;
+              if ((qb.dropStepTimer || 0) > 0) {
+                qb.dropStepTimer!--;
+                // QB takes a crisp 3-step drop backwards away from the line of scrimmage at the beginning of the play
+                const progress = (qb.dropStepTimer || 0) / 28;
+                const dropSpeed = Math.sin(progress * Math.PI) * 1.35;
+                qb.y -= (dropSpeed * GAME_SPEED_SCALE * attackDirection);
+              }
             }
           } else {
             // CPU AI Quarterback: Pocket navigation, rolling out, and scrambles!
@@ -4211,10 +4250,9 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           const baseRunSpeed = getBallCarrierRunSpeed(isReturn, (activeEntity.powerBoostTimer || 0) > 0);
           const contactSpeed = (activeEntity.contactSlowTimer || 0) > 0 ? 0.75 : 1;
           if ((activeEntity.contactSlowTimer || 0) > 0) activeEntity.contactSlowTimer!--;
-          // Requirement: "The user controlled the ball here should only be as fast as his teammates, currently he's too fast."
           // Teammate routes and lead blockers scale movement by 0.68 * GAME_SPEED_SCALE.
           const teammateSpeedScale = isReturn ? 0.68 : 0.78;
-          const carrierMaxSpeed = baseRunSpeed * teammateSpeedScale * GAME_SPEED_SCALE * (activeEntity.speedMultiplier || 1) * getFatigueSpeedMultiplier(activeEntity.stamina) * contactSpeed;
+          const carrierMaxSpeed = baseRunSpeed * teammateSpeedScale * GAME_SPEED_SCALE * (activeEntity.speedMultiplier || 1) * getFatigueSpeedMultiplier(activeEntity.stamina) * contactSpeed * (isUserControlled ? USER_CONTROL_SPEED_MULTIPLIER : 1);
 
           if (isUserControlled) {
             const joy = getEffectiveJoystickInput();
@@ -4226,22 +4264,16 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
               activeEntity.vx = 0; // Explicitly ensure lateral velocity is 0 during juke!
               activeEntity.vy = carrierMaxSpeed * attackDirection * 0.85;
               activeEntity.y += activeEntity.vy;
-            } else if (joy.active) {
-              // Lateral steering with calibrated agility - eliminates wild sliding and prevents overrunning
-              const targetLateralVx = joy.x !== 0 ? joy.x * carrierMaxSpeed * 0.26 : sweepLaneBias;
-              activeEntity.vx = (activeEntity.vx || 0) * 0.65 + targetLateralVx * 0.35;
-
-              if (joy.y !== 0) {
-                const forwardFactor = Math.max(0.70, Math.min(1.05, 0.90 + (-joy.y * attackDirection) * 0.25));
-                activeEntity.vy = carrierMaxSpeed * attackDirection * forwardFactor;
-              } else {
-                activeEntity.vy = carrierMaxSpeed * attackDirection;
-              }
+            } else if (joy.active && (joy.x !== 0 || joy.y !== 0)) {
+              // Tight direct control: velocity follows the stick/d-pad heading with no carried momentum.
+              const runnerVelocity = getUserRunnerVelocity(joy.x, joy.y, carrierMaxSpeed, attackDirection);
+              activeEntity.vx = runnerVelocity.vx;
+              activeEntity.vy = runnerVelocity.vy;
               activeEntity.x += activeEntity.vx;
               activeEntity.y += activeEntity.vy;
               activeEntity.x = Math.max(30, Math.min(fieldWidth - 30, activeEntity.x));
             } else {
-              activeEntity.vx = sweepLaneBias || (activeEntity.vx || 0) * 0.75;
+              activeEntity.vx = sweepLaneBias;
               activeEntity.x += activeEntity.vx;
               activeEntity.vy = carrierMaxSpeed * attackDirection;
               activeEntity.y += activeEntity.vy;
@@ -4355,7 +4387,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       const hasExtraBlitzer = passRushers.length >= 2;
       const offTeam = activeOffense === 'P1' ? p1Team : p2Team;
       const defTeam = activeDefense === 'P1' ? p1Team : p2Team;
-      const baseBlockHoldFrames = hasExtraBlitzer ? 75 : 135;
+      const baseBlockHoldFrames = getPassBlockBaseHoldFrames();
       const blockHoldFrames = getPassBlockHoldFrames(
         baseBlockHoldFrames,
         offTeam.ratings.passProtection || 1,
@@ -4685,9 +4717,13 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         if (isUserDefender) {
           const joy = getEffectiveJoystickInput();
           if (joy.active) {
-            const defSpeed = 1.15 * 0.68 * GAME_SPEED_SCALE * (p1Team.ratings.dbClosingSpeed || p1Team.ratings.passRush || 1.0) * getFatigueSpeedMultiplier(d.stamina);
-            d.vx = joy.x * defSpeed;
-            d.vy = joy.y * defSpeed;
+            const defenderSpeedRating = d.speedMultiplier || (d.passRusher
+              ? p1Team.ratings.passRush || 1.0
+              : p1Team.ratings.dbClosingSpeed || p1Team.ratings.passRush || 1.0);
+            const defSpeed = getUserDefenderSpeed(defenderSpeedRating, d.stamina);
+            const defenderDirection = getDirectionalInput(joy.x, joy.y);
+            d.vx = defenderDirection.x * defSpeed;
+            d.vy = defenderDirection.y * defSpeed;
             if (!d.isEngagedWithBlocker) {
               d.x += d.vx;
               d.y += d.vy;
@@ -4752,8 +4788,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           }
           // Calibrate rush speed so blitz doesn't instantly overwhelm the pocket before the QB drops back
           const isMultiRusherScheme = activeDefKey === 'ZONE34' || activeDefKey === 'ZONE232';
-          const rushSpeed = isMultiRusherScheme ? 1.28 : 1.10;
-          const rushAccel = isMultiRusherScheme ? 0.22 : 0.18;
+          const rushSpeed = isMultiRusherScheme ? 1.20 : 1.02;
+          const rushAccel = isMultiRusherScheme ? 0.20 : 0.16;
           moveToward(d, qb.x, qb.y, rushAccel, rushSpeed);
           d.x = Math.max(20, Math.min(fieldWidth - 20, d.x));
           d.y = Math.max(30, Math.min(fieldHeight - 30, d.y));
@@ -5809,7 +5845,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     playersByDepth
       .sort((first, second) => first.entity.y - second.entity.y)
       .forEach(({ entity, role, forwardDirection }) => {
-        drawHelmet(entity, getEntityHelmet(entity, role), forwardDirection, entity === qb && phase === 'QB_DROP');
+        drawHelmet(entity, getEntityHelmet(entity, role), forwardDirection, entity === qb && (phase === 'PRE_SNAP' || phase === 'QB_DROP'));
       });
 
     if (activeEntity === qb || (qb.powerBoostTimer || 0) > 0) {
@@ -6503,18 +6539,22 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       joystick.alpha = Math.max(0, joystick.alpha - 0.08);
     }
 
-    if (joystick.alpha > 0.01) {
+    const showOffenseJoystickHint = phase === 'PRE_SNAP' && activeOffense === 'P1' && p1OffPlay !== 'PUNT';
+    if (joystick.alpha > 0.01 || showOffenseJoystickHint) {
       ctx.save();
       const MAX_RADIUS = 46 * (logicalCanvasWidth / 340);
       const KNOB_RADIUS = 20 * (logicalCanvasWidth / 340);
-      const alpha = joystick.alpha;
+      const alpha = joystick.alpha > 0.01 ? joystick.alpha : 0.42;
+      const offenseJoystickAnchor = getCurrentOffenseJoystickAnchor();
+      const baseX = joystick.active ? joystick.baseX : offenseJoystickAnchor.x;
+      const baseY = joystick.active ? joystick.baseY : offenseJoystickAnchor.y;
 
       // Base ring
       ctx.fillStyle = `rgba(15, 23, 42, ${0.45 * alpha})`;
       ctx.strokeStyle = `rgba(0, 255, 255, ${0.45 * alpha})`;
       ctx.lineWidth = 2.5;
       ctx.beginPath();
-      ctx.arc(joystick.baseX, joystick.baseY, MAX_RADIUS, 0, Math.PI * 2);
+      ctx.arc(baseX, baseY, MAX_RADIUS, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
 
@@ -6523,18 +6563,18 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       ctx.lineWidth = 1;
       ctx.setLineDash([4, 4]);
       ctx.beginPath();
-      ctx.arc(joystick.baseX, joystick.baseY, MAX_RADIUS * 0.55, 0, Math.PI * 2);
+      ctx.arc(baseX, baseY, MAX_RADIUS * 0.55, 0, Math.PI * 2);
       ctx.stroke();
       ctx.setLineDash([]);
 
       // Directional stem line
-      const knobX = joystick.baseX + (joystick.inputX * (MAX_RADIUS - 6));
-      const knobY = joystick.baseY + (joystick.inputY * (MAX_RADIUS - 6));
+      const knobX = baseX + (joystick.inputX * (MAX_RADIUS - 6));
+      const knobY = baseY + (joystick.inputY * (MAX_RADIUS - 6));
       if (joystick.distance > 0.05) {
         ctx.strokeStyle = `rgba(0, 255, 255, ${0.55 * alpha})`;
         ctx.lineWidth = 3;
         ctx.beginPath();
-        ctx.moveTo(joystick.baseX, joystick.baseY);
+        ctx.moveTo(baseX, baseY);
         ctx.lineTo(knobX, knobY);
         ctx.stroke();
       }
@@ -6555,6 +6595,13 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       ctx.arc(knobX, knobY, KNOB_RADIUS, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
+
+      if (showOffenseJoystickHint && !joystick.active) {
+        ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
+        ctx.font = 'bold 8px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('TAP TO SNAP', baseX, baseY + MAX_RADIUS + 14);
+      }
 
       ctx.restore();
     }
