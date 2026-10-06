@@ -53,6 +53,7 @@ export interface GameEngineHandle {
   isJoystickActiveForTest?: () => boolean;
   getQuarterbackScreenPositionForTest?: () => { x: number; y: number };
   getReceiverScreenPositionForTest?: (index: number) => { x: number; y: number } | null;
+  getDefenderScreenPositionForTest?: (index: number) => { x: number; y: number } | null;
   cameraPerspective?: CameraPerspectiveMode;
   setCameraPerspective?: (mode: CameraPerspectiveMode) => void;
   getCameraPerspective?: () => CameraPerspectiveMode;
@@ -2343,6 +2344,10 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       const receiver = receivers[index];
       return receiver ? worldToCanvas(receiver.x, receiver.y) : null;
     },
+    getDefenderScreenPositionForTest: (index: number) => {
+      const defender = defenders[index];
+      return defender ? worldToCanvas(defender.x, defender.y) : null;
+    },
     diveTackle,
     selectP1Team: (teamId: string) => {
       p1Team = getTeam(teamId);
@@ -2728,13 +2733,22 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     };
   }
 
-  function getCurrentOffenseJoystickAnchor(): { x: number; y: number } {
-    // Height is pinned to the RB's formation depth in the pre-snap framing, so the stick never
-    // follows players, alignments, or the live-play camera.
-    const pitch = getCameraPitchFactor();
-    const preSnapCameraY = getCameraYForLineOfScrimmage(lineOfScrimmageY, 450, pitch, true);
-    const runningBackDepthScreenY = (lineOfScrimmageY - (75 * attackDirection) - preSnapCameraY) * (cameraScale * pitch);
-    return getOffenseJoystickAnchor(runningBackDepthScreenY, logicalCanvasWidth);
+  function getJoystickAnchor(): { x: number; y: number } {
+    return getOffenseJoystickAnchor(288, logicalCanvasWidth);
+  }
+
+  function activateJoystick(pointerId: number): void {
+    const anchor = getJoystickAnchor();
+    joystick.active = true;
+    joystick.pointerId = pointerId;
+    joystick.baseX = anchor.x;
+    joystick.baseY = anchor.y;
+    joystick.currentX = anchor.x;
+    joystick.currentY = anchor.y;
+    joystick.inputX = 0;
+    joystick.inputY = 0;
+    joystick.distance = 0;
+    joystick.alpha = 1.0;
   }
 
   function getControlledDefender(): Entity | null {
@@ -2853,52 +2867,43 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     const screenPos = getScreenCoords(e.clientX, e.clientY);
 
     const currentTime = Date.now();
+    const joystickAnchor = getJoystickAnchor();
+    const touchedJoystick = isOffenseJoystickStartZone(
+      screenPos.x,
+      screenPos.y,
+      joystickAnchor.x,
+      joystickAnchor.y,
+      logicalCanvasWidth,
+      logicalCanvasHeight
+    );
 
     if (options.tutorial) {
       const near = (entity: Entity | null) => entity && Math.hypot(entity.x - px, entity.y - py) < 32;
-      if (tutorialStep === 6 || tutorialStep === 10 || tutorialStep === 12) return;
+      if (tutorialStep === 6 || tutorialStep === 12) return;
       if (tutorialStep === 2 && !receivers.some(near)) return;
       if (tutorialStep === 3 && !near(centerReceiver)) return;
-      if (tutorialStep === 4 && !near(qb)) return;
+      if (tutorialStep === 4 && !near(qb) && !touchedJoystick) return;
       if (tutorialStep === 8 && !near(defenders[3])) return;
       if (tutorialStep === 9 && !near(defenders[0])) return;
       if ((tutorialStep === 0 || tutorialStep === 1 || tutorialStep === 7) && [qb, rb, centerReceiver, ...receivers, ...defenders].some(near)) return;
     }
 
-    // Guard against tap-through immediately after closing playbook or selecting defense
-    if (currentTime - lastDefenseSelectTime < 450) {
+    // The joystick is an explicit start action, so the tap-through guard must not block it.
+    if (!touchedJoystick && currentTime - lastDefenseSelectTime < 450) {
       return;
     }
 
     if (phase === 'KICKOFF') {
-      if (kickoffKickingTeam === 'P1') {
-        executeKickoff(kickMeterPower);
+      if (touchedJoystick) {
+        const kickoffPower = kickoffKickingTeam === 'P1'
+          ? kickMeterPower
+          : 0.85 + Math.random() * 0.12;
+        executeKickoff(kickoffPower);
+        if (kickoffReceivingTeam === 'P1') {
+          activateJoystick(e.pointerId);
+        }
       }
       return;
-    }
-
-    // Tapping the punt meter on the field executes the punt!
-    if (phase === 'PRE_SNAP' && activeOffense === 'P1' && typeof p1OffPlay !== 'undefined' && p1OffPlay === 'PUNT') {
-      const cWidth = (typeof canvas !== 'undefined' && canvas) ? logicalCanvasWidth : fieldWidth;
-      const cHeight = (typeof canvas !== 'undefined' && canvas) ? logicalCanvasHeight : logicalCanvasHeight;
-      const meterW = 210;
-      const meterH = 50;
-      const meterX = (cWidth - meterW) / 2;
-      const meterY = cHeight - 145;
-      const isTapOnMeter = (
-        screenPos.x >= meterX - 35 &&
-        screenPos.x <= meterX + meterW + 35 &&
-        screenPos.y >= meterY - 30 &&
-        screenPos.y <= meterY + meterH + 35
-      );
-      const distToPunter = Math.hypot(qb.x - px, qb.y - py);
-      if (isTapOnMeter || distToPunter < 45) {
-        if (typeof snapToQuarterback === 'function') snapToQuarterback();
-        if (typeof executePunt === 'function') {
-          executePunt('P1', typeof attackDirection !== 'undefined' ? attackDirection : 1, typeof kickMeterPower !== 'undefined' ? kickMeterPower : 0.6);
-        }
-        return;
-      }
     }
 
     tapThrowTarget = null;
@@ -2957,30 +2962,12 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           return;
         }
 
-        // Snap joystick zone: checked after player hit tests so alignments near the stick stay tappable.
-        const pointerPosition = screenPos;
-        const joystickAnchor = getCurrentOffenseJoystickAnchor();
-        if (p1OffPlay !== 'PUNT' && isOffenseJoystickStartZone(
-          pointerPosition.x,
-          pointerPosition.y,
-          joystickAnchor.x,
-          joystickAnchor.y,
-          logicalCanvasWidth,
-          logicalCanvasHeight
-        )) {
+        // Keep the same joystick start area for offense, defense, and special teams.
+        if (touchedJoystick) {
           startReadyPlay();
-          const phaseAfterSnap: string = phase;
-          if (activeOffense === 'P1' && (phaseAfterSnap === 'QB_DROP' || phaseAfterSnap === 'HANDOFF')) {
-            joystick.active = true;
-            joystick.pointerId = e.pointerId;
-            joystick.baseX = pointerPosition.x;
-            joystick.baseY = pointerPosition.y;
-            joystick.currentX = pointerPosition.x;
-            joystick.currentY = pointerPosition.y;
-            joystick.inputX = 0;
-            joystick.inputY = 0;
-            joystick.distance = 0;
-            joystick.alpha = 1.0;
+          const phaseAfterStart: string = phase;
+          if (phaseAfterStart === 'QB_DROP' || phaseAfterStart === 'HANDOFF' || activeDefense === 'P1') {
+            activateJoystick(e.pointerId);
           }
           return;
         }
@@ -3012,6 +2999,12 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           gestureTouchStartY = py;
           isDirtGestureActive = false;
           isPullingDefender = false;
+          return;
+        }
+
+        if (touchedJoystick) {
+          startReadyPlay();
+          activateJoystick(e.pointerId);
           return;
         }
 
@@ -3058,21 +3051,16 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     const isLiveMovementPhase = (phase === 'QB_DROP' || phase === 'HANDOFF' || phase === 'RUNNING');
     if (typeof joystick !== 'undefined' && isLiveMovementPhase && !joystick.active) {
       const cPos = typeof getCanvasCoords === 'function' ? getCanvasCoords(e.clientX, e.clientY) : { x: e.clientX, y: e.clientY };
-      const joystickAnchor = getCurrentOffenseJoystickAnchor();
-      const canStartOffenseJoystick = activeOffense === 'P1' &&
-        isOffenseJoystickStartZone(cPos.x, cPos.y, joystickAnchor.x, joystickAnchor.y, logicalCanvasWidth, logicalCanvasHeight);
-      const canStartDefenseJoystick = activeDefense === 'P1' && cPos.y >= logicalCanvasHeight / 2;
-      if (canStartOffenseJoystick || canStartDefenseJoystick) {
-        joystick.active = true;
-        joystick.pointerId = e.pointerId;
-        joystick.baseX = cPos.x;
-        joystick.baseY = cPos.y;
-        joystick.currentX = cPos.x;
-        joystick.currentY = cPos.y;
-        joystick.inputX = 0;
-        joystick.inputY = 0;
-        joystick.distance = 0;
-        joystick.alpha = 1.0;
+      const joystickAnchor = getJoystickAnchor();
+      if (isOffenseJoystickStartZone(
+        cPos.x,
+        cPos.y,
+        joystickAnchor.x,
+        joystickAnchor.y,
+        logicalCanvasWidth,
+        logicalCanvasHeight
+      )) {
+        activateJoystick(e.pointerId);
       }
     }
   };
@@ -3101,10 +3089,6 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       if (rawDist > DEADZONE) {
         const clampedDist = Math.min(MAX_RADIUS, rawDist);
         const angle = Math.atan2(dy, dx);
-        if (rawDist > MAX_RADIUS) {
-          joystick.baseX = joystick.currentX - Math.cos(angle) * MAX_RADIUS;
-          joystick.baseY = joystick.currentY - Math.sin(angle) * MAX_RADIUS;
-        }
         joystick.distance = Math.min(1.0, (clampedDist - DEADZONE) / (MAX_RADIUS - DEADZONE));
         joystick.inputX = Math.cos(angle) * joystick.distance;
         joystick.inputY = Math.sin(angle) * joystick.distance;
@@ -6421,7 +6405,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         ctx.fillStyle = '#ffcc00';
         ctx.font = 'bold 11px monospace';
         ctx.textAlign = 'center';
-        ctx.fillText('🏈 TAP METER TO KICKOFF!', logicalCanvasWidth / 2, meterY + 14);
+        ctx.fillText('🏈 TOUCH JOYSTICK TO KICKOFF!', logicalCanvasWidth / 2, meterY + 14);
 
         const barX = meterX + 15;
         const barY = meterY + 22;
@@ -6462,7 +6446,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         ctx.fillText(`${p2Team.name.toUpperCase()} KICKOFF...`, logicalCanvasWidth / 2, meterY + 18);
         ctx.fillStyle = '#aaaaaa';
         ctx.font = '9px monospace';
-        ctx.fillText('GET READY TO FIELD AND RETURN!', logicalCanvasWidth / 2, meterY + 34);
+        ctx.fillText('TOUCH JOYSTICK TO START!', logicalCanvasWidth / 2, meterY + 34);
       }
       ctx.restore();
     }
@@ -6485,7 +6469,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       ctx.fillStyle = '#00ffff';
       ctx.font = 'bold 11px monospace';
       ctx.textAlign = 'center';
-      ctx.fillText('🏈 TAP METER TO PUNT!', logicalCanvasWidth / 2, meterY + 14);
+      ctx.fillText('🏈 TOUCH JOYSTICK TO PUNT!', logicalCanvasWidth / 2, meterY + 14);
 
       const barX = meterX + 15;
       const barY = meterY + 22;
@@ -6539,15 +6523,16 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       joystick.alpha = Math.max(0, joystick.alpha - 0.08);
     }
 
-    const showOffenseJoystickHint = phase === 'PRE_SNAP' && activeOffense === 'P1' && p1OffPlay !== 'PUNT';
-    if (joystick.alpha > 0.01 || showOffenseJoystickHint) {
+    const showJoystickHint = (phase === 'PRE_SNAP' && (activeOffense === 'P1' || activeDefense === 'P1')) ||
+      phase === 'KICKOFF';
+    if (joystick.alpha > 0.01 || showJoystickHint) {
       ctx.save();
       const MAX_RADIUS = 46 * (logicalCanvasWidth / 340);
       const KNOB_RADIUS = 20 * (logicalCanvasWidth / 340);
       const alpha = joystick.alpha > 0.01 ? joystick.alpha : 0.42;
-      const offenseJoystickAnchor = getCurrentOffenseJoystickAnchor();
-      const baseX = joystick.active ? joystick.baseX : offenseJoystickAnchor.x;
-      const baseY = joystick.active ? joystick.baseY : offenseJoystickAnchor.y;
+      const joystickAnchor = getJoystickAnchor();
+      const baseX = joystick.active ? joystick.baseX : joystickAnchor.x;
+      const baseY = joystick.active ? joystick.baseY : joystickAnchor.y;
 
       // Base ring
       ctx.fillStyle = `rgba(15, 23, 42, ${0.45 * alpha})`;
@@ -6596,11 +6581,18 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       ctx.fill();
       ctx.stroke();
 
-      if (showOffenseJoystickHint && !joystick.active) {
+      if (showJoystickHint && !joystick.active) {
         ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
         ctx.font = 'bold 8px monospace';
         ctx.textAlign = 'center';
-        ctx.fillText('TAP TO SNAP', baseX, baseY + MAX_RADIUS + 14);
+        const hint = phase === 'KICKOFF'
+          ? 'TOUCH TO START'
+          : activeOffense === 'P1' && p1OffPlay === 'PUNT'
+            ? 'TOUCH TO PUNT'
+            : activeDefense === 'P1'
+              ? 'TOUCH TO START'
+              : 'TOUCH TO SNAP';
+        ctx.fillText(hint, baseX, baseY + MAX_RADIUS + 14);
       }
 
       ctx.restore();

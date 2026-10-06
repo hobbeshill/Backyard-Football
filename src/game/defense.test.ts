@@ -1408,7 +1408,7 @@ test('offensive double-taps only reposition the RB on offset and scaled canvases
     const completeTutorialAction = () => {};
     const receiverHitPadding = 20, touchHitPadding = 18;
     const p1OffPlay = 'SHORT_PASS', logicalCanvasWidth = 340, logicalCanvasHeight = 450;
-    const getCurrentOffenseJoystickAnchor = () => ({ x: 82, y: 292 });
+    const getJoystickAnchor = () => ({ x: 89.3, y: 364 });
     const isOffenseJoystickStartZone = (x, y, anchorX, anchorY, width, height) =>
       Math.abs(x - anchorX) <= width * 0.15 && Math.abs(y - anchorY) <= height * 0.12;
     let rbDoubleTapConsumed = false, lastDefenseSelectTime = 0, lastTapTime = 0;
@@ -1544,7 +1544,7 @@ test('Tapping any player or open field does not start the defensive play', () =>
 
   // 4. Tapping directly on the QB
   const qbTap = evaluatePreSnapDefenseTap(170, 948);
-  assert.equal(qbTap.playStarted, false, 'Tapping QB must not bypass the Ready action');
+  assert.equal(qbTap.playStarted, false, 'Tapping QB must not start the defensive play');
 });
 
 test('AI pre-snap shifts defenders toward the RB side', () => {

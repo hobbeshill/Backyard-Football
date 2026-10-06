@@ -368,15 +368,16 @@ test('relative joystick controls the unassigned defender when user is on defense
     const moveHandler = (canvas as any)._listeners.get('pointermove');
     const upHandler = (canvas as any)._listeners.get('pointerup');
 
-    // Ready starts the CPU play while the user is on defense.
+    // Start the CPU play while the user is on defense.
     game.startPlay?.();
     assert.ok((game.phase as string) === 'QB_DROP' || (game.phase as string) === 'HANDOFF');
 
-    // Engage joystick on defense
-    downHandler({ clientX: 100, clientY: 300, pointerId: 5 } as PointerEvent);
-    moveHandler({ clientX: 100, clientY: 260, pointerId: 5 } as PointerEvent);
+    // Defense uses the same fixed screen anchor as offense.
+    downHandler({ clientX: 90, clientY: 364, pointerId: 5 } as PointerEvent);
+    assert.equal(game.isJoystickActiveForTest?.(), true);
+    moveHandler({ clientX: 110, clientY: 364, pointerId: 5 } as PointerEvent);
 
-    upHandler({ clientX: 100, clientY: 260, pointerId: 5 } as PointerEvent);
+    upHandler({ clientX: 110, clientY: 364, pointerId: 5 } as PointerEvent);
   } finally {
     cleanup?.();
   }
@@ -615,19 +616,24 @@ test('assignment defenders can cycle coverage but cannot be moved or controlled'
     const defenders = game.getDefenders?.();
     assert.ok(defenders);
     const teammate = defenders[1];
+    const teammateScreenPosition = game.getDefenderScreenPositionForTest?.(1);
+    assert.ok(teammateScreenPosition);
     const initialPosition = { x: teammate.x, y: teammate.y };
+    const assignmentCycle = ['MAN', 'ZONE', 'BLITZ', 'RB_SPY'];
+    const initialAssignment = teammate.defenseAssignment || 'MAN';
+    const expectedAssignment = assignmentCycle[(assignmentCycle.indexOf(initialAssignment) + 1) % assignmentCycle.length];
     const downHandler = (canvas as any)._listeners.get('pointerdown');
     const moveHandler = (canvas as any)._listeners.get('pointermove');
     const upHandler = (canvas as any)._listeners.get('pointerup');
 
-    downHandler({ clientX: teammate.x, clientY: teammate.y, pointerId: 1 } as PointerEvent);
-    upHandler({ clientX: teammate.x, clientY: teammate.y, pointerId: 1 } as PointerEvent);
-    assert.equal(teammate.defenseAssignment, 'BLITZ');
+    downHandler({ clientX: teammateScreenPosition.x, clientY: teammateScreenPosition.y, pointerId: 1 } as PointerEvent);
+    upHandler({ clientX: teammateScreenPosition.x, clientY: teammateScreenPosition.y, pointerId: 1 } as PointerEvent);
+    assert.equal(teammate.defenseAssignment, expectedAssignment);
     assert.equal(game.getControlledDefender?.(), defenders[0]);
 
-    downHandler({ clientX: teammate.x, clientY: teammate.y, pointerId: 2 } as PointerEvent);
-    moveHandler({ clientX: teammate.x + 50, clientY: teammate.y + 35, pointerId: 2 } as PointerEvent);
-    upHandler({ clientX: teammate.x + 50, clientY: teammate.y + 35, pointerId: 2 } as PointerEvent);
+    downHandler({ clientX: teammateScreenPosition.x, clientY: teammateScreenPosition.y, pointerId: 2 } as PointerEvent);
+    moveHandler({ clientX: teammateScreenPosition.x + 50, clientY: teammateScreenPosition.y + 35, pointerId: 2 } as PointerEvent);
+    upHandler({ clientX: teammateScreenPosition.x + 50, clientY: teammateScreenPosition.y + 35, pointerId: 2 } as PointerEvent);
     assert.deepEqual({ x: teammate.x, y: teammate.y }, initialPosition);
     assert.equal(teammate.defenseAssignment, 'ZONE', 'Deep backward swipe on assignment defender assigns ZONE coverage without moving the sprite');
     assert.equal(game.getControlledDefender?.(), defenders[0]);
@@ -772,7 +778,7 @@ test('user cannot pull defensive sprite across the line of scrimmage (illegal of
   }
 });
 
-test('Space starts ready plays on both sides, ignores repeats and typing, and arrows do not scroll', () => {
+test('Space starts plays on both sides, ignores repeats and typing, and arrows do not scroll', () => {
   const originalWindow = globalThis.window;
   const listeners = new Map<string, EventListener>();
   const mockWindow = {
@@ -825,7 +831,7 @@ test('Space starts ready plays on both sides, ignores repeats and typing, and ar
   }
 });
 
-test('Ready starts user defense while 12-yard-line joystick touch starts user offense', () => {
+test('the shared joystick starts defense, offense, kickoffs, and punts', () => {
   const canvas = createMockCanvas();
   let engine: GameEngineHandle | null = null;
   const cleanup = mountFootballGame(canvas, {
@@ -844,19 +850,20 @@ test('Ready starts user defense while 12-yard-line joystick touch starts user of
 
   try {
     assert.ok(engine);
-    const game = engine as any;
+    const game = engine as GameEngineHandle;
     game.setPossessionForTest?.('P2'); // CPU is on offense, User on defense
     game.resetDrill();
     assert.equal(game.phase, 'PRE_SNAP');
 
     const downHandler = (canvas as any)._listeners.get('pointerdown');
     const upHandler = (canvas as any)._listeners.get('pointerup');
-    downHandler({ clientX: 170, clientY: 200, pointerId: 1 } as PointerEvent);
-    upHandler({ clientX: 170, clientY: 200, pointerId: 1 } as PointerEvent);
-    assert.equal(game.phase, 'PRE_SNAP', 'Defensive play starts from READY, not a QB tap');
-
-    game.startPlay?.();
-    assert.notEqual(game.phase, 'PRE_SNAP');
+    downHandler({ clientX: 90, clientY: 256, pointerId: 1 } as PointerEvent);
+    upHandler({ clientX: 90, clientY: 256, pointerId: 1 } as PointerEvent);
+    assert.equal(game.phase, 'PRE_SNAP', 'The defense start area is anchored to the offense joystick position');
+    downHandler({ clientX: 90, clientY: 364, pointerId: 5 } as PointerEvent);
+    upHandler({ clientX: 90, clientY: 364, pointerId: 5 } as PointerEvent);
+    const phaseAfterDefenseStart: string = game.phase;
+    assert.ok(phaseAfterDefenseStart === 'QB_DROP' || phaseAfterDefenseStart === 'HANDOFF', 'The joystick starts the defensive play');
 
     // The offense starts from the field-positioned joystick instead of the QB.
     game.setPossessionForTest?.('P1');
@@ -864,7 +871,22 @@ test('Ready starts user defense while 12-yard-line joystick touch starts user of
     assert.equal(game.phase, 'PRE_SNAP');
     downHandler({ clientX: 90, clientY: 364, pointerId: 2 } as PointerEvent);
     upHandler({ clientX: 90, clientY: 364, pointerId: 2 } as PointerEvent);
-    assert.ok(game.phase === 'QB_DROP' || game.phase === 'HANDOFF');
+    const phaseAfterOffenseStart: string = game.phase;
+    assert.ok(phaseAfterOffenseStart === 'QB_DROP' || phaseAfterOffenseStart === 'HANDOFF');
+
+    game.resetGame();
+    assert.equal(game.phase, 'KICKOFF');
+    downHandler({ clientX: 90, clientY: 364, pointerId: 3 } as PointerEvent);
+    upHandler({ clientX: 90, clientY: 364, pointerId: 3 } as PointerEvent);
+    assert.equal(game.phase, 'THROWN', 'The joystick starts the kickoff');
+
+    game.setPossessionForTest?.('P1');
+    game.set4thDownForTest?.();
+    game.callPunt();
+    assert.equal(game.phase, 'PRE_SNAP');
+    downHandler({ clientX: 90, clientY: 364, pointerId: 4 } as PointerEvent);
+    upHandler({ clientX: 90, clientY: 364, pointerId: 4 } as PointerEvent);
+    assert.equal(game.phase, 'THROWN', 'The joystick starts the punt');
   } finally {
     cleanup?.();
   }

@@ -145,7 +145,7 @@ test('kickoff line calculation correctly places kicking team at 35-yard line', (
   assert.equal(getKickoffLineY(fieldHeight, endZoneHeight, 1, 35), 450);
 });
 
-test('real tutorial follows offense snaps, free-defender setup, defense Ready, and live play', (context) => {
+test('real tutorial follows offense snaps, free-defender setup, joystick-started defense, and live play', (context) => {
   let timestamp = 1000;
   context.mock.method(Date, 'now', () => timestamp);
   context.mock.method(Math, 'random', () => 0.5);
@@ -167,8 +167,8 @@ test('real tutorial follows offense snaps, free-defender setup, defense Ready, a
   let highlight = { x: 0, y: 0 };
   context.mock.method(drawing, 'translate', (x: number, y: number) => { offsetX = x; offsetY = y; });
   context.mock.method(drawing, 'scale', (x: number) => { scale = x; });
-  context.mock.method(drawing, 'arc', (x: number, y: number) => {
-    highlight = { x: offsetX + x * scale, y: offsetY + y * scale };
+  context.mock.method(drawing, 'arc', (x: number, y: number, radius: number) => {
+    if (radius <= 15) highlight = { x: offsetX + x * scale, y: offsetY + y * scale };
   });
   canvas.getContext = (() => new Proxy(drawing, {
     get: (target, key) => Reflect.get(target, key) ?? (() => {})
@@ -220,7 +220,7 @@ test('real tutorial follows offense snaps, free-defender setup, defense Ready, a
     assert.equal(step, 3);
     tap(250, 225);
     assert.equal(step, 4);
-    tap(170, 273);
+    tap(90, 364);
     assert.equal(step, 5);
     assert.equal(game.phase, 'QB_DROP');
     settle();
@@ -238,15 +238,19 @@ test('real tutorial follows offense snaps, free-defender setup, defense Ready, a
     send('pointerup', 85, 5);
     assert.equal(step, 8);
     settle();
-    tap(highlight.x, highlight.y);
+    const assignedDefender = game.getDefenderScreenPositionForTest?.(3);
+    assert.ok(assignedDefender);
+    tap(assignedDefender.x, assignedDefender.y);
     assert.equal(step, 9);
     settle();
-    send('pointerdown', highlight.x, highlight.y);
-    send('pointermove', highlight.x + 40, highlight.y);
-    send('pointerup', highlight.x + 40, highlight.y);
+    const freeDefender = game.getDefenderScreenPositionForTest?.(0);
+    assert.ok(freeDefender);
+    send('pointerdown', freeDefender.x, freeDefender.y);
+    send('pointermove', freeDefender.x + 40, freeDefender.y);
+    send('pointerup', freeDefender.x + 40, freeDefender.y);
     assert.equal(step, 10);
     settle();
-    game.startPlay?.();
+    tap(90, 364);
     assert.equal(step, 11);
     for (let count = 0; count < 2000 && step === 11; count++) {
       timestamp += 16;
@@ -557,7 +561,7 @@ test('return blockers only stun once per tackler engagement', () => {
   assert.equal(shouldApplyRunBlockStun({ x: 0, y: 0, radius: 10 }, tackler), true);
 });
 
-test('tapping the punt meter on the field executes the punt and all player speeds scale with GAME_SPEED_SCALE', async () => {
+test('the punt joystick starts the punt and all player speeds scale with GAME_SPEED_SCALE', async () => {
   const { GAME_SPEED_SCALE } = await import('./movement');
   assert.equal(GAME_SPEED_SCALE, 0.90, 'Player speed scale is increased for more responsive gameplay');
 
@@ -601,11 +605,12 @@ test('tapping the punt meter on the field executes the punt and all player speed
   const pointerDown = handlers.get('pointerdown');
   assert.ok(typeof pointerDown === 'function', 'Canvas has pointerdown listener');
 
-  // Meter is drawn at meterX = (340-210)/2 = 65, meterY = 450 - 145 = 305
-  // Tapping the meter (x: 170, y: 320)
+  // The punt meter is informational; the shared joystick is the start control.
   pointerDown({ clientX: 170, clientY: 320, pointerId: 1 });
+  assert.notEqual(engine.phase, 'THROWN', 'Tapping the punt meter does not start the punt');
+  pointerDown({ clientX: 90, clientY: 364, pointerId: 2 });
 
-  assert.ok(announcement.includes('PUNT') || engine.phase === 'THROWN' || engine.phase === 'PUNT', 'Tapping on-field punt meter triggers the punt');
+  assert.equal(engine.phase, 'THROWN', 'Touching the joystick starts the punt');
 
   if (cleanup) cleanup();
 });
@@ -710,4 +715,3 @@ test('swiping left or right on the RB calls a running play while tapping toggles
 
   if (cleanup) cleanup();
 });
-

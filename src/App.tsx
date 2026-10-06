@@ -595,8 +595,8 @@ export default function App() {
   );
   const currentRivalry = getRivalryForMatchup(p1TeamState.id, p2TeamState.id);
   const currentWeekNumber = seasonForDisplay.results.length + 1;
-  const isReadyPhase = hasKickedOff && engineRef.current?.phase === 'PRE_SNAP' && !engineRef.current.isKickoffActive();
-  const showPuntAction = isReadyPhase && activeOffenseState === 'P1' && is4thDown;
+  const isUserPreSnapPhase = hasKickedOff && engineRef.current?.phase === 'PRE_SNAP' && !engineRef.current.isKickoffActive();
+  const showPuntAction = isUserPreSnapPhase && activeOffenseState === 'P1' && is4thDown;
 
   return (
     <div className="relative w-screen min-h-[100dvh] h-[100dvh] overflow-hidden flex flex-col items-center justify-between py-1 bg-[#030704] text-white font-mono select-none">
@@ -885,31 +885,13 @@ export default function App() {
         <span className="font-bold opacity-90">v2.8.6 • 7v7 Football</span>
         <span className="text-neutral-300">
           {activeOffenseState === 'P1'
-            ? 'Draw Routes • Swipe RB Left/Right for Run Play • Tap RB for Protection • Tap QB to Snap'
-            : 'Move Highlighted Defender • Ready to Start'}
+            ? 'Draw Routes • Swipe RB Left/Right for Run Play • Touch Joystick to Start'
+            : 'Move Highlighted Defender • Touch Joystick to Start'}
         </span>
       </footer>
       <p className="keyboard-controls hidden sm:block mt-0.5 max-w-[420px] px-2 text-center text-[11px] text-neutral-300 shrink-0">
-        <kbd>Space</kbd> Ready / Snap · <kbd>WASD</kbd> / <kbd>Arrow keys</kbd> Move
+        <kbd>Space</kbd> Start / Snap · <kbd>WASD</kbd> / <kbd>Arrow keys</kbd> Move
       </p>
-
-      {/* Ready button for user defense */}
-      {isReadyPhase && activeOffenseState === 'P2' && !showPauseMenu && !finishedGame && (
-        <div className="fixed bottom-3 right-3 z-[85]">
-          <button
-            type="button"
-            onClick={() => {
-              engineRef.current?.startPlay?.();
-            }}
-            className="flex items-center gap-1.5 px-4 py-2.5 bg-gradient-to-r from-emerald-600 via-emerald-500 to-green-500 hover:from-emerald-500 hover:to-green-400 active:scale-95 text-white font-black text-xs uppercase rounded-xl border-2 border-emerald-300 shadow-2xl transition cursor-pointer tracking-wider animate-pulse"
-            title="Start Defensive Play (Space)"
-            aria-keyshortcuts="Space"
-          >
-            <Play size={14} className="fill-white" /> READY
-            <kbd className="keyboard-controls rounded border border-white/40 px-1 text-[10px]">Space</kbd>
-          </button>
-        </div>
-      )}
 
       {/* Game Manual / Help Modal */}
       {showHelp && (
@@ -940,7 +922,7 @@ export default function App() {
                   </li>
                   <li><b className="text-white">Call a Run Play vs RB Tap Toggle:</b> Swipe left or right on the Running Back to call a <b>Designed Run Play</b> (QB hands off to RB)! Tapping the RB toggles between <b>Pass Protection</b> (RB lead-blocks rushers) and <b>Pass Route</b> (Flat checkdown)!</li>
                   <li><b className="text-white">Single Tap for Run Blocking:</b> Simply tap any receiver (WR or Center) to assign them to <b>RUN BLOCKING</b>! A white block bar appears across them and they lead-block downfield! Tap again to toggle back to route.</li>
-                  <li><b className="text-white">Start the Play:</b> Tap the QB on offense or READY on defense. Tap assignment-controlled defenders to cycle blitz, man, RB spy, and zone.</li>
+                  <li><b className="text-white">Start the Play:</b> Touch the field joystick on offense or defense. The same joystick starts kickoffs and punts; drag it to steer once play is live. Tap assignment-controlled defenders to cycle blitz, man, RB spy, and zone.</li>
                   <li><b className="text-white">Flip Running Back:</b> Quick double-tap left or right of center to shift the RB side.</li>
                 </ul>
               </div>
@@ -949,7 +931,7 @@ export default function App() {
                 <span className="text-[#ffcc00] font-bold block mb-1">2. TAP TO THROW & RELATIVE JOYSTICK CONTROLS:</span>
                 <ul className="list-disc list-inside space-y-1 text-neutral-300">
                   <li><b className="text-white">Tap to Throw:</b> Tap any eligible receiver downfield (WR, Center, or RB) to launch a crisp pass with smart lead targeting so they catch the ball in stride!</li>
-                  <li><b className="text-white">Relative Virtual Joystick:</b> Touch and drag anywhere on screen (or use WASD / Arrow keys on keyboard) to control your player with a smooth floating joystick!</li>
+                  <li><b className="text-white">Relative Virtual Joystick:</b> Touch the joystick at the lower-left of the field to start the play, then drag it (or use WASD / Arrow keys on keyboard) to control your player with a smooth floating joystick!</li>
                   <li><b className="text-white">Quarterback Control:</b> Maneuver the QB in the pocket, step up to avoid blitzers, roll out, or cross the line of scrimmage to scramble!</li>
                   <li><b className="text-white">Ball Carrier Control:</b> Steer the Running Back through holes, cut laterally, or slow down behind lead blockers!</li>
                   <li><b className="text-white">Edge Rusher on Defense:</b> Take control of the edge rusher with the joystick, bend around the tackle, collapse the pocket, and deliver a bone-crushing sack!</li>
