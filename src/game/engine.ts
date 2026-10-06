@@ -4,7 +4,7 @@ import { alignDefenderAcrossFromReceiver, alignDefenderAcrossFromRunningBack, al
 import { evaluateCpuOffensiveAudibles, evaluateCpuBallCarrierMoves, isCpuPressureRecognized, shouldCpuGoForItOnFourthDown, shouldCpuReleasePass, shouldCpuScramble, scoreRunBlockTarget } from './ai';
 import { createFumbleBall, getCarrierFumbleChance } from './fumbles';
 import { canEngagePassBlock, clampPlayerToFieldY, createSimulationClock, distToSegment, GAME_SPEED_SCALE, getBallCarrierRunSpeed, getDesignedRunLateralBias, getFatigueSpeedMultiplier, getPassBlockBaseHoldFrames, getPassBlockHoldFrames, getDirectionalInput, getReturnPursuitSpeed, getReturnTeamBlockers, getUserRunnerVelocity, getRunPursuitMovement, getUserDefenderSpeed, isRusherActivelyBlocked, moveToward, resolveCollisions, shouldApplyRunBlockStun, shouldHoldPassBlock, updatePlayerStamina, updateReceiverTargetStamina, updateRouteMovement, USER_CONTROL_SPEED_MULTIPLIER } from './movement';
-import { resolvePlayResult, isSafety, calculateBrokenTackleChance, calculateYardsToGo, getDriveStartY, getSnapBallPosition, getPassArcHeight, getPassArcMaxHeight, getPassFlightFrames, findTappedPassReceiver, shouldReleaseUserPass, getPassLeadTarget, getRoutePassLeadTarget, canDefenderDeflectPass, canTackleQuarterback, resolveCatchContestOutcome, evaluateQbThrowAccuracy, getCpuThrowAimVariance, calculateKickoffFlight, calculatePuntFlight, getTouchbackYardLineY, getKickoffLineY, getDefenderPassReachHeight, isPlayerOutOfBounds } from './rules';
+import { resolvePlayResult, isSafety, calculateBrokenTackleChance, calculateYardsToGo, getDriveStartY, getSnapBallPosition, getPassArcHeight, getPassArcMaxHeight, getPassFlightFrames, findTappedPassReceiver, shouldReleaseUserPass, getPassLeadTarget, getRoutePassLeadTarget, canDefenderDeflectPass, canTackleQuarterback, resolveCatchContestOutcome, evaluateQbThrowAccuracy, getCpuThrowAimVariance, calculateKickoffFlight, calculatePuntFlight, getTouchbackYardLineY, getKickoffLineY, getDefenderPassReachHeight, isPlayerOutOfBounds, calculateFieldGoalFlight, getFieldGoalDistanceYards, GOALPOST_CENTER_X, GOALPOST_LEFT_UPRIGHT_X, GOALPOST_RIGHT_UPRIGHT_X, GOALPOST_CROSSBAR_HEIGHT_Z } from './rules';
 import { sounds } from './sound';
 import { evaluateDirtSwipeGesture, drawDirtSwipeGesture } from './chalkMenu';
 import { getHelmetDesign, type HelmetDesign } from './helmetDesigns';
@@ -37,6 +37,11 @@ export interface GameEngineHandle {
   kickoff: (power?: number) => void;
   callPunt: () => void;
   punt: (power?: number) => void;
+  callFieldGoal: (force?: boolean) => void;
+  getFieldGoalDistance?: () => number;
+  fieldGoal: (aim?: number, power?: number) => void;
+  lockFieldGoalMeter: () => void;
+  getFieldGoalMeterState?: () => { stage: 'AIM' | 'POWER' | 'KICKING'; aim: number; power: number; distanceYards: number; lockedAim: number | null; lockedPower: number | null };
   isKickoffActive: () => boolean;
   is4thDown: () => boolean;
   triggerPlayEnd?: (endingY: number, resultType: string, customMessage?: string, customColor?: string) => void;
@@ -154,6 +159,7 @@ export interface GameEngineCallbacks {
   setIsKickoffState?: (isKickoff: boolean, kickingTeam: 'P1' | 'P2', receivingTeam: 'P1' | 'P2') => void;
   setIs4thDownState?: (is4thDown: boolean) => void;
   setKickMeterPowerState?: (power: number) => void;
+  setFieldGoalMeterState?: (state: { stage: 'AIM' | 'POWER' | 'KICKING'; aim: number; power: number; distanceYards: number } | null) => void;
 }
 
 export interface GameBoxScore {
@@ -379,6 +385,15 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   let isSpecialTeamsReturn = false;
   let specialTeamsReturnType: 'KICKOFF' | 'PUNT' | null = null;
   let returnCatchY = 0;
+
+  // Special Teams (Field Goals: Direction Meter followed by Distance/Power Meter)
+  let fgMeterStage: 'AIM' | 'POWER' | 'KICKING' = 'AIM';
+  let fgAimVal = 0.0;
+  let fgAimDir = 1;
+  let fgPowerVal = 0.5;
+  let fgPowerDir = 1;
+  let fgLockedAim: number | null = null;
+  let fgLockedPower: number | null = null;
   interface PlayRecord {
     play: string;
     isPass: boolean;
@@ -1870,6 +1885,11 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
   function setupKickoff(kickingTeam: 'P1' | 'P2', receivingTeam: 'P1' | 'P2', announcementText?: string) {
     isKickoffPhase = true;
+    if (p1OffPlay === 'FIELD_GOAL' || p1OffPlay === 'PUNT') {
+      p1OffPlay = 'SHORT_PASS';
+      callbacks.setP1OffPlayState?.('SHORT_PASS');
+    }
+    callbacks.setFieldGoalMeterState?.(null);
     kickoffKickingTeam = kickingTeam;
     kickoffReceivingTeam = receivingTeam;
     phase = 'KICKOFF';
@@ -2038,6 +2058,145 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     showAnnouncement("HIGH SPIRAL PUNT IS AWAY! 🏈", "#00ffff");
   }
 
+  function executeFieldGoal(puntingTeam: 'P1' | 'P2', fgAttackDir: number, aim = fgAimVal, power = fgPowerVal) {
+    setIs4thDownState?.(false);
+    p1OffPlay = 'SHORT_PASS';
+    callbacks.setP1OffPlayState?.('SHORT_PASS');
+    callbacks.setFieldGoalMeterState?.(null);
+    fgMeterStage = 'KICKING';
+    const offTeam = puntingTeam === 'P1' ? p1Team : p2Team;
+    const kickerRating = offTeam.ratings.kicking || 1.0;
+    const fgDist = getFieldGoalDistanceYards(lineOfScrimmageY, fgAttackDir, fieldHeight, endZoneHeight);
+    const flight = calculateFieldGoalFlight(fgDist, aim, power, fgAttackDir, kickerRating);
+
+    const kickStartX = 170;
+    const kickStartY = lineOfScrimmageY - (55 * fgAttackDir);
+    const totalFrames = flight.flightFrames;
+    const vx = (flight.targetX - kickStartX) / totalFrames;
+    const vy = (flight.targetY - kickStartY) / totalFrames;
+
+    ball = {
+      startX: kickStartX,
+      startY: kickStartY,
+      x: kickStartX,
+      y: kickStartY,
+      z: 8,
+      vx,
+      vy,
+      maxZ: flight.maxZ,
+      flightFrames: totalFrames,
+      currentFrame: 0,
+      targetX: flight.targetX,
+      targetY: flight.targetY,
+      isFieldGoal: true,
+      kickingTeam: puntingTeam,
+      receivingTeam: puntingTeam === 'P1' ? 'P2' : 'P1',
+      kickPower: power,
+      fgDistance: flight.distanceYards,
+      fgIsGood: flight.isGood,
+      fgMissReason: flight.missReason
+    };
+
+    if (qb) qb.hasBall = false;
+    if (rb) rb.hasBall = false;
+    phase = 'THROWN';
+    sounds.playKick();
+    showAnnouncement(`THE KICK IS UP! 🏈 (${flight.distanceYards} YDS)`, "#ffcc00");
+  }
+
+  function resolveFieldGoalResult() {
+    if (!ball || !ball.isFieldGoal) return;
+    const fgDist = ball.fgDistance || 40;
+    const isGood = Boolean(ball.fgIsGood);
+    const missReason = ball.fgMissReason;
+    const kickingTeam = ball.kickingTeam || activeOffense;
+    const defendingTeam = kickingTeam === 'P1' ? 'P2' : 'P1';
+
+    if (isGood) {
+      gameClockRunning = false;
+      sounds.playTouchdown();
+      applyMomentum(kickingTeam === 'P1' ? 2 : -2);
+
+      if (kickingTeam === 'P1') {
+        p1Score += 3;
+        p1QuarterScores[quarter - 1] += 3;
+        setUserScore(p1Score);
+        showAnnouncement(
+          `FIELD GOAL IS GOOD! 🙌 (${fgDist} YDS) +3 PTS`,
+          '#00ffff',
+          true,
+          {
+            category: 'TOUCHDOWN',
+            subtext: `${p1Team.name.toUpperCase()} (P1) NAILS THE ${fgDist}-YD FIELD GOAL! • KICKOFF UPCOMING`,
+            possessionTeam: 'P1',
+            durationMs: 5500
+          }
+        );
+      } else {
+        p2Score += 3;
+        p2QuarterScores[quarter - 1] += 3;
+        setCpuScore(p2Score);
+        showAnnouncement(
+          `FIELD GOAL IS GOOD! 🙌 (${fgDist} YDS) +3 PTS`,
+          '#ffcc00',
+          true,
+          {
+            category: 'TOUCHDOWN',
+            subtext: `${p2Team.name.toUpperCase()} (CPU) NAILS THE ${fgDist}-YD FIELD GOAL! • KICKOFF UPCOMING`,
+            possessionTeam: 'P2',
+            durationMs: 5500
+          }
+        );
+      }
+
+      isKickoffPhase = true;
+      kickoffKickingTeam = kickingTeam;
+      kickoffReceivingTeam = defendingTeam;
+      setIsKickoffState?.(true, kickoffKickingTeam, kickoffReceivingTeam);
+      phase = 'DEAD';
+      ball = null;
+      scheduleDrillReset();
+    } else {
+      gameClockRunning = false;
+      sounds.playWhistle();
+      if (missReason === 'UPRIGHT_DOINK') {
+        sounds.playCrossbarDoink();
+      }
+
+      let missText = 'FIELD GOAL NO GOOD!';
+      if (missReason === 'WIDE_LEFT') missText = 'NO GOOD! WIDE LEFT! ⬅️';
+      else if (missReason === 'WIDE_RIGHT') missText = 'NO GOOD! WIDE RIGHT! ➡️';
+      else if (missReason === 'SHORT') missText = 'NO GOOD! SHORT OF THE CROSSBAR! ❌';
+      else if (missReason === 'UPRIGHT_DOINK') missText = 'DOINK! OFF THE UPRIGHT! 🔔 NO GOOD!';
+
+      const defendingName = (defendingTeam === 'P1' ? p1Team : p2Team).name.toUpperCase();
+      showAnnouncement(
+        missText,
+        '#ff4444',
+        true,
+        {
+          category: 'TURNOVER',
+          subtext: `${missText} (${fgDist} YDS) • ${defendingName} TAKES OVER POSSESSION (1ST & 10)`,
+          possessionTeam: defendingTeam,
+          durationMs: 5500
+        }
+      );
+
+      const oppGoalLineY = attackDirection === -1 ? endZoneHeight : (fieldHeight - endZoneHeight);
+      const yardsFromOppGoal = Math.round(Math.abs(lineOfScrimmageY - oppGoalLineY) / 10);
+      swapPossession();
+      if (yardsFromOppGoal < 20) {
+        const newOwnGoal = attackDirection === -1 ? (fieldHeight - endZoneHeight) : endZoneHeight;
+        lineOfScrimmageY = newOwnGoal + (20 * 10 * attackDirection);
+        firstDownMarkerY = lineOfScrimmageY + (100 * attackDirection);
+      }
+      updateDownDisplay();
+      phase = 'DEAD';
+      ball = null;
+      scheduleDrillReset();
+    }
+  }
+
   function resetDrill(animateAlignment = false) {
     if (isKickoffPhase) {
       setupKickoff(kickoffKickingTeam, kickoffReceivingTeam);
@@ -2119,9 +2278,12 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       setMomentumState(0);
     }
 
-    if (activeOffense === 'P1' && p1OffPlay === 'PUNT' && currentDown !== 4) {
+    if (activeOffense === 'P1' && (p1OffPlay === 'PUNT' || p1OffPlay === 'FIELD_GOAL') && currentDown !== 4) {
       p1OffPlay = 'SHORT_PASS';
       callbacks.setP1OffPlayState?.(p1OffPlay);
+    }
+    if (p1OffPlay !== 'FIELD_GOAL') {
+      callbacks.setFieldGoalMeterState?.(null);
     }
     const activePlayName = (activeOffense === 'P1') ? p1OffPlay : p2OffPlay;
 
@@ -2170,6 +2332,86 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
       activeEntity = qb;
       cpuPreSnapTimer = 0;
+      callbacks.setP1OffFormationState?.('SPREAD');
+      callbacks.setP1DefPlayState(p1DefPlay);
+      return;
+    }
+
+    // Special Teams: FIELD GOAL Formation
+    if (activePlayName === 'FIELD_GOAL') {
+      const offTeam = activeOffense === 'P1' ? p1Team : p2Team;
+      const defTeam = activeDefense === 'P1' ? p1Team : p2Team;
+
+      // Holder (QB kneeling 7 yards behind line of scrimmage)
+      qb.color = offTeam.qbColor || '#ffea00';
+      qb.x = 170;
+      qb.y = lineOfScrimmageY - (55 * attackDirection);
+      qb.isHolder = true;
+      qb.isPunter = false;
+      qb.hasBall = false;
+
+      // Kicker (RB standing behind holder, angled slightly)
+      rb = {
+        startX: 156,
+        startY: lineOfScrimmageY - (80 * attackDirection),
+        x: 156,
+        y: lineOfScrimmageY - (80 * attackDirection),
+        radius: 10,
+        vx: 0,
+        vy: 0,
+        color: offTeam.primaryColor,
+        isKicker: true,
+        isBlocker: false,
+        speedMultiplier: 1.0,
+        team: activeOffense
+      };
+
+      // Offensive Line Protection Wedge
+      linemen = [
+        { startX: 170, startY: lineOfScrimmageY, x: 170, y: lineOfScrimmageY, radius: 10, blockTimer: 0, color: offTeam.primaryColor, speedMultiplier: 0.95 },
+        { startX: 145, startY: lineOfScrimmageY, x: 145, y: lineOfScrimmageY, radius: 10, blockTimer: 0, color: offTeam.primaryColor, speedMultiplier: 0.95 },
+        { startX: 195, startY: lineOfScrimmageY, x: 195, y: lineOfScrimmageY, radius: 10, blockTimer: 0, color: offTeam.primaryColor, speedMultiplier: 0.95 }
+      ];
+
+      // Wing Protectors
+      receivers = [
+        { startX: 120, startY: lineOfScrimmageY - (10 * attackDirection), x: 120, y: lineOfScrimmageY - (10 * attackDirection), vx: 0, vy: 0, radius: 10, routeType: 'BLOCK', color: offTeam.primaryColor, archetype: 'BLOCKER', speedMultiplier: 0.95, isBlocker: true },
+        { startX: 220, startY: lineOfScrimmageY - (10 * attackDirection), x: 220, y: lineOfScrimmageY - (10 * attackDirection), vx: 0, vy: 0, radius: 10, routeType: 'BLOCK', color: offTeam.primaryColor, archetype: 'BLOCKER', speedMultiplier: 0.95, isBlocker: true },
+        { startX: 95, startY: lineOfScrimmageY - (15 * attackDirection), x: 95, y: lineOfScrimmageY - (15 * attackDirection), vx: 0, vy: 0, radius: 10, routeType: 'BLOCK', color: offTeam.primaryColor, archetype: 'BLOCKER', speedMultiplier: 0.95, isBlocker: true }
+      ];
+      centerReceiver = { startX: 245, startY: lineOfScrimmageY - (15 * attackDirection), x: 245, y: lineOfScrimmageY - (15 * attackDirection), vx: 0, vy: 0, radius: 10, routeType: 'BLOCK', color: offTeam.primaryColor, archetype: 'BLOCKER', speedMultiplier: 0.95, isBlocker: true };
+
+      // Defense: Field Goal Block Rush Unit across line of scrimmage
+      const fgRushXs = [110, 135, 155, 170, 185, 205, 230];
+      const fgRushY = lineOfScrimmageY + (15 * attackDirection);
+      defenders = fgRushXs.map((x, idx) => ({
+        startX: x,
+        startY: fgRushY,
+        x,
+        y: fgRushY,
+        radius: 10,
+        type: idx % 2 === 0 ? 'DL' : 'LB',
+        isBlocker: false,
+        color: defTeam.primaryColor,
+        speedMultiplier: 1.05,
+        team: activeDefense
+      }));
+
+      qb.team = activeOffense;
+      linemen.forEach(l => { l.team = activeOffense; });
+      receivers.forEach(r => { r.team = activeOffense; });
+      if (centerReceiver) centerReceiver.team = activeOffense;
+      defenders.forEach(d => { d.team = activeDefense; });
+
+      activeEntity = qb;
+      cpuPreSnapTimer = 0;
+      fgMeterStage = 'AIM';
+      fgAimVal = 0.0;
+      fgAimDir = 1;
+      fgPowerVal = 0.5;
+      fgPowerDir = 1;
+      fgLockedAim = null;
+      fgLockedPower = null;
       callbacks.setP1OffFormationState?.('SPREAD');
       callbacks.setP1DefPlayState(p1DefPlay);
       return;
@@ -2422,6 +2664,9 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       if (activeOffense === 'P1' && phase === 'PRE_SNAP' && offensivePlaybook[key] &&
         (key !== 'PUNT' || (currentDown === 4 && !isKickoffPhase))) {
         p1OffPlay = key;
+        if (key !== 'FIELD_GOAL') {
+          callbacks.setFieldGoalMeterState?.(null);
+        }
         if (offensivePlaybook[key].alignment) {
           p1OffFormation = offensivePlaybook[key].alignment!;
           callbacks.setP1OffFormationState?.(p1OffFormation);
@@ -2463,6 +2708,88 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         snapToQuarterback();
         executePunt('P1', attackDirection, chosenPower);
       }
+    },
+    callFieldGoal: (force = false) => {
+      if (gameOver) return;
+      if (!force && (activeOffense !== 'P1' || phase !== 'PRE_SNAP' || isKickoffPhase)) return;
+      if (force) {
+        isKickoffPhase = false;
+        activeOffense = 'P1';
+        activeDefense = 'P2';
+        attackDirection = -1;
+        currentDown = 4;
+        yardsToGo = 10;
+        phase = 'PRE_SNAP';
+        gameClockRunning = false;
+        ball = null;
+        snapBall = null;
+        fumbleBall = null;
+        isAiming = false;
+      }
+      p1OffPlay = 'FIELD_GOAL';
+      callbacks.setP1OffPlayState?.('FIELD_GOAL');
+      fgMeterStage = 'AIM';
+      fgAimVal = 0.0;
+      fgAimDir = 1;
+      fgPowerVal = 0.5;
+      fgPowerDir = 1;
+      fgLockedAim = null;
+      fgLockedPower = null;
+      resetDrill(true);
+      const fgDist = getFieldGoalDistanceYards(lineOfScrimmageY, attackDirection, fieldHeight, endZoneHeight);
+      callbacks.setFieldGoalMeterState?.({
+        stage: 'AIM',
+        aim: 0,
+        power: 0.5,
+        distanceYards: fgDist
+      });
+      showAnnouncement(`SPECIAL TEAMS: FIELD GOAL UNIT! (${fgDist} YDS) 🎯`, '#00ffff');
+    },
+    getFieldGoalDistance: () => {
+      return getFieldGoalDistanceYards(lineOfScrimmageY, attackDirection, fieldHeight, endZoneHeight);
+    },
+    lockFieldGoalMeter: () => {
+      if (activeOffense !== 'P1' || phase !== 'PRE_SNAP' || p1OffPlay !== 'FIELD_GOAL') return;
+      if (fgMeterStage === 'AIM') {
+        fgLockedAim = fgAimVal;
+        fgMeterStage = 'POWER';
+        sounds.playMeterLock();
+        callbacks.setFieldGoalMeterState?.({
+          stage: 'POWER',
+          aim: fgLockedAim,
+          power: fgPowerVal,
+          distanceYards: getFieldGoalDistanceYards(lineOfScrimmageY, attackDirection, fieldHeight, endZoneHeight)
+        });
+      } else if (fgMeterStage === 'POWER') {
+        fgLockedPower = fgPowerVal;
+        fgMeterStage = 'KICKING';
+        callbacks.setFieldGoalMeterState?.({
+          stage: 'KICKING',
+          aim: fgLockedAim ?? 0,
+          power: fgLockedPower,
+          distanceYards: getFieldGoalDistanceYards(lineOfScrimmageY, attackDirection, fieldHeight, endZoneHeight)
+        });
+        executeFieldGoal('P1', attackDirection, fgLockedAim ?? 0, fgLockedPower);
+      }
+    },
+    fieldGoal: (aim?: number, power?: number) => {
+      if (activeOffense === 'P1' && phase === 'PRE_SNAP' && !isKickoffPhase && !gameOver) {
+        p1OffPlay = 'FIELD_GOAL';
+        const chosenAim = aim !== undefined ? aim : (fgLockedAim ?? fgAimVal);
+        const chosenPower = power !== undefined ? power : (fgLockedPower ?? fgPowerVal);
+        executeFieldGoal('P1', attackDirection, chosenAim, chosenPower);
+      }
+    },
+    getFieldGoalMeterState: () => {
+      const fgDist = getFieldGoalDistanceYards(lineOfScrimmageY, attackDirection, fieldHeight, endZoneHeight);
+      return {
+        stage: fgMeterStage,
+        aim: fgAimVal,
+        power: fgPowerVal,
+        distanceYards: fgDist,
+        lockedAim: fgLockedAim,
+        lockedPower: fgLockedPower
+      };
     },
     isKickoffActive: () => isKickoffPhase,
     is4thDown: () => currentDown === 4 && phase === 'PRE_SNAP',
@@ -2577,6 +2904,17 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       executePunt('P2', attackDirection, cpuPower);
       return;
     }
+    if (cpuPlay && cpuPlay.type === 'FIELD_GOAL') {
+      snapToQuarterback();
+      const fgDist = getFieldGoalDistanceYards(lineOfScrimmageY, attackDirection, fieldHeight, endZoneHeight);
+      const kickerRating = p2Team.ratings.kicking || 1.0;
+      const aimVariance = (0.05 + (fgDist / 60) * 0.18) / kickerRating;
+      const cpuAim = (Math.random() - 0.5) * 2 * aimVariance;
+      const neededPower = Math.min(0.98, Math.max(0.35, (fgDist / 62) * 1.0));
+      const cpuPower = Math.min(1.0, Math.max(0.2, neededPower + (Math.random() - 0.5) * 0.10));
+      executeFieldGoal('P2', attackDirection, cpuAim, cpuPower);
+      return;
+    }
     if (rb && (rb.isBlocker || rb.routeType === 'BLOCK') && cpuPlay?.type !== 'PASS') {
       p2OffPlay = 'MESH';
       cpuPlay = offensivePlaybook.MESH;
@@ -2618,9 +2956,35 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       }
       return;
     }
+    if (play?.type === 'FIELD_GOAL') {
+      if (fgMeterStage === 'AIM') {
+        fgLockedAim = fgAimVal;
+        fgMeterStage = 'POWER';
+        sounds.playMeterLock();
+        callbacks.setFieldGoalMeterState?.({
+          stage: 'POWER',
+          aim: fgLockedAim,
+          power: fgPowerVal,
+          distanceYards: getFieldGoalDistanceYards(lineOfScrimmageY, attackDirection, fieldHeight, endZoneHeight)
+        });
+        return;
+      } else if (fgMeterStage === 'POWER') {
+        fgLockedPower = fgPowerVal;
+        fgMeterStage = 'KICKING';
+        callbacks.setFieldGoalMeterState?.({
+          stage: 'KICKING',
+          aim: fgLockedAim ?? 0,
+          power: fgLockedPower,
+          distanceYards: getFieldGoalDistanceYards(lineOfScrimmageY, attackDirection, fieldHeight, endZoneHeight)
+        });
+        executeFieldGoal('P1', attackDirection, fgLockedAim ?? 0, fgLockedPower);
+        return;
+      }
+      return;
+    }
 
     snapToQuarterback();
-    const isDesignedRun = (play?.type !== 'PASS' && play?.type !== 'PUNT') || rb?.routeType === 'RUN';
+    const isDesignedRun = (play?.type !== 'PASS' && play?.type !== 'PUNT' && play?.type !== 'FIELD_GOAL') || rb?.routeType === 'RUN';
     if (isDesignedRun) {
       if (rb) rb.hasBall = false;
       activeEntity = rb || qb;
@@ -2928,6 +3292,12 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     touchStartTime = Date.now();
 
     if (phase === 'PRE_SNAP') {
+      // Field Goal Skill Meter tap advancement (Direction -> Distance -> Kick)
+      if (activeOffense === 'P1' && p1OffPlay === 'FIELD_GOAL') {
+        startReadyPlay();
+        return;
+      }
+
       // 1. If on offense, check if user tapped/dragged an interactive player (RB, WR, Center) FIRST!
       if (activeOffense === 'P1') {
         // RB tap / line gesture: checked before the snap zone so tapping the RB never starts the play.
@@ -3445,6 +3815,33 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         if (kickMeterPower >= 1.0) { kickMeterPower = 1.0; kickMeterDirection = -1; }
         if (kickMeterPower <= 0.25) { kickMeterPower = 0.25; kickMeterDirection = 1; }
         setKickMeterPowerState?.(kickMeterPower);
+      }
+      if (activeOffense === 'P1' && p1OffPlay === 'FIELD_GOAL') {
+        const fgDist = getFieldGoalDistanceYards(lineOfScrimmageY, attackDirection, fieldHeight, endZoneHeight);
+        const distRatio = Math.max(0, Math.min(1, (fgDist - 15) / 45));
+        if (fgMeterStage === 'AIM') {
+          const aimSpeed = 0.032 + distRatio * 0.028;
+          fgAimVal += aimSpeed * fgAimDir;
+          if (fgAimVal >= 1.0) { fgAimVal = 1.0; fgAimDir = -1; }
+          if (fgAimVal <= -1.0) { fgAimVal = -1.0; fgAimDir = 1; }
+          callbacks.setFieldGoalMeterState?.({
+            stage: 'AIM',
+            aim: fgAimVal,
+            power: fgPowerVal,
+            distanceYards: fgDist
+          });
+        } else if (fgMeterStage === 'POWER') {
+          const powerSpeed = 0.028 + distRatio * 0.024;
+          fgPowerVal += powerSpeed * fgPowerDir;
+          if (fgPowerVal >= 1.0) { fgPowerVal = 1.0; fgPowerDir = -1; }
+          if (fgPowerVal <= 0.08) { fgPowerVal = 0.08; fgPowerDir = 1; }
+          callbacks.setFieldGoalMeterState?.({
+            stage: 'POWER',
+            aim: fgLockedAim ?? 0,
+            power: fgPowerVal,
+            distanceYards: fgDist
+          });
+        }
       }
       if (activeDefense === 'P2') {
         aiPreSnapShiftTimer++;
@@ -5181,6 +5578,35 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       const progress = ball.currentFrame / ball.flightFrames;
       ball.z = getPassArcHeight(ball.maxZ, progress);
 
+      if (ball.isFieldGoal) {
+        // Special Teams Field Goal in flight
+        defenders.forEach(d => {
+          if (d) moveToward(d, 170, lineOfScrimmageY - (50 * attackDirection), 0.20, 1.4, 0);
+        });
+        [...linemen, ...receivers, centerReceiver].filter(Boolean).forEach(b => {
+          if (b) {
+            const nearestDef = defenders.reduce<Entity | null>((closest, def) => {
+              const dist = Math.hypot(def.x - b.x, def.y - b.y);
+              if (!closest) return def;
+              return dist < Math.hypot(closest.x - b.x, closest.y - b.y) ? def : closest;
+            }, null);
+            if (nearestDef && Math.hypot(nearestDef.x - b.x, nearestDef.y - b.y) < 32) {
+              b.isEngagedWithBlocker = true;
+              nearestDef.vx = (nearestDef.vx || 0) * 0.25;
+              nearestDef.vy = (nearestDef.vy || 0) * 0.25;
+            }
+          }
+        });
+
+        // Arrival at or past the goalpost uprights plane
+        const passedEndLine = attackDirection === -1 ? ball.y <= 0 : ball.y >= fieldHeight;
+        if (progress >= 1.0 || ball.currentFrame >= ball.flightFrames || passedEndLine) {
+          resolveFieldGoalResult();
+          return;
+        }
+        return;
+      }
+
       if (ball.isKickoff || ball.isPunt) {
         // Special Teams Kickoff / Punt in flight
         const coverageUnits = ball.isKickoff
@@ -5611,6 +6037,95 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     ctx!.restore();
   }
 
+  function drawGoalPost(postY: number, isTopEnd: boolean) {
+    if (!ctx) return;
+    ctx.save();
+    if (cameraPerspectiveMode === 'THREE_QUARTER') {
+      ctx.translate(GOALPOST_CENTER_X, postY);
+      ctx.scale(1, 1 / 0.72);
+      ctx.translate(-GOALPOST_CENTER_X, -postY);
+    }
+    const centerX = GOALPOST_CENTER_X; // 170
+    const leftX = GOALPOST_LEFT_UPRIGHT_X; // 151
+    const rightX = GOALPOST_RIGHT_UPRIGHT_X; // 189
+    const uprightHeight = 46;
+    const crossbarElevation = isTopEnd ? -14 : 14;
+
+    // Turf base shadow
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.40)';
+    ctx.beginPath();
+    ctx.ellipse(centerX, postY + (isTopEnd ? -3 : 3), 12, 4, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Central Gooseneck stanchion pipe
+    ctx.strokeStyle = '#e6b800';
+    ctx.lineWidth = 4.5;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(centerX, postY);
+    ctx.lineTo(centerX, postY + crossbarElevation);
+    ctx.stroke();
+
+    // Specular highlight on stanchion
+    ctx.strokeStyle = '#fff5a8';
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.moveTo(centerX - 1, postY);
+    ctx.lineTo(centerX - 1, postY + crossbarElevation);
+    ctx.stroke();
+
+    // Horizontal Crossbar
+    ctx.strokeStyle = '#ffd700';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(leftX, postY + crossbarElevation);
+    ctx.lineTo(rightX, postY + crossbarElevation);
+    ctx.stroke();
+
+    // Crossbar metallic sheen
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(leftX + 2, postY + crossbarElevation - 1);
+    ctx.lineTo(rightX - 2, postY + crossbarElevation - 1);
+    ctx.stroke();
+
+    // Vertical Uprights
+    const uprightTopY = postY + (isTopEnd ? -uprightHeight - 12 : uprightHeight + 12);
+    [leftX, rightX].forEach((ux, idx) => {
+      ctx.strokeStyle = '#ffd700';
+      ctx.lineWidth = 3.5;
+      ctx.beginPath();
+      ctx.moveTo(ux, postY + crossbarElevation);
+      ctx.lineTo(ux, uprightTopY);
+      ctx.stroke();
+
+      ctx.strokeStyle = '#fff8cc';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(ux - 0.7, postY + crossbarElevation);
+      ctx.lineTo(ux - 0.7, uprightTopY);
+      ctx.stroke();
+
+      // Top cap
+      ctx.fillStyle = '#ffaa00';
+      ctx.beginPath();
+      ctx.arc(ux, uprightTopY, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Fluttering orange wind streamer
+      ctx.strokeStyle = '#ff3b00';
+      ctx.lineWidth = 2;
+      const flutter = Math.sin(Date.now() * 0.008 + idx * 2) * 3.5;
+      ctx.beginPath();
+      ctx.moveTo(ux, uprightTopY);
+      ctx.quadraticCurveTo(ux + 3 + flutter, uprightTopY - (isTopEnd ? 5 : -5), ux + flutter, uprightTopY - (isTopEnd ? 12 : -12));
+      ctx.stroke();
+    });
+
+    ctx.restore();
+  }
+
   function drawFootball(x: number, y: number, rotation: number, size = 8) {
     ctx!.save();
     if (cameraPerspectiveMode === 'THREE_QUARTER') {
@@ -5749,6 +6264,10 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       ctx.lineTo(fieldWidth - 20, boundaryY);
       ctx.stroke();
     }
+
+    // Goal Post Uprights at both ends of the field
+    drawGoalPost(0, true);
+    drawGoalPost(fieldHeight, false);
 
     // Line of Scrimmage (Cyan)
     ctx.strokeStyle = '#00ffff';
@@ -6451,7 +6970,179 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       ctx.restore();
     }
 
-    if (phase === 'PRE_SNAP' && activeOffense === 'P1' && p1OffPlay === 'PUNT') {
+    if (!isKickoffPhase && phase === 'PRE_SNAP' && activeOffense === 'P1' && p1OffPlay === 'FIELD_GOAL') {
+      ctx.save();
+      const oppGoalY = attackDirection === -1 ? endZoneHeight : fieldHeight - endZoneHeight;
+      const distToGoalYards = Math.round(Math.abs(lineOfScrimmageY - oppGoalY) / 10);
+      const fgDist = distToGoalYards + 17;
+      const distRatio = Math.max(0, Math.min(1, (fgDist - 15) / 45));
+
+      const meterW = 236;
+      const meterH = 76;
+      const meterX = (logicalCanvasWidth - meterW) / 2;
+      const meterY = logicalCanvasHeight - 166;
+
+      ctx.fillStyle = 'rgba(10, 15, 25, 0.94)';
+      ctx.strokeStyle = '#ffd700';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.roundRect(meterX, meterY, meterW, meterH, 10);
+      ctx.fill();
+      ctx.stroke();
+
+      if (fgMeterStage === 'AIM') {
+        ctx.fillStyle = '#ffd700';
+        ctx.font = 'bold 11px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(`🎯 FIELD GOAL: ${fgDist} YDS`, logicalCanvasWidth / 2, meterY + 15);
+
+        ctx.fillStyle = '#00ffff';
+        ctx.font = 'bold 9px monospace';
+        ctx.fillText(`STAGE 1: DIRECTION SKILL METER ↔`, logicalCanvasWidth / 2, meterY + 29);
+
+        const barX = meterX + 16;
+        const barY = meterY + 35;
+        const barW = meterW - 32;
+        const barH = 15;
+
+        ctx.fillStyle = '#221111';
+        ctx.fillRect(barX, barY, barW, barH);
+
+        const tolerance = Math.max(0.14, 0.44 - distRatio * 0.28);
+        const winW = barW * tolerance;
+        const winX = barX + (barW - winW) / 2;
+
+        const winGrad = ctx.createLinearGradient(winX, barY, winX + winW, barY);
+        winGrad.addColorStop(0, 'rgba(0, 255, 120, 0.5)');
+        winGrad.addColorStop(0.5, 'rgba(0, 255, 200, 0.85)');
+        winGrad.addColorStop(1, 'rgba(0, 255, 120, 0.5)');
+        ctx.fillStyle = winGrad;
+        ctx.fillRect(winX, barY, winW, barH);
+
+        ctx.strokeStyle = '#ffff00';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(winX, barY - 2); ctx.lineTo(winX, barY + barH + 2);
+        ctx.moveTo(winX + winW, barY - 2); ctx.lineTo(winX + winW, barY + barH + 2);
+        ctx.stroke();
+
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([2, 2]);
+        ctx.beginPath();
+        ctx.moveTo(barX + barW / 2, barY); ctx.lineTo(barX + barW / 2, barY + barH);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(barX, barY, barW, barH);
+
+        const needleX = barX + (barW / 2) + (fgAimVal * (barW / 2));
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.arc(needleX, barY + barH / 2, 6, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#ff3333';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        ctx.fillStyle = '#ffff00';
+        ctx.font = 'bold 8px monospace';
+        const aimOffset = Math.abs(fgAimVal);
+        const aimStatus = aimOffset <= tolerance ? 'CENTER (ON TARGET)' : fgAimVal < 0 ? 'WIDE LEFT' : 'WIDE RIGHT';
+        ctx.fillText(aimStatus, logicalCanvasWidth / 2, meterY + 66);
+      } else if (fgMeterStage === 'POWER') {
+        ctx.fillStyle = '#ffd700';
+        ctx.font = 'bold 11px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(`⚡ FIELD GOAL: ${fgDist} YDS`, logicalCanvasWidth / 2, meterY + 14);
+
+        ctx.fillStyle = '#00ffaa';
+        ctx.font = 'bold 8.5px monospace';
+        ctx.fillText(`STAGE 2: UP/DOWN DISTANCE METER ↕`, logicalCanvasWidth / 2, meterY + 26);
+
+        // Vertical up/down gauge
+        const gaugeX = meterX + 28;
+        const gaugeY = meterY + 31;
+        const gaugeW = 20;
+        const gaugeH = 38;
+
+        // Background of vertical column
+        ctx.fillStyle = '#1c1313';
+        ctx.fillRect(gaugeX, gaugeY, gaugeW, gaugeH);
+
+        const reqPower = Math.min(0.96, Math.max(0.28, (fgDist / 62) * 0.95));
+        const fillHeight = gaugeH * fgPowerVal;
+        const fillTopY = gaugeY + gaugeH - fillHeight;
+
+        // Vertical gradient fill from bottom to top
+        const grad = ctx.createLinearGradient(gaugeX, gaugeY + gaugeH, gaugeX, gaugeY);
+        grad.addColorStop(0, '#ff2200');
+        grad.addColorStop(Math.max(0.01, reqPower * 0.75), '#ff9900');
+        grad.addColorStop(reqPower, '#00ff66');
+        grad.addColorStop(1.0, '#00ffff');
+        ctx.fillStyle = grad;
+        ctx.fillRect(gaugeX, fillTopY, gaugeW, fillHeight);
+
+        // Target requirement line (horizontal tick across vertical bar)
+        const threshY = gaugeY + gaugeH - (gaugeH * reqPower);
+        ctx.strokeStyle = '#ffff00';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(gaugeX - 4, threshY);
+        ctx.lineTo(gaugeX + gaugeW + 4, threshY);
+        ctx.stroke();
+
+        // Border of gauge
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1.2;
+        ctx.strokeRect(gaugeX, gaugeY, gaugeW, gaugeH);
+
+        // Up/down moving needle / pointer arrow
+        const currIndicatorY = fillTopY;
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.moveTo(gaugeX - 6, currIndicatorY);
+        ctx.lineTo(gaugeX - 1, currIndicatorY - 3.5);
+        ctx.lineTo(gaugeX - 1, currIndicatorY + 3.5);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(gaugeX, currIndicatorY);
+        ctx.lineTo(gaugeX + gaugeW, currIndicatorY);
+        ctx.stroke();
+
+        // Side information and labels
+        const textLeft = gaugeX + gaugeW + 12;
+        ctx.textAlign = 'left';
+
+        // Distance and status readout
+        const currentYards = Math.round(fgPowerVal * 62);
+        const hasEnoughDistance = fgPowerVal >= reqPower;
+
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 9px monospace';
+        ctx.fillText(`POWER: ${Math.round(fgPowerVal * 100)}% (${currentYards} YDS)`, textLeft, meterY + 40);
+
+        ctx.fillStyle = hasEnoughDistance ? '#00ffaa' : '#ff4444';
+        ctx.font = 'bold 8.5px monospace';
+        const powerStatus = hasEnoughDistance ? `✔ CLEARS CROSSBAR!` : `✖ SHORT! NEED ${fgDist} YDS`;
+        ctx.fillText(powerStatus, textLeft, meterY + 52);
+
+        // Locked direction indicator badge
+        const lockedAim = fgLockedAim ?? 0;
+        const aimOffset = Math.abs(lockedAim);
+        const aimText = aimOffset <= 0.18 ? 'AIM: CENTER' : lockedAim < 0 ? 'AIM: LEFT' : 'AIM: RIGHT';
+        ctx.fillStyle = '#ffd700';
+        ctx.font = '7.5px monospace';
+        ctx.fillText(`🎯 ${aimText} | NEED: ${fgDist} YD LINE`, textLeft, meterY + 64);
+      }
+      ctx.restore();
+    } else if (phase === 'PRE_SNAP' && activeOffense === 'P1' && p1OffPlay === 'PUNT') {
       ctx.save();
       const meterW = 210;
       const meterH = 48;
@@ -6512,7 +7203,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       ctx.fillStyle = '#ffffff';
       ctx.font = 'bold 10px monospace';
       ctx.textAlign = 'center';
-      ctx.fillText('🏈 4TH DOWN • PUNT OPTION', logicalCanvasWidth / 2, tagY + 15);
+      ctx.fillText('🏈 4TH DOWN • PUNT / FG', logicalCanvasWidth / 2, tagY + 15);
       ctx.restore();
     }
 

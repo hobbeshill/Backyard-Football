@@ -88,6 +88,7 @@ export interface Entity {
   isOpenDeep?: boolean;
   isKicker?: boolean;
   isPunter?: boolean;
+  isHolder?: boolean;
   isReturner?: boolean;
   team?: 'P1' | 'P2';
   speechBubble?: {
@@ -123,6 +124,10 @@ export interface Ball {
   intendedTarget?: Entity | null;
   isKickoff?: boolean;
   isPunt?: boolean;
+  isFieldGoal?: boolean;
+  fgDistance?: number;
+  fgIsGood?: boolean;
+  fgMissReason?: 'WIDE_LEFT' | 'WIDE_RIGHT' | 'SHORT' | 'UPRIGHT_DOINK';
   kickingTeam?: 'P1' | 'P2';
   receivingTeam?: 'P1' | 'P2';
   kickPower?: number;

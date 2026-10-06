@@ -57,6 +57,7 @@ export default function App() {
   const [isKickoffActive, setIsKickoffActive] = useState(true);
   const [kickoffSide, setKickoffSide] = useState<{ kicking: 'P1' | 'P2'; receiving: 'P1' | 'P2' }>({ kicking: 'P2', receiving: 'P1' });
   const [is4thDown, setIs4thDown] = useState(false);
+  const [fgMeterState, setFgMeterState] = useState<{ stage: 'AIM' | 'POWER' | 'KICKING'; aim: number; power: number; distanceYards: number } | null>(null);
   const [phaseState, setPhaseState] = useState('PRE_SNAP');
   const [kickMeterPower, setKickMeterPower] = useState(0.55);
   const [momentumState, setMomentumState] = useState(0);
@@ -346,6 +347,7 @@ export default function App() {
       },
       setIs4thDownState: (val) => setIs4thDown(val),
       setKickMeterPowerState: (power) => setKickMeterPower(power),
+      setFieldGoalMeterState: (state) => setFgMeterState(state),
       setP1OffPlayState
     });
   }, []);
@@ -471,6 +473,15 @@ export default function App() {
     setHasKickedOff(false);
     setShowPauseMenu(false);
     setShowTeamModal(true);
+  };
+
+  const handlePauseAttemptFieldGoal = () => {
+    setShowPauseMenu(false);
+    if (engineRef.current) {
+      engineRef.current.setPaused(false);
+      engineRef.current.callFieldGoal(true);
+      setP1OffPlayState('FIELD_GOAL');
+    }
   };
 
   useEffect(() => {
@@ -698,25 +709,36 @@ export default function App() {
         </div>
       </header>
 
-      {/* 4th Down Special Teams Punt / Audible Action Controls */}
-      {((showPuntAction && p1OffPlayState !== 'PUNT') || p1OffPlayState === 'PUNT') && (
+      {/* 4th Down Special Teams Punt / Field Goal Action Controls */}
+      {((showPuntAction && p1OffPlayState !== 'PUNT' && p1OffPlayState !== 'FIELD_GOAL') ||
+        (isUserPreSnapPhase && !isKickoffActive && activeOffenseState === 'P1' && p1OffPlayState === 'FIELD_GOAL' && fgMeterState !== null)) && (
         <div className="flex items-center justify-center gap-2 mb-1 z-30 w-full max-w-[420px] px-2 shrink-0">
-          {showPuntAction && p1OffPlayState !== 'PUNT' && (
-            <button
-              type="button"
-              onClick={() => engineRef.current?.callPunt?.()}
-              className="min-w-0 px-3.5 py-1.5 rounded-lg border-2 border-cyan-300 bg-gradient-to-r from-cyan-600 to-blue-600 text-xs font-black uppercase text-white shadow-xl transition hover:from-cyan-500 hover:to-blue-500 active:scale-95"
-            >
-              PUNT
-            </button>
+          {showPuntAction && p1OffPlayState !== 'PUNT' && p1OffPlayState !== 'FIELD_GOAL' && (
+            <>
+              <button
+                type="button"
+                onClick={() => engineRef.current?.callFieldGoal?.()}
+                className="min-w-0 px-3 py-1.5 rounded-lg border-2 border-amber-300 bg-gradient-to-r from-amber-600 to-yellow-500 text-xs font-black uppercase text-white shadow-xl transition hover:from-amber-500 hover:to-yellow-400 active:scale-95 flex items-center gap-1 cursor-pointer"
+              >
+                <span>FIELD GOAL</span>
+                <span className="text-[0.65rem] opacity-90">({engineRef.current?.getFieldGoalDistance?.() ?? fgMeterState?.distanceYards ?? 40} YD)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => engineRef.current?.callPunt?.()}
+                className="min-w-0 px-3.5 py-1.5 rounded-lg border-2 border-cyan-300 bg-gradient-to-r from-cyan-600 to-blue-600 text-xs font-black uppercase text-white shadow-xl transition hover:from-cyan-500 hover:to-blue-500 active:scale-95 cursor-pointer"
+              >
+                PUNT
+              </button>
+            </>
           )}
-          {p1OffPlayState === 'PUNT' && (
+          {isUserPreSnapPhase && !isKickoffActive && activeOffenseState === 'P1' && p1OffPlayState === 'FIELD_GOAL' && fgMeterState !== null && (
             <button
               type="button"
-              onClick={() => handleSelectOffensePlay('SHORT_PASS')}
-              className="min-w-0 px-3.5 py-1.5 rounded-lg border border-neutral-500 bg-neutral-900 text-neutral-100 text-xs font-bold shadow-xl transition hover:bg-neutral-800 active:scale-95"
+              onClick={() => engineRef.current?.lockFieldGoalMeter?.()}
+              className="min-w-0 px-4 py-1.5 rounded-lg border-2 border-amber-300 bg-gradient-to-r from-emerald-600 to-teal-500 text-xs font-black uppercase text-white shadow-xl transition hover:from-emerald-500 hover:to-teal-400 active:scale-95 animate-pulse cursor-pointer"
             >
-              Audible
+              {fgMeterState.stage === 'POWER' ? '⚡ KICK! (LOCK DISTANCE)' : '🎯 LOCK DIRECTION'}
             </button>
           )}
         </div>
@@ -967,6 +989,21 @@ export default function App() {
                   <li><b className="text-white">3-4 ZONE:</b> Three defenders rush or stunt while four drop into intermediate and deep zones. <i>Weakness:</i> Quick throws behind the rush.</li>
                   <li><b className="text-white">2-3-2 ZONE:</b> Two upfront, three across the middle, and two deep defenders tracking long balls. <i>Weakness:</i> Intermediate sideline windows.</li>
                   <li><b className="text-white">1-5-1 DEFENSE:</b> One rusher, five across the intermediate level, and one deep safety. <i>Weakness:</i> Deep middle and outside vertical routes.</li>
+                </ul>
+              </div>
+
+              <div className="bg-black/60 p-2.5 rounded border border-neutral-800">
+                <span className="text-[#ffd700] font-bold block mb-1">6. FIELD GOALS & SPECIAL TEAMS (UP TO 60 YARDS):</span>
+                <ul className="list-disc list-inside space-y-1 text-neutral-300">
+                  <li><b className="text-white">Field Goals (3 Points):</b> Can be attempted from up to 60 yards out. Greater distance significantly tightens accuracy margins and requires higher kicking power!</li>
+                  <li><b className="text-white">Two-Stage Skill Meter:</b>
+                    <ul className="list-disc list-inside ml-2 text-neutral-400">
+                      <li><b>Stage 1 (Direction):</b> Tap to lock horizontal aim. Aim must land between the yellow upright target markers. The target window narrows as distance increases!</li>
+                      <li><b>Stage 2 (Distance & Power):</b> Immediately follow with an up/down vertical meter tap to lock kick elevation and distance. Must reach the required yard line threshold to clear the crossbar!</li>
+                    </ul>
+                  </li>
+                  <li><b className="text-white">Uprights & Doinks:</b> Kicks hitting the upright post trigger a realistic metallic DOINK! Missed kicks turn possession over to the defense.</li>
+                  <li><b className="text-white">Punts:</b> Flip field position on 4th down with a high soaring spiral punt.</li>
                 </ul>
               </div>
             </div>
@@ -1341,13 +1378,23 @@ export default function App() {
                   engineRef.current?.setPaused(false);
                   setShowPauseMenu(false);
                 }}
-                className="flex w-full items-center justify-center gap-2 rounded-md bg-[#246344] px-4 py-3 text-sm font-bold text-white transition hover:bg-[#2c7751]"
+                className="flex w-full items-center justify-center gap-2 rounded-md bg-[#246344] px-4 py-3 text-sm font-bold text-white transition hover:bg-[#2c7751] cursor-pointer"
               >
                 <Play size={17} /> Continue game
               </button>
               <button
+                onClick={handlePauseAttemptFieldGoal}
+                className="flex w-full items-center justify-center gap-2 rounded-md border-2 border-amber-400 bg-gradient-to-r from-amber-600 to-yellow-600 px-4 py-3 text-sm font-black uppercase text-white shadow-xl transition hover:from-amber-500 hover:to-yellow-500 active:scale-95 cursor-pointer"
+              >
+                <Crosshair size={17} />
+                <span>Attempt Field Goal</span>
+                <span className="text-xs font-semibold opacity-90">
+                  ({engineRef.current?.getFieldGoalDistance?.() ?? fgMeterState?.distanceYards ?? 40} YD)
+                </span>
+              </button>
+              <button
                 onClick={handleReturnToMainMenu}
-                className="flex w-full items-center justify-center gap-2 rounded-md border border-[#bd5635] bg-[#32170f] px-4 py-3 text-sm font-bold text-[#ffd8ca] transition hover:bg-[#512116]"
+                className="flex w-full items-center justify-center gap-2 rounded-md border border-[#bd5635] bg-[#32170f] px-4 py-3 text-sm font-bold text-[#ffd8ca] transition hover:bg-[#512116] cursor-pointer"
               >
                 <Home size={17} /> Return to main menu
               </button>

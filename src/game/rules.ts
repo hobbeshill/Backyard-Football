@@ -381,3 +381,94 @@ export function getKickoffLineY(
   return ownGoalLineY + (kickoffYardLine * 10 * kickAttackDirection);
 }
 
+export const GOALPOST_CENTER_X = 170;
+export const GOALPOST_LEFT_UPRIGHT_X = 151;
+export const GOALPOST_RIGHT_UPRIGHT_X = 189;
+export const GOALPOST_CROSSBAR_HEIGHT_Z = 22;
+
+export interface FieldGoalFlightResult {
+  distanceYards: number;
+  flightFrames: number;
+  maxZ: number;
+  arrivalZ: number;
+  targetX: number;
+  targetY: number;
+  isGood: boolean;
+  missReason?: 'WIDE_LEFT' | 'WIDE_RIGHT' | 'SHORT' | 'UPRIGHT_DOINK';
+}
+
+export function getFieldGoalDistanceYards(
+  lineOfScrimmageY: number,
+  attackDirection: number,
+  fieldHeight: number,
+  endZoneHeight: number
+): number {
+  const oppGoalLineY = attackDirection === -1 ? endZoneHeight : (fieldHeight - endZoneHeight);
+  const distToGoalLineYards = Math.round(Math.abs(lineOfScrimmageY - oppGoalLineY) / 10);
+  return distToGoalLineYards + 17;
+}
+
+export function calculateFieldGoalFlight(
+  distanceYards: number,
+  aimOffset: number, // -1.0 to 1.0 (0 is dead center)
+  power: number,     // 0.0 to 1.0 (power/distance meter)
+  attackDirection: number,
+  kickerRating = 1.0
+): FieldGoalFlightResult {
+  const clampedDistance = Math.max(15, Math.min(65, distanceYards));
+  const clampedPower = Math.max(0, Math.min(1.0, power));
+  const clampedAim = Math.max(-1.0, Math.min(1.0, aimOffset));
+
+  // A 60-yard kick can be made! Max distance with 1.0 power is ~62 yards.
+  const maxKickingDistance = 62.5 * Math.max(0.92, Math.min(1.12, kickerRating));
+  const effectiveDistance = clampedPower * maxKickingDistance;
+
+  // Flight duration and vertical apex
+  const flightFrames = Math.max(38, Math.round(36 + (clampedDistance / 60) * 26));
+  const maxZ = Math.round(32 + clampedPower * 30);
+
+  // Distance / Elevation clearance
+  // If effectiveDistance >= clampedDistance, arrival height clears crossbar (z >= 22).
+  // If effectiveDistance < clampedDistance, ball drops short of crossbar.
+  const distanceMargin = effectiveDistance - clampedDistance;
+  const arrivalZ = distanceMargin >= 0
+    ? GOALPOST_CROSSBAR_HEIGHT_Z + Math.min(26, distanceMargin * 2.2)
+    : Math.max(0, GOALPOST_CROSSBAR_HEIGHT_Z + distanceMargin * 4.2);
+
+  // Lateral drift: As distance increases, aim deviations carry wider over the long flight
+  // At 20 yds: driftScale ~ 42 (requires Math.abs(aim) <= 0.45 to stay inside 151-189)
+  // At 60 yds: driftScale ~ 82 (requires Math.abs(aim) <= 0.23 to stay inside 151-189)
+  const distanceRatio = Math.max(0, Math.min(1, (clampedDistance - 15) / 45));
+  const driftScale = 38 + distanceRatio * 44;
+  const lateralDrift = clampedAim * driftScale;
+  const targetX = GOALPOST_CENTER_X + lateralDrift;
+  const targetY = attackDirection === -1 ? 0 : 1200;
+
+  let isGood = false;
+  let missReason: 'WIDE_LEFT' | 'WIDE_RIGHT' | 'SHORT' | 'UPRIGHT_DOINK' | undefined;
+
+  if (arrivalZ < GOALPOST_CROSSBAR_HEIGHT_Z) {
+    missReason = 'SHORT';
+  } else if (Math.abs(targetX - GOALPOST_LEFT_UPRIGHT_X) < 1.8 || Math.abs(targetX - GOALPOST_RIGHT_UPRIGHT_X) < 1.8) {
+    missReason = 'UPRIGHT_DOINK';
+  } else if (targetX < GOALPOST_LEFT_UPRIGHT_X) {
+    missReason = 'WIDE_LEFT';
+  } else if (targetX > GOALPOST_RIGHT_UPRIGHT_X) {
+    missReason = 'WIDE_RIGHT';
+  } else {
+    isGood = true;
+  }
+
+  return {
+    distanceYards: clampedDistance,
+    flightFrames,
+    maxZ,
+    arrivalZ,
+    targetX,
+    targetY,
+    isGood,
+    missReason
+  };
+}
+
+

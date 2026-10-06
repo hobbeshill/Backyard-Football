@@ -197,6 +197,65 @@ export class SoundManager {
     osc.start();
     osc.stop(this.ctx.currentTime + 0.22);
   }
+
+  playKick() {
+    if (!this.enabled) return;
+    this.init();
+    if (!this.ctx) return;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(180, this.ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(55, this.ctx.currentTime + 0.18);
+    gain.gain.setValueAtTime(0.45, this.ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.18);
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+    osc.start();
+    osc.stop(this.ctx.currentTime + 0.18);
+  }
+
+  playCrossbarDoink() {
+    if (!this.enabled) return;
+    this.init();
+    if (!this.ctx) return;
+    // Resonant metallic doink (high harmonic chime + low thump)
+    const osc1 = this.ctx.createOscillator();
+    const osc2 = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc1.type = 'sine';
+    osc2.type = 'triangle';
+    osc1.frequency.setValueAtTime(880, this.ctx.currentTime);
+    osc1.frequency.exponentialRampToValueAtTime(740, this.ctx.currentTime + 0.35);
+    osc2.frequency.setValueAtTime(440, this.ctx.currentTime);
+    osc2.frequency.exponentialRampToValueAtTime(370, this.ctx.currentTime + 0.35);
+    gain.gain.setValueAtTime(0.5, this.ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.35);
+    osc1.connect(gain);
+    osc2.connect(gain);
+    gain.connect(this.ctx.destination);
+    osc1.start();
+    osc2.start();
+    osc1.stop(this.ctx.currentTime + 0.35);
+    osc2.stop(this.ctx.currentTime + 0.35);
+  }
+
+  playMeterLock() {
+    if (!this.enabled) return;
+    this.init();
+    if (!this.ctx) return;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(520, this.ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(780, this.ctx.currentTime + 0.08);
+    gain.gain.setValueAtTime(0.25, this.ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.08);
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+    osc.start();
+    osc.stop(this.ctx.currentTime + 0.08);
+  }
 }
 
 export const sounds = new SoundManager();

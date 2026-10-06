@@ -145,6 +145,19 @@ export const offensivePlaybook: Record<string, PlayOption> = {
     risk: 'SAFE',
     routeType: 'VERTICAL',
     expectedGain: [35, 55]
+  },
+  FIELD_GOAL: {
+    name: 'SPECIAL TEAMS: FIELD GOAL',
+    type: 'FIELD_GOAL',
+    alignment: 'SPREAD',
+    left: 'BLOCK',
+    right: 'BLOCK',
+    center: 'BLOCK',
+    rbRoute: 'BLOCK',
+    desc: 'Field Goal: 3-point kick attempt through the uprights from up to 60 yards',
+    risk: 'SAFE',
+    routeType: 'SHORT',
+    expectedGain: [0, 0]
   }
 };
 
