@@ -875,7 +875,7 @@ test('user cannot pull defensive sprite across the line of scrimmage (illegal of
   }
 });
 
-test('Space starts plays on both sides, ignores repeats and typing, and arrows do not scroll', () => {
+test('Space, WASD, and arrows start plays on both sides and special teams without repeats or typing', () => {
   const originalWindow = globalThis.window;
   const listeners = new Map<string, EventListener>();
   const mockWindow = {
@@ -897,26 +897,49 @@ test('Space starts plays on both sides, ignores repeats and typing, and arrows d
     assert.ok(engine);
     const game = engine as GameEngineHandle;
     const keyDown = listeners.get('keydown');
-    assert.ok(keyDown);
+    const keyUp = listeners.get('keyup');
+    assert.ok(keyDown && keyUp);
     let prevented = false;
-    const space = { key: ' ', repeat: false, preventDefault: () => { prevented = true; } };
-    keyDown(space as KeyboardEvent);
-    assert.equal(game.phase, 'KICKOFF');
-    for (const team of ['P1', 'P2'] as const) {
-      game.setPossessionForTest?.(team);
-      game.resetDrill();
-      keyDown({ ...space, target: { tagName: 'INPUT' } } as unknown as KeyboardEvent);
+    for (const key of [' ', 'w', 'a', 's', 'd', 'W', 'A', 'S', 'D', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']) {
+      const press = { key, repeat: false, preventDefault: () => { prevented = true; } };
+      for (const team of ['P1', 'P2'] as const) {
+        game.setPossessionForTest?.(team);
+        game.resetDrill();
+        for (const tagName of ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON', 'A']) {
+          keyDown({ ...press, target: { tagName } } as unknown as KeyboardEvent);
+          assert.equal(game.phase, 'PRE_SNAP');
+        }
+        keyDown({ ...press, target: { isContentEditable: true } } as unknown as KeyboardEvent);
+        assert.equal(game.phase, 'PRE_SNAP');
+        keyDown({ ...press, defaultPrevented: true } as KeyboardEvent);
+        assert.equal(game.phase, 'PRE_SNAP');
+        keyDown({ ...press, repeat: true } as KeyboardEvent);
+        assert.equal(game.phase, 'PRE_SNAP');
+        game.setPaused(true);
+        keyDown(press as KeyboardEvent);
+        assert.equal(game.phase, 'PRE_SNAP');
+        game.setPaused(false);
+        prevented = false;
+        keyDown(press as KeyboardEvent);
+        assert.notEqual(game.phase, 'PRE_SNAP', `${key} starts a play for ${team}`);
+        assert.equal(prevented, key === ' ' || key.startsWith('Arrow'));
+        keyUp(press as KeyboardEvent);
+      }
+      game.resetGame();
+      assert.equal(game.phase, 'KICKOFF');
+      keyDown({ ...press, repeat: true } as KeyboardEvent);
+      assert.equal(game.phase, 'KICKOFF');
+      keyDown(press as KeyboardEvent);
+      assert.equal(game.phase, 'THROWN', `${key} starts the kickoff`);
+      keyUp(press as KeyboardEvent);
+
+      game.setPossessionForTest?.('P1');
+      game.set4thDownForTest?.();
+      game.callPunt();
       assert.equal(game.phase, 'PRE_SNAP');
-      keyDown({ ...space, repeat: true } as KeyboardEvent);
-      assert.equal(game.phase, 'PRE_SNAP');
-      game.setPaused(true);
-      keyDown(space as KeyboardEvent);
-      assert.equal(game.phase, 'PRE_SNAP');
-      game.setPaused(false);
-      prevented = false;
-      keyDown(space as KeyboardEvent);
-      assert.notEqual(game.phase, 'PRE_SNAP');
-      assert.equal(prevented, true);
+      keyDown(press as KeyboardEvent);
+      assert.equal(game.phase, 'THROWN', `${key} starts the punt`);
+      keyUp(press as KeyboardEvent);
     }
     prevented = false;
     keyDown({ key: 'ArrowLeft', preventDefault: () => { prevented = true; } } as KeyboardEvent);

@@ -2595,6 +2595,13 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     }
   }
 
+  function startReadyKickoff(): void {
+    const kickoffPower = kickoffKickingTeam === 'P1'
+      ? kickMeterPower
+      : 0.85 + Math.random() * 0.12;
+    executeKickoff(kickoffPower);
+  }
+
   function startReadyPlay(): void {
     if (phase !== 'PRE_SNAP') return;
     if (activeDefense === 'P1') {
@@ -2653,19 +2660,24 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     const target = e.target as HTMLElement | null;
     if (target?.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON', 'A'].includes(target?.tagName ?? '')) return;
     const key = e.key.toLowerCase();
-    if (key === ' ') {
-      e.preventDefault();
-      if (e.repeat) return;
-      if (phase === 'PRE_SNAP' && !isKickoffPhase) {
-        startReadyPlay();
-        return;
-      }
-    }
-    if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(key)) e.preventDefault();
+    const isDirectionKey = ['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(key);
+    if (key === ' ' || ['arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(key)) e.preventDefault();
+    if (key === ' ' && e.repeat) return;
     if (key === 'w' || key === 'arrowup') keysDown.up = true;
     if (key === 's' || key === 'arrowdown') keysDown.down = true;
     if (key === 'a' || key === 'arrowleft') keysDown.left = true;
     if (key === 'd' || key === 'arrowright') keysDown.right = true;
+    if ((isDirectionKey || key === ' ') && !e.repeat) {
+      if (phase === 'KICKOFF') {
+        startReadyKickoff();
+        return;
+      }
+      if (phase === 'PRE_SNAP' && !isKickoffPhase &&
+          (!options.tutorial || tutorialStep === 4 || tutorialStep === 10)) {
+        startReadyPlay();
+        return;
+      }
+    }
     if ((key === ' ' || key === 'e') && !e.repeat && activeDefense === 'P1') {
       e.preventDefault();
       diveTackle();
@@ -2897,10 +2909,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
     if (phase === 'KICKOFF') {
       if (touchedJoystick) {
-        const kickoffPower = kickoffKickingTeam === 'P1'
-          ? kickMeterPower
-          : 0.85 + Math.random() * 0.12;
-        executeKickoff(kickoffPower);
+        startReadyKickoff();
         if (kickoffReceivingTeam === 'P1') {
           activateJoystick(e.pointerId, screenPos);
         }

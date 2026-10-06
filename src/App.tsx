@@ -890,7 +890,7 @@ export default function App() {
         </span>
       </footer>
       <p className="keyboard-controls hidden sm:block mt-0.5 max-w-[420px] px-2 text-center text-[11px] text-neutral-300 shrink-0">
-        <kbd>Space</kbd> Start / Snap · <kbd>WASD</kbd> / <kbd>Arrow keys</kbd> Move
+        <kbd>Space</kbd> Start / Snap · <kbd>WASD</kbd> / <kbd>Arrow keys</kbd> Start / Move
       </p>
 
       {/* Game Manual / Help Modal */}
@@ -931,7 +931,7 @@ export default function App() {
                 <span className="text-[#ffcc00] font-bold block mb-1">2. TAP TO THROW & RELATIVE JOYSTICK CONTROLS:</span>
                 <ul className="list-disc list-inside space-y-1 text-neutral-300">
                   <li><b className="text-white">Tap to Throw:</b> Tap any eligible receiver downfield (WR, Center, or RB) to launch a crisp pass with smart lead targeting so they catch the ball in stride!</li>
-                  <li><b className="text-white">Relative Virtual Joystick:</b> Touch anywhere in the lower-left control area—from the top of the joystick marker to the bottom of the field, and from the left edge to mid-screen—to start the play. The stick appears where you touch; drag it (or use WASD / Arrow keys on keyboard) to control your player!</li>
+                  <li><b className="text-white">Relative Virtual Joystick:</b> Touch anywhere in the lower-left control area—from the top of the joystick marker to the bottom of the field, and from the left edge to mid-screen—to start the play. The stick appears where you touch; drag it to control your player! On keyboard, press Space, WASD, or any Arrow key to start snaps, kickoffs, and punts; WASD / Arrow keys also move your player.</li>
                   <li><b className="text-white">Quarterback Control:</b> Maneuver the QB in the pocket, step up to avoid blitzers, roll out, or cross the line of scrimmage to scramble!</li>
                   <li><b className="text-white">Ball Carrier Control:</b> Steer the Running Back through holes, cut laterally, or slow down behind lead blockers!</li>
                   <li><b className="text-white">Edge Rusher on Defense:</b> Take control of the edge rusher with the joystick, bend around the tackle, collapse the pocket, and deliver a bone-crushing sack!</li>
