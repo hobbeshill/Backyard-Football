@@ -606,8 +606,8 @@ test('the punt joystick starts the punt and all player speeds scale with GAME_SP
   assert.ok(typeof pointerDown === 'function', 'Canvas has pointerdown listener');
 
   // The punt meter is informational; the shared joystick is the start control.
-  pointerDown({ clientX: 170, clientY: 320, pointerId: 1 });
-  assert.notEqual(engine.phase, 'THROWN', 'Tapping the punt meter does not start the punt');
+  pointerDown({ clientX: 190, clientY: 320, pointerId: 1 });
+  assert.notEqual(engine.phase, 'THROWN', 'Tapping the punt meter outside the joystick area does not start the punt');
   pointerDown({ clientX: 90, clientY: 364, pointerId: 2 });
 
   assert.equal(engine.phase, 'THROWN', 'Touching the joystick starts the punt');

@@ -80,7 +80,8 @@ export function getCameraYForLineOfScrimmage(
 
 // Inner (field-side) edge of the left sideline yard numbers, drawn at x=30 in 28px bold monospace.
 export const FIELD_NUMBERS_INNER_EDGE_X = 64;
-export const OFFENSE_JOYSTICK_INNER_RING_RADIUS = 46 * 0.55;
+export const OFFENSE_JOYSTICK_RADIUS = 46;
+export const OFFENSE_JOYSTICK_INNER_RING_RADIUS = OFFENSE_JOYSTICK_RADIUS * 0.55;
 
 export function getOffenseJoystickAnchor(
   runningBackDepthScreenY: number,
@@ -97,12 +98,13 @@ export function getOffenseJoystickAnchor(
 export function isOffenseJoystickStartZone(
   x: number,
   y: number,
-  anchorX: number,
+  _anchorX: number,
   anchorY: number,
   width = 340,
   height = 450
 ): boolean {
-  return Math.abs(x - anchorX) <= width * 0.15 && Math.abs(y - anchorY) <= height * 0.12;
+  const top = anchorY - OFFENSE_JOYSTICK_RADIUS * (width / 340);
+  return x >= 0 && x <= width / 2 && y >= top && y <= height;
 }
 
 export function getPlayerForwardDirection(
@@ -2737,14 +2739,13 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     return getOffenseJoystickAnchor(288, logicalCanvasWidth);
   }
 
-  function activateJoystick(pointerId: number): void {
-    const anchor = getJoystickAnchor();
+  function activateJoystick(pointerId: number, origin: { x: number; y: number }): void {
     joystick.active = true;
     joystick.pointerId = pointerId;
-    joystick.baseX = anchor.x;
-    joystick.baseY = anchor.y;
-    joystick.currentX = anchor.x;
-    joystick.currentY = anchor.y;
+    joystick.baseX = origin.x;
+    joystick.baseY = origin.y;
+    joystick.currentX = origin.x;
+    joystick.currentY = origin.y;
     joystick.inputX = 0;
     joystick.inputY = 0;
     joystick.distance = 0;
@@ -2868,7 +2869,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
     const currentTime = Date.now();
     const joystickAnchor = getJoystickAnchor();
-    const touchedJoystick = isOffenseJoystickStartZone(
+    const joystickEnabled = !options.tutorial || [4, 5, 10, 11].includes(tutorialStep);
+    const touchedJoystick = joystickEnabled && isOffenseJoystickStartZone(
       screenPos.x,
       screenPos.y,
       joystickAnchor.x,
@@ -2900,7 +2902,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           : 0.85 + Math.random() * 0.12;
         executeKickoff(kickoffPower);
         if (kickoffReceivingTeam === 'P1') {
-          activateJoystick(e.pointerId);
+          activateJoystick(e.pointerId, screenPos);
         }
       }
       return;
@@ -2967,7 +2969,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           startReadyPlay();
           const phaseAfterStart: string = phase;
           if (phaseAfterStart === 'QB_DROP' || phaseAfterStart === 'HANDOFF' || activeDefense === 'P1') {
-            activateJoystick(e.pointerId);
+            activateJoystick(e.pointerId, screenPos);
           }
           return;
         }
@@ -3004,7 +3006,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
         if (touchedJoystick) {
           startReadyPlay();
-          activateJoystick(e.pointerId);
+          activateJoystick(e.pointerId, screenPos);
           return;
         }
 
@@ -3049,19 +3051,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
     // Relative Virtual Joystick activation
     const isLiveMovementPhase = (phase === 'QB_DROP' || phase === 'HANDOFF' || phase === 'RUNNING');
-    if (typeof joystick !== 'undefined' && isLiveMovementPhase && !joystick.active) {
-      const cPos = typeof getCanvasCoords === 'function' ? getCanvasCoords(e.clientX, e.clientY) : { x: e.clientX, y: e.clientY };
-      const joystickAnchor = getJoystickAnchor();
-      if (isOffenseJoystickStartZone(
-        cPos.x,
-        cPos.y,
-        joystickAnchor.x,
-        joystickAnchor.y,
-        logicalCanvasWidth,
-        logicalCanvasHeight
-      )) {
-        activateJoystick(e.pointerId);
-      }
+    if (typeof joystick !== 'undefined' && isLiveMovementPhase && !joystick.active && touchedJoystick) {
+      activateJoystick(e.pointerId, screenPos);
     }
   };
 
@@ -3083,8 +3074,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       const dx = joystick.currentX - joystick.baseX;
       const dy = joystick.currentY - joystick.baseY;
       const rawDist = Math.hypot(dx, dy);
-      const MAX_RADIUS = 46 * ((canvas?.width || 340) / 340);
-      const DEADZONE = 5 * ((canvas?.width || 340) / 340);
+      const MAX_RADIUS = OFFENSE_JOYSTICK_RADIUS * (logicalCanvasWidth / 340);
+      const DEADZONE = 5 * (logicalCanvasWidth / 340);
 
       if (rawDist > DEADZONE) {
         const clampedDist = Math.min(MAX_RADIUS, rawDist);
@@ -6527,7 +6518,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       phase === 'KICKOFF';
     if (joystick.alpha > 0.01 || showJoystickHint) {
       ctx.save();
-      const MAX_RADIUS = 46 * (logicalCanvasWidth / 340);
+      const MAX_RADIUS = OFFENSE_JOYSTICK_RADIUS * (logicalCanvasWidth / 340);
       const KNOB_RADIUS = 20 * (logicalCanvasWidth / 340);
       const alpha = joystick.alpha > 0.01 ? joystick.alpha : 0.42;
       const joystickAnchor = getJoystickAnchor();
