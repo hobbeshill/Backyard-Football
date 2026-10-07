@@ -2,11 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createSeason, getSeasonRecord, recordSeasonGame } from './season';
 
-test('season setup renders all team choices without a schedule panel', async (context) => {
+test('opening UI chooses a game mode before showing teams, even with a saved mode preference', async (context) => {
   const { createElement } = await import('react');
   const { renderToStaticMarkup } = await import('react-dom/server');
   const { default: App } = await import('../App');
-  const { getAllTeams } = await import('./teams');
   const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
   Object.defineProperty(globalThis, 'window', {
     configurable: true,
@@ -21,16 +20,85 @@ test('season setup renders all team choices without a schedule panel', async (co
     else Reflect.deleteProperty(globalThis, 'window');
   });
   const markup = renderToStaticMarkup(createElement(App));
-  assert.ok(markup.includes('Season setup'));
-  assert.ok(markup.includes('Search SEC teams'));
-  assert.ok(markup.includes('Start season'));
+  assert.ok(markup.includes('aria-labelledby="game-mode-title"'));
+  assert.ok(markup.includes('One Game'));
+  assert.ok(markup.includes('Season'));
+  assert.ok(markup.includes('Dynasty'));
+  assert.ok(markup.includes('Coming soon'));
+  assert.ok(markup.includes('aria-label="Settings"'));
+  assert.ok(!markup.includes('aria-labelledby="team-selector-title"'));
+  assert.ok(!markup.includes('Search SEC teams'));
+  assert.ok(!markup.includes('Enable Elite Mode'));
+  assert.ok(!markup.includes('Switch mode'));
+  assert.ok(!markup.includes('Choose Gameplay Mode'));
   assert.ok(!markup.includes('aria-label="Season schedule"'));
   assert.ok(!markup.includes('SCHEDULED'));
-  for (const team of getAllTeams()) {
-    const escapedName = team.name.replaceAll('&', '&amp;');
-    assert.ok(markup.includes(`<span>${escapedName}</span>`), `${team.name} is available to pick`);
-  }
 });
+
+test('mode selection routes to teams, season choices preserve progress, and Dynasty cannot start a game', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { stripTypeScriptTypes } = await import('node:module');
+    const { getTeam, TEAM_KEYS } = await import('./teams');
+    const source = readFileSync(new URL('../App.tsx', import.meta.url), 'utf8');
+    const start = source.indexOf('  const handleContinueSeason =');
+    const end = source.indexOf('  const visibleTeams =', start);
+    assert.ok(start >= 0 && end > start);
+    const handlers = stripTypeScriptTypes(source.slice(start, end));
+    const makeHandlers = new Function('state', 'createSeason', 'saveSeasonProgress', 'getTeam', 'TEAM_KEYS', `
+      const gameModeRef = { current: 'ONE_GAME' };
+      const seasonProgressRef = { current: state.season };
+      const p1TeamState = getTeam('ALABAMA');
+      const engineRef = { current: {
+        selectP1Team: id => state.userTeam = id,
+        selectP2Team: id => state.cpuTeam = id
+      } };
+      const loadSeasonProgress = () => state.season;
+      const setGameMode = mode => state.mode = mode;
+      const saveGameMode = mode => state.savedMode = mode;
+      const setTeamSelectionSide = side => state.side = side;
+      const setTeamSearch = search => state.search = search;
+      const setShowSeasonChoiceModal = visible => state.seasonChoices = visible;
+      const setSetupStep = step => state.step = step;
+      const setSeasonProgress = season => state.season = season;
+      const setP1TeamState = team => state.userTeam = team.id;
+      const setP2TeamState = team => state.cpuTeam = team.id;
+      ${handlers}
+      return { handleGameModeChange, handleContinueSeason, handleStartNewSeason };
+    `);
+    const savedSeason = recordSeasonGame(createSeason('GEORGIA'), 14, 7);
+    for (const mode of ['ONE_GAME', 'SEASON', 'DYNASTY'] as const) {
+      const state = { season: null, mode: '', savedMode: '', side: 'P2', search: 'old search', step: 'MODE', seasonChoices: false };
+      const calls = makeHandlers(state, createSeason, () => {}, getTeam, TEAM_KEYS);
+      calls.handleGameModeChange(mode);
+      assert.equal(state.mode, mode);
+      assert.equal(state.savedMode, mode);
+      assert.equal(state.side, 'P1');
+      assert.equal(state.search, '');
+      assert.equal(state.step, 'TEAMS');
+    }
+    const state = { season: savedSeason, step: 'MODE', seasonChoices: false, userTeam: '', cpuTeam: '' };
+    let saves = 0;
+    const calls = makeHandlers(state, createSeason, () => { saves++; }, getTeam, TEAM_KEYS);
+    calls.handleGameModeChange('SEASON');
+    assert.equal(state.seasonChoices, true);
+    assert.equal(state.step, 'MODE', 'Existing season must ask continue or new before teams');
+    assert.equal(saves, 0, 'Opening the season choice must not overwrite the save');
+    calls.handleContinueSeason();
+    assert.equal(state.step, 'TEAMS');
+    assert.equal(state.userTeam, 'GEORGIA');
+    assert.equal(state.season.results.length, 1);
+    assert.equal(state.cpuTeam, savedSeason.opponentIds[1]);
+    calls.handleStartNewSeason('ALABAMA');
+    assert.equal(state.season.teamId, 'ALABAMA');
+    assert.equal(state.season.results.length, 0);
+
+    const startGame = source.slice(source.indexOf('  const handleStartGame ='), source.indexOf('  const handleReturnToMainMenu ='));
+    const dynastyGuard = startGame.slice(startGame.indexOf("    if (gameMode === 'DYNASTY')"), startGame.indexOf('    finishedGameHandledRef.current'));
+    let preview = false;
+    const attemptDynasty = new Function('gameMode', 'setShowDynastyPreview', `${dynastyGuard}; throw new Error('Dynasty reached game startup');`);
+    attemptDynasty('DYNASTY', (visible: boolean) => { preview = visible; });
+    assert.equal(preview, true);
+  });
 
 test('completed games retain a box score and save season results for player navigation', async () => {
   const { readFileSync } = await import('node:fs');
@@ -187,7 +255,7 @@ test('winning rivalry games awards trophies and season culminates in SEC Champio
   assert.ok(afterChampionship.trophiesWon?.includes('SEC Championship Trophy'), 'Champion wins SEC Championship Trophy');
 });
 
-test('clicking season has option to continue the season or start a new season and does not list rivalry under scoreboard', async (context) => {
+test('opening UI offers saved-season continuation without skipping mode selection or listing rivalries', async (context) => {
   const { createElement } = await import('react');
   const { renderToStaticMarkup } = await import('react-dom/server');
   const { default: App } = await import('../App');
@@ -216,9 +284,9 @@ test('clicking season has option to continue the season or start a new season an
 
   const markup = renderToStaticMarkup(createElement(App));
 
-  // Season setup screen provides option to continue season as well as start new season
   assert.ok(markup.includes('Continue season'), 'Has option to continue existing season');
-  assert.ok(markup.includes('Start new season'), 'Has option to start new season');
+  assert.ok(markup.includes('aria-labelledby="game-mode-title"'));
+  assert.ok(!markup.includes('Search SEC teams'), 'Teams are a separate setup step');
 
   // Verify rivalry game names are NOT listed under the scoreboard header
   // Header should only contain the matchup button and scoreboard grid

@@ -33,6 +33,7 @@ export interface ProOffensePlay {
   leftRoute: string;
   rightRoute: string;
   centerRoute: string;
+  slotRoute: string;
   rbRoute: string;
   routesSummary: string;
   matchups: Record<ProDefensePlayId, MatchupEffectiveness>;
@@ -54,18 +55,19 @@ export const PRO_OFFENSE_PLAYS: Record<ProOffensePlayId, ProOffensePlay> = {
   PRO_QUICK_SLANTS: {
     id: 'PRO_QUICK_SLANTS',
     name: 'Quick Slants',
-    category: 'Short Pass',
+    category: 'Short/Medium Pass',
     isRun: false,
     isDeepPass: false,
-    description: 'Quick 3-step drop, slot receivers cross underneath zone coverage for fast yardage.',
+    description: 'Inside slants and an intermediate comeback attack beyond the sticks, with a short slot checkdown.',
     counterDefenseId: 'PRO_COVER1_MAN',
     counterDefenseName: 'Cover 1 Man-Free',
     alignment: 'SPREAD',
-    leftRoute: 'SLANT-L',
-    rightRoute: 'SLANT-R',
-    centerRoute: 'SLANT-R',
+    leftRoute: 'SLANT-R',
+    rightRoute: 'SLANT-L',
+    centerRoute: 'COMEBACK',
+    slotRoute: 'HITCH',
     rbRoute: 'BLOCK',
-    routesSummary: 'Dual perimeter slants breaking inside at 4 yards with slot slant underneath.',
+    routesSummary: '12-yard inside slants and a comeback from 16 to 12 yards; slot settles at 6 yards for a checkdown.',
     matchups: {
       PRO_COVER2_HARD_FLAT: 'EFFECTIVE',
       PRO_COVER1_MAN: 'SHUTDOWN',
@@ -82,15 +84,16 @@ export const PRO_OFFENSE_PLAYS: Record<ProOffensePlayId, ProOffensePlay> = {
     category: 'Short/Medium Pass',
     isRun: false,
     isDeepPass: false,
-    description: 'Two receivers cross underneath at shallow depths to create a natural rub/pick against man coverage.',
+    description: 'Intermediate crossers create a natural rub while a deep post clears space for the short slot checkdown.',
     counterDefenseId: 'PRO_COVER3_DEEP',
     counterDefenseName: 'Cover 3 Deep Zone',
     alignment: 'SPREAD',
     leftRoute: 'CROSS-R',
     rightRoute: 'CROSS-L',
-    centerRoute: 'HITCH',
+    centerRoute: 'POST-R',
+    slotRoute: 'HITCH',
     rbRoute: 'BLOCK',
-    routesSummary: 'Underneath crossing drags at 4-5 yards create natural rub; slot sits in intermediate hole.',
+    routesSummary: 'Crossers break at 8 yards and finish at 12; center runs a 32-yard post, slot sits at 6 yards.',
     matchups: {
       PRO_COVER2_HARD_FLAT: 'EFFECTIVE',
       PRO_COVER1_MAN: 'MODERATE',
@@ -114,8 +117,9 @@ export const PRO_OFFENSE_PLAYS: Record<ProOffensePlayId, ProOffensePlay> = {
     leftRoute: 'GO',
     rightRoute: 'GO',
     centerRoute: 'GO',
+    slotRoute: 'GO',
     rbRoute: 'BLOCK',
-    routesSummary: 'All 4 eligible targets streak vertically downfield stretching deep safeties to their limits.',
+    routesSummary: 'All four receivers stretch coverage to 35 yards and settle in bounds; RB protects the quarterback.',
     matchups: {
       PRO_COVER2_HARD_FLAT: 'MODERATE',
       PRO_COVER1_MAN: 'MODERATE',
@@ -132,15 +136,16 @@ export const PRO_OFFENSE_PLAYS: Record<ProOffensePlayId, ProOffensePlay> = {
     category: 'Deep Pass',
     isRun: false,
     isDeepPass: true,
-    description: 'Wide receiver fakes an out route before breaking deep downfield to beat flat or man coverage.',
+    description: 'Deep boundary corners and a post stretch the safeties, with a short slot hitch as the checkdown.',
     counterDefenseId: 'PRO_COVER2_HARD_FLAT',
     counterDefenseName: 'Cover 2 Hard Flat',
     alignment: 'SPREAD',
     leftRoute: 'FLAG-L',
     rightRoute: 'FLAG-R',
     centerRoute: 'POST-R',
+    slotRoute: 'HITCH',
     rbRoute: 'BLOCK',
-    routesSummary: 'Perimeter receivers feign hard out cuts before snapping vertical into the deep sideline seam.',
+    routesSummary: 'Perimeter receivers break at 16 yards to 30-yard corners; center runs a 32-yard post, slot hitches at 6.',
     matchups: {
       PRO_COVER2_HARD_FLAT: 'SHUTDOWN',
       PRO_COVER1_MAN: 'MODERATE',
@@ -164,6 +169,7 @@ export const PRO_OFFENSE_PLAYS: Record<ProOffensePlayId, ProOffensePlay> = {
     leftRoute: 'BLOCK',
     rightRoute: 'HITCH',
     centerRoute: 'BLOCK',
+    slotRoute: 'BLOCK',
     rbRoute: 'BLOCK',
     routesSummary: 'Receiver catches behind LOS while slot and tackle seal the perimeter wall for RAC yards.',
     matchups: {
@@ -189,6 +195,7 @@ export const PRO_OFFENSE_PLAYS: Record<ProOffensePlayId, ProOffensePlay> = {
     leftRoute: 'GO',
     rightRoute: 'GO',
     centerRoute: 'BLOCK',
+    slotRoute: 'BLOCK',
     rbRoute: 'RUN',
     routesSummary: 'Speed motion horizontally across formation, taking immediate handoff to outrun the edge pursuit.',
     matchups: {
@@ -214,6 +221,7 @@ export const PRO_OFFENSE_PLAYS: Record<ProOffensePlayId, ProOffensePlay> = {
     leftRoute: 'GO',
     rightRoute: 'GO',
     centerRoute: 'BLOCK',
+    slotRoute: 'BLOCK',
     rbRoute: 'RUN',
     routesSummary: 'QB drops to pass to entice rushers upfield, slipping delayed handoff to RB through the A/B gap.',
     matchups: {

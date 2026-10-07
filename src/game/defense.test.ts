@@ -715,6 +715,45 @@ test('Pro coverage and run fronts rush one defender unless an all-out blitz is c
   assert.equal(alignedPassRushers('PRO_BLITZ_ZERO'), 3);
 });
 
+test('Pro deep shells preserve three thirds or four quarters against spread and trips', () => {
+  for (const alignment of ['SPREAD', 'TRIPS'] as const) {
+    const cover3 = createAlignedDefense('PRO_COVER3_DEEP', alignment).defenders;
+    const thirds = cover3.filter(defender => ((500 - (defender.zoneY ?? 500)) >= 300));
+    assert.equal(thirds.length, 3);
+    assert.deepEqual(thirds.map(defender => defender.zoneX).sort((a, b) => a! - b!), [55, 170, 285]);
+    const cover4 = createAlignedDefense('PRO_COVER4_QUARTERS', alignment).defenders;
+    const quarters = cover4.filter(defender => ((500 - (defender.zoneY ?? 500)) >= 300));
+    assert.equal(quarters.length, 4);
+    assert.deepEqual(quarters.map(defender => defender.zoneX).sort((a, b) => a! - b!), [50, 115, 225, 290]);
+  }
+});
+
+test('Pro man and zero blitz cover all four receivers without moving a deep safety into man coverage', () => {
+  for (const play of ['PRO_COVER1_MAN', 'PRO_BLITZ_ZERO']) {
+    const { defenders, eligibleReceivers } = createAlignedDefense(play);
+    const slot: Entity = { x: 115, y: 500, radius: 10 };
+    eligibleReceivers.splice(1, 0, slot);
+    alignDefenders(defenders, play, -1, 500, eligibleReceivers.slice(0, -1), eligibleReceivers.at(-1)!);
+    assert.equal(new Set(defenders.map(defender => defender.assignedReceiver).filter(Boolean)).size, 4);
+    for (const receiver of eligibleReceivers) {
+      assert.ok(defenders.some(defender => defender.assignedReceiver === receiver), play);
+    }
+    if (play === 'PRO_COVER1_MAN') assert.equal(defenders[6].assignedReceiver, undefined);
+  }
+});
+
+test('CPU allows intermediate routes to develop but releases under pressure or on timeout', () => {
+  const situation = {
+    hasTarget: true, isDeepShotOpportunity: false, hasOpenBreak: true,
+    isUnderHeavyPressure: false, playClock: 66, bestScore: 30,
+    isIntermediatePlay: true, targetDepthYards: 5, targetSeparation: 25
+  };
+  assert.equal(shouldCpuReleasePass(situation), false);
+  assert.equal(shouldCpuReleasePass({ ...situation, targetDepthYards: 8 }), true);
+  assert.equal(shouldCpuReleasePass({ ...situation, isUnderHeavyPressure: true, pressureFrames: 10 }), true);
+  assert.equal(shouldCpuReleasePass({ ...situation, playClock: 180 }), true);
+});
+
 test('CPU brackets a lone receiving threat instead of defending blockers or sitting in deep zones', () => {
   for (const playKey of ['COVER2', 'ZONE34', 'ZONE232', 'ZONE151']) {
     for (const randomValue of [0, 1]) {

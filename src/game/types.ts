@@ -9,6 +9,7 @@ export interface PlayOption {
   alignment?: 'SPREAD' | 'STACK' | 'TRIPS';
   left?: string;
   right?: string;
+  slot?: string;
   center?: string;
   rbRoute?: string;
   desc: string;
@@ -58,6 +59,7 @@ export interface Entity {
   pursuitTimer?: number;
   routeType?: string;
   routeIndex?: number;
+  routeWaypoint?: number;
   timer?: number;
   flash?: number;
   caught?: boolean;

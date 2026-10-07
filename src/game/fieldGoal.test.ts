@@ -11,7 +11,7 @@ import {
   GOALPOST_CROSSBAR_HEIGHT_Z
 } from './rules';
 import { offensivePlaybook } from './playbook';
-import { mountFootballGame, GameEngineCallbacks } from './engine';
+import { mountFootballGame, GameEngineCallbacks, type GameEngineHandle } from './engine';
 import { TEAMS } from './teams';
 
 test('Field goals can be made from up to 60 yards out with accurate aim and power', () => {
@@ -151,6 +151,74 @@ function createMockCanvas(): HTMLCanvasElement {
     getBoundingClientRect: () => ({ left: 0, top: 0, width: 340, height: 450 })
   } as unknown as HTMLCanvasElement;
 }
+
+test('Pro playbook field goals preserve the actual down and launch through the meter', () => {
+  let engine: GameEngineHandle | null = null;
+  let downDistanceText = '';
+  let selectedPlay = '';
+  const cleanup = mountFootballGame(createMockCanvas(), {
+    setP2OffPlayState: () => {}, setP2DefPlayState: () => {},
+    setDownDistanceText: text => { downDistanceText = text; },
+    setActiveOffenseState: () => {}, setUserScore: () => {}, setCpuScore: () => {},
+    setP1DefPlayState: () => {}, setMomentumState: () => {}, setGameClockState: () => {},
+    setP1OffPlayState: play => { selectedPlay = play; },
+    showAnnouncement: () => {},
+    onEngineReady: handle => { engine = handle; }
+  });
+  try {
+    assert.ok(engine);
+    const game: GameEngineHandle = engine;
+    game.setTacticalMode?.('PRO');
+    game.selectOffense('FIELD_GOAL');
+    assert.notEqual(game.p1OffPlay, 'FIELD_GOAL', 'Cannot select a field goal during kickoff');
+    game.setPossessionForTest?.('P1');
+    game.resetDrill();
+    game.selectOffense('PRO_VERTS');
+    assert.deepEqual(game.getReceivers().map(receiver => receiver.routeType), ['GO', 'GO', 'GO']);
+    game.selectOffense('PRO_MESH');
+    assert.deepEqual(game.getReceivers().map(receiver => receiver.routeType), ['CROSS-R', 'HITCH', 'CROSS-L']);
+    const originalDown = downDistanceText;
+    game.selectOffense('FIELD_GOAL');
+    assert.equal(game.p1OffPlay, 'FIELD_GOAL');
+    assert.equal(selectedPlay, 'FIELD_GOAL');
+    assert.equal(downDistanceText, originalDown);
+    assert.match(downDistanceText, /^1st & 10/);
+    assert.equal(game.getFieldGoalMeterState?.().stage, 'AIM');
+    game.lockFieldGoalMeter?.();
+    assert.equal(game.getFieldGoalMeterState?.().stage, 'POWER');
+    game.lockFieldGoalMeter?.();
+    assert.equal(game.phase, 'THROWN');
+  } finally {
+    cleanup?.();
+  }
+});
+
+test('Pro playbook punts require fourth down and clear the play-selection gate', () => {
+  let engine: GameEngineHandle | null = null;
+  const cleanup = mountFootballGame(createMockCanvas(), {
+    setP2OffPlayState: () => {}, setP2DefPlayState: () => {},
+    setDownDistanceText: () => {}, setActiveOffenseState: () => {},
+    setUserScore: () => {}, setCpuScore: () => {}, setP1DefPlayState: () => {},
+    setMomentumState: () => {}, setGameClockState: () => {}, showAnnouncement: () => {},
+    onEngineReady: handle => { engine = handle; }
+  });
+  try {
+    assert.ok(engine);
+    const game: GameEngineHandle = engine;
+    game.setPossessionForTest?.('P1');
+    game.setTacticalMode?.('PRO');
+    game.resetDrill();
+    game.selectOffense('PUNT');
+    assert.notEqual(game.p1OffPlay, 'PUNT');
+    game.set4thDownForTest?.();
+    game.selectOffense('PUNT');
+    assert.equal(game.p1OffPlay, 'PUNT');
+    game.startPlay?.();
+    assert.equal(game.phase, 'THROWN', 'Selected punt starts without another offensive card');
+  } finally {
+    cleanup?.();
+  }
+});
 
 test('Field Goal two-stage skill meter: directional meter followed by up/down distance meter', () => {
   let engineHandle: any = null;

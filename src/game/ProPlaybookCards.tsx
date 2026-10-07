@@ -9,6 +9,7 @@ import {
   evaluateProMatchup
 } from './proMode';
 import { X, Shield, Zap, ChevronRight, Info } from 'lucide-react';
+import { getRouteWaypoints } from './movement';
 
 interface ProPlaybookCardsProps {
   onClose: () => void;
@@ -18,6 +19,12 @@ interface ProPlaybookCardsProps {
   activeDefensePlay?: string;
   initialTab?: 'OFFENSE' | 'DEFENSE' | 'MATRIX';
   selectionOnly?: boolean;
+  downDistanceText?: string;
+  canPunt?: boolean;
+  fieldGoalDistance?: number;
+  onSelectSpecialTeams?: (playId: 'PUNT' | 'FIELD_GOAL') => void;
+  offensePlayIds?: readonly ProOffensePlayId[];
+  specialTeamsOnly?: boolean;
 }
 
 export const ProPlaybookCards: React.FC<ProPlaybookCardsProps> = ({
@@ -27,7 +34,13 @@ export const ProPlaybookCards: React.FC<ProPlaybookCardsProps> = ({
   activeOffensePlay,
   activeDefensePlay,
   initialTab = 'OFFENSE',
-  selectionOnly = false
+  selectionOnly = false,
+  downDistanceText,
+  canPunt = false,
+  fieldGoalDistance,
+  onSelectSpecialTeams,
+  offensePlayIds,
+  specialTeamsOnly = false
 }) => {
   const [activeTab, setActiveTab] = useState<'OFFENSE' | 'DEFENSE' | 'MATRIX'>(initialTab);
   const [selectedOffenseId, setSelectedOffenseId] = useState<ProOffensePlayId>(
@@ -37,21 +50,46 @@ export const ProPlaybookCards: React.FC<ProPlaybookCardsProps> = ({
     (activeDefensePlay as ProDefensePlayId) || 'PRO_COVER2_HARD_FLAT'
   );
 
-  const offensePlayList = Object.values(PRO_OFFENSE_PLAYS);
+  const offensePlayList = specialTeamsOnly ? [] : Object.values(PRO_OFFENSE_PLAYS).filter(play => !offensePlayIds || offensePlayIds.includes(play.id));
   const defensePlayList = Object.values(PRO_DEFENSE_PLAYS);
-  const currentOffense = PRO_OFFENSE_PLAYS[selectedOffenseId] || offensePlayList[0];
+  const currentOffense = PRO_OFFENSE_PLAYS[selectedOffenseId] || PRO_OFFENSE_PLAYS.PRO_QUICK_SLANTS;
   const currentDefense = PRO_DEFENSE_PLAYS[selectedDefenseId] || defensePlayList[0];
+  const specialTeamsCards = onSelectSpecialTeams && (
+    <div className="col-span-full grid grid-cols-2 gap-2 border-t border-neutral-700 pt-3">
+      {(['PUNT', 'FIELD_GOAL'] as const).map(playId => (
+        <button
+          key={playId}
+          type="button"
+          disabled={playId === 'PUNT' && !canPunt}
+          onClick={() => {
+            onSelectSpecialTeams(playId);
+            onClose();
+          }}
+          className="rounded-md border border-amber-500/60 bg-[#121c27] px-3 py-4 text-center hover:border-amber-300 disabled:cursor-not-allowed disabled:border-neutral-700 disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-400"
+        >
+          <span className="block text-sm font-black uppercase text-white">
+            {playId === 'PUNT' ? 'Punt' : 'Field Goal'}
+            {playId === 'FIELD_GOAL' && fieldGoalDistance !== undefined ? ` (${fieldGoalDistance} YD)` : ''}
+          </span>
+          <span className="mt-1 block text-xs text-neutral-400">
+            {playId === 'PUNT' ? (canPunt ? 'Flip field position' : 'Available on 4th down') : 'Attempt 3 points; range up to 60 yards'}
+          </span>
+        </button>
+      ))}
+    </div>
+  );
 
   if (selectionOnly) {
     const isDefense = initialTab === 'DEFENSE';
-    const title = isDefense ? 'Choose a Defensive Scheme' : 'Choose an Offensive Play';
+    const title = isDefense ? 'Choose a Defensive Scheme' : specialTeamsOnly ? 'Choose a Special Teams Play' : 'Choose an Offensive Play';
 
     return (
       <div className="fixed inset-0 z-[150] flex items-center justify-center bg-black/90 p-2 sm:p-4 backdrop-blur-sm">
         <div className="flex max-h-[96dvh] w-full max-w-5xl flex-col overflow-hidden rounded-lg border border-neutral-700 bg-[#0d131a] text-neutral-200 shadow-2xl">
-          <h2 className="shrink-0 border-b border-neutral-800 px-4 py-3 text-center text-sm font-black uppercase text-white">
-            {title}
-          </h2>
+          <div className="shrink-0 border-b border-neutral-800 px-4 py-3 text-center">
+            {downDistanceText && <p className="mb-1 text-base font-black text-amber-300">{downDistanceText}</p>}
+            <h2 className="text-sm font-black uppercase text-white">{title}</h2>
+          </div>
           <div className="grid min-h-0 flex-1 grid-cols-2 gap-2 overflow-y-auto p-2 sm:grid-cols-3 sm:gap-3 sm:p-3 lg:grid-cols-4">
             {isDefense ? defensePlayList.map((play) => (
               <button
@@ -90,6 +128,7 @@ export const ProPlaybookCards: React.FC<ProPlaybookCardsProps> = ({
                 </span>
               </button>
             ))}
+            {!isDefense && specialTeamsCards}
           </div>
         </div>
       </div>
@@ -117,6 +156,7 @@ export const ProPlaybookCards: React.FC<ProPlaybookCardsProps> = ({
               <p className="text-xs text-neutral-400">
                 Strategic rock-paper-scissors playbook with exact counters, mismatch variance, and containment rules
               </p>
+              {downDistanceText && <p className="mt-1 text-sm font-black text-amber-300">{downDistanceText}</p>}
             </div>
           </div>
           <button
@@ -165,6 +205,7 @@ export const ProPlaybookCards: React.FC<ProPlaybookCardsProps> = ({
 
         {/* Main Content Area */}
         <div className="flex-1 overflow-y-auto p-4 sm:p-6">
+          {activeTab === 'OFFENSE' && specialTeamsCards}
           {activeTab === 'OFFENSE' && (
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
               {/* Play Selector List */}
@@ -537,6 +578,44 @@ export const ProPlaybookCards: React.FC<ProPlaybookCardsProps> = ({
  * High quality SVG route diagram for 7-on-7 offense
  */
 const OffenseRouteDiagram: React.FC<{ play: ProOffensePlay }> = ({ play }) => {
+  if (!play.isRun) {
+    const positions = play.alignment === 'TRIPS'
+      ? [50, 290, 250, 215]
+      : play.alignment === 'STACK' ? [80, 275, 215, 105] : [45, 295, 225, 115];
+    const routes = [play.leftRoute, play.rightRoute, play.centerRoute, play.slotRoute];
+    return (
+      <svg viewBox="0 0 340 430" className="h-full w-full select-none" aria-label={`${play.name} routes`}>
+        <defs>
+          <marker id={`routeArrow-${play.id}`} viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto">
+            <path d="M 0 1 L 10 5 L 0 9 z" fill="#fbbf24" />
+          </marker>
+        </defs>
+        <rect width="340" height="430" fill="#0d2616" />
+        {[50, 100, 150, 200, 250, 300].map(y => <line key={y} x1="0" y1={y} x2="340" y2={y} stroke="#ffffff18" />)}
+        <line x1="0" y1="350" x2="340" y2="350" stroke="#3b82f6" strokeWidth="2" />
+        <line x1="0" y1="250" x2="340" y2="250" stroke="#eab308" strokeDasharray="5 4" />
+        <text x="8" y="244" fill="#facc15" fontSize="10">10 YDS</text>
+        {routes.map((routeType, index) => {
+          const x = positions[index];
+          const points = getRouteWaypoints({ x, y: 350, routeType, radius: 10 }, -1, 340, 430);
+          return (
+            <g key={index}>
+              {routeType === 'BLOCK'
+                ? <path d={`M ${x} 350 L ${x} 328 M ${x - 9} 328 L ${x + 9} 328`} stroke="#34d399" strokeWidth="3" />
+                : <path d={`M ${x} 350 ${points.map(point => `L ${point.x} ${point.y}`).join(' ')}`} fill="none" stroke={routeType === 'HITCH' ? '#38bdf8' : '#fbbf24'} strokeWidth="3" markerEnd={`url(#routeArrow-${play.id})`} />}
+              <circle cx={x} cy="350" r="6" fill="#3b82f6" stroke="#fff" />
+              <text x={x} y="370" fill="#93c5fd" fontSize="10" textAnchor="middle">{['WR-L', 'WR-R', 'TE', 'SLOT'][index]}</text>
+            </g>
+          );
+        })}
+        <circle cx="170" cy="395" r="7" fill="#eab308" stroke="#fff" />
+        <text x="170" y="415" fill="#fbbf24" fontSize="10" textAnchor="middle">QB</text>
+        <circle cx={play.alignment === 'TRIPS' ? 90 : 220} cy="405" r="6" fill="#3b82f6" stroke="#fff" />
+        <path d={`M ${play.alignment === 'TRIPS' ? 90 : 220} 399 v -16 m -9 0 h 18`} stroke="#34d399" strokeWidth="3" />
+        <text x={play.alignment === 'TRIPS' ? 90 : 220} y="425" fill="#93c5fd" fontSize="10" textAnchor="middle">RB BLOCK</text>
+      </svg>
+    );
+  }
   return (
     <svg viewBox="0 0 340 200" className="w-full h-44 sm:h-52 select-none">
       <defs>
@@ -591,72 +670,6 @@ const OffenseRouteDiagram: React.FC<{ play: ProOffensePlay }> = ({ play }) => {
       <circle cx="230" cy="130" r="5" fill="#3b82f6" stroke="#fff" strokeWidth="1" />
       <text x="230" y="142" fill="#93c5fd" fontSize="7" fontWeight="bold" textAnchor="middle">SLOT</text>
 
-      {/* Specific Route Paths Based on Play */}
-      {play.id === 'PRO_QUICK_SLANTS' && (
-        <g>
-          {/* WR-L slant */}
-          <path d="M 50 130 L 50 110 L 115 80" fill="none" stroke="#fbbf24" strokeWidth="2.5" markerEnd="url(#arrowAmber)" />
-          {/* WR-R slant */}
-          <path d="M 290 130 L 290 110 L 225 80" fill="none" stroke="#fbbf24" strokeWidth="2.5" markerEnd="url(#arrowAmber)" />
-          {/* Slot underneath slant */}
-          <path d="M 230 130 L 230 115 L 155 92" fill="none" stroke="#fbbf24" strokeWidth="2" markerEnd="url(#arrowAmber)" />
-        </g>
-      )}
-
-      {play.id === 'PRO_MESH' && (
-        <g>
-          {/* Left WR shallow drag crossing to right */}
-          <path d="M 50 130 L 50 112 Q 130 102 245 98" fill="none" stroke="#fbbf24" strokeWidth="2.5" markerEnd="url(#arrowAmber)" />
-          {/* Right WR shallow drag crossing to left underneath */}
-          <path d="M 290 130 L 290 115 Q 210 106 95 102" fill="none" stroke="#38bdf8" strokeWidth="2.5" markerEnd="url(#arrowCyan)" />
-          {/* Slot hitch in center */}
-          <path d="M 230 130 L 230 95 L 230 100" fill="none" stroke="#fbbf24" strokeWidth="2" markerEnd="url(#arrowAmber)" />
-          {/* Rub area indicator */}
-          <circle cx="170" cy="104" r="14" fill="rgba(234, 179, 8, 0.15)" stroke="#eab308" strokeWidth="1" strokeDasharray="2 2" />
-          <text x="170" y="120" fill="#facc15" fontSize="7" fontWeight="bold" textAnchor="middle">RUB ZONE</text>
-        </g>
-      )}
-
-      {play.id === 'PRO_VERTS' && (
-        <g>
-          {/* 4 Straight Verticals */}
-          <path d="M 50 130 L 50 25" fill="none" stroke="#fbbf24" strokeWidth="2.5" markerEnd="url(#arrowAmber)" />
-          <path d="M 125 130 L 125 25" fill="none" stroke="#fbbf24" strokeWidth="2" markerEnd="url(#arrowAmber)" />
-          <path d="M 215 130 L 215 25" fill="none" stroke="#fbbf24" strokeWidth="2" markerEnd="url(#arrowAmber)" />
-          <path d="M 290 130 L 290 25" fill="none" stroke="#fbbf24" strokeWidth="2.5" markerEnd="url(#arrowAmber)" />
-          <text x="170" y="32" fill="#fbbf24" fontSize="8" fontWeight="black" textAnchor="middle">STRETCH DEEP SAFETIES</text>
-        </g>
-      )}
-
-      {play.id === 'PRO_DOUBLE_MOVES' && (
-        <g>
-          {/* Out and up left */}
-          <path d="M 50 130 L 50 100 L 28 100 L 28 25" fill="none" stroke="#fbbf24" strokeWidth="2.5" markerEnd="url(#arrowAmber)" />
-          <circle cx="39" cy="100" r="4" fill="rgba(239,68,68,0.4)" />
-          <text x="32" y="112" fill="#f87171" fontSize="6" fontWeight="bold">PUMP FAKE</text>
-
-          {/* Out and up right */}
-          <path d="M 290 130 L 290 100 L 312 100 L 312 25" fill="none" stroke="#fbbf24" strokeWidth="2.5" markerEnd="url(#arrowAmber)" />
-          {/* Slot deep post */}
-          <path d="M 230 130 L 230 85 L 170 30" fill="none" stroke="#38bdf8" strokeWidth="2" markerEnd="url(#arrowCyan)" />
-        </g>
-      )}
-
-      {play.id === 'PRO_SCREEN' && (
-        <g>
-          {/* Bubble screen swing */}
-          <path d="M 290 130 Q 280 145 260 142" fill="none" stroke="#fbbf24" strokeWidth="2.5" markerEnd="url(#arrowAmber)" />
-          {/* Blocking wall */}
-          <line x1="230" y1="130" x2="245" y2="105" stroke="#34d399" strokeWidth="3" />
-          <rect x="238" y="98" width="14" height="6" fill="#10b981" rx="2" />
-          <line x1="170" y1="130" x2="210" y2="110" stroke="#34d399" strokeWidth="2.5" />
-          <rect x="204" y="103" width="14" height="6" fill="#10b981" rx="2" />
-          {/* Throw trajectory */}
-          <line x1="170" y1="160" x2="260" y2="142" stroke="#eab308" strokeWidth="1.5" strokeDasharray="3 3" />
-          <text x="250" y="160" fill="#34d399" fontSize="7" fontWeight="bold">BLOCK WALL</text>
-        </g>
-      )}
-
       {play.id === 'PRO_JET_SWEEP' && (
         <g>
           {/* Motion path before snap */}
@@ -683,12 +696,6 @@ const OffenseRouteDiagram: React.FC<{ play: ProOffensePlay }> = ({ play }) => {
         </g>
       )}
 
-      {!play.isRun && (
-        <g>
-          <circle cx="140" cy="165" r="8" fill="none" stroke="#60a5fa" strokeWidth="1.5" strokeDasharray="3 2" />
-          <text x="140" y="192" fill="#93c5fd" fontSize="6" fontWeight="bold" textAnchor="middle">RB PASS PRO</text>
-        </g>
-      )}
     </svg>
   );
 };

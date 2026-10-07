@@ -145,7 +145,8 @@ test('kickoff line calculation correctly places kicking team at 35-yard line', (
   assert.equal(getKickoffLineY(fieldHeight, endZoneHeight, 1, 35), 450);
 });
 
-test('real tutorial follows offense snaps, free-defender setup, joystick-started defense, and live play', (context) => {
+for (const specialTeamsPlay of ['FIELD_GOAL', 'PUNT'] as const) {
+test(`Pro tutorial follows play cards, joystick snaps, passing, scheme cards, defense and ${specialTeamsPlay}`, (context) => {
   let timestamp = 1000;
   context.mock.method(Date, 'now', () => timestamp);
   context.mock.method(Math, 'random', () => 0.5);
@@ -200,69 +201,66 @@ test('real tutorial follows offense snaps, free-defender setup, joystick-started
   try {
     assert.ok(engine);
     const game = engine as GameEngineHandle;
+    assert.equal(game.getTacticalMode?.(), 'PRO');
     assert.equal(step, 0);
-    tap(170, 273);
-    assert.equal(step, 0, 'Snapping cannot skip the alignment lesson');
-    send('pointerdown', 30, 380);
-    send('pointerup', 110, 380);
+    tap(90, 364);
+    assert.equal(step, 0, 'Snapping cannot skip playbook selection');
+    game.selectOffense('PRO_MESH');
     assert.equal(step, 1);
     settle();
     assert.equal(midfieldNumbers.get(30), 'bold 28px Courier New, monospace');
     assert.equal(midfieldNumbers.get(310), 'bold 28px Courier New, monospace');
-    tap(300, 380);
-    timestamp += 100;
-    tap(300, 380);
-    assert.equal(step, 2);
-    settle();
-    send('pointerdown', 50, 225);
-    send('pointermove', 120, 225);
-    send('pointerup', 120, 225);
-    assert.equal(step, 3);
-    tap(250, 225);
-    assert.equal(step, 4);
     tap(90, 364);
-    assert.equal(step, 5);
+    assert.equal(step, 2);
     assert.equal(game.phase, 'QB_DROP');
     settle();
-    assert.equal(step, 5, 'The tutorial must wait while the user aims');
-    send('pointerdown', highlight.x, highlight.y);
-    send('pointerup', highlight.x, highlight.y + 70);
-    assert.equal(step, 6);
+    assert.equal(step, 2, 'The tutorial must wait while the user picks a target');
+    const target = game.getReceiverScreenPositionForTest?.(0);
+    assert.ok(target);
+    tap(target.x, target.y);
+    assert.equal(step, 3);
     assert.equal(game.phase, 'THROWN');
-    for (let count = 0; count < 1500 && step === 6; count++) {
+    for (let count = 0; count < 1500 && step === 3; count++) {
       timestamp += 16;
       frame(timestamp);
     }
-    assert.equal(step, 7, 'The real offensive play must finish before defense');
-    send('pointerdown', 5, 5);
-    send('pointerup', 85, 5);
-    assert.equal(step, 8);
-    settle();
-    const assignedDefender = game.getDefenderScreenPositionForTest?.(3);
-    assert.ok(assignedDefender);
-    tap(assignedDefender.x, assignedDefender.y);
-    assert.equal(step, 9);
-    settle();
-    const freeDefender = game.getDefenderScreenPositionForTest?.(0);
-    assert.ok(freeDefender);
-    send('pointerdown', freeDefender.x, freeDefender.y);
-    send('pointermove', freeDefender.x + 40, freeDefender.y);
-    send('pointerup', freeDefender.x + 40, freeDefender.y);
-    assert.equal(step, 10);
+    assert.equal(step, 4, 'The real offensive play must finish before defense');
+    tap(90, 364);
+    assert.equal(step, 4, 'Must select a defensive scheme first');
+    game.selectDefense('PRO_COVER3_DEEP');
+    assert.equal(step, 5);
     settle();
     tap(90, 364);
-    assert.equal(step, 11);
-    for (let count = 0; count < 2000 && step === 11; count++) {
+    assert.equal(step, 6);
+    for (let count = 0; count < 2000 && step === 6; count++) {
       timestamp += 16;
       frame(timestamp);
     }
-    assert.equal(step, 12, 'The real defensive play must finish');
+    assert.equal(step, 7, 'The real defensive play must finish before special teams');
+    assert.equal(game.is4thDown(), true);
+    game.selectOffense(specialTeamsPlay);
+    assert.equal(step, 8);
+    if (specialTeamsPlay === 'FIELD_GOAL') {
+      assert.equal(game.getFieldGoalMeterState?.().stage, 'AIM');
+      game.lockFieldGoalMeter();
+      assert.equal(game.getFieldGoalMeterState?.().stage, 'POWER');
+      game.lockFieldGoalMeter();
+    } else {
+      tap(90, 364);
+    }
+    assert.equal(game.phase, 'THROWN');
+    for (let count = 0; count < 500 && step === 8; count++) {
+      timestamp += 16;
+      frame(timestamp);
+    }
+    assert.equal(step, 9, 'The real kick must finish before tutorial completion');
   } finally {
     cleanup?.();
     globalThis.requestAnimationFrame = originalRequest;
     globalThis.cancelAnimationFrame = originalCancel;
   }
 });
+}
 
 test('tutorial coaching overlays the field without changing its aspect ratio', async () => {
   const { createElement } = await import('react');
@@ -274,6 +272,10 @@ test('tutorial coaching overlays the field without changing its aspect ratio', a
   assert.ok(markup.includes('h-auto!'));
   assert.ok(markup.includes('pointer-events-none absolute inset-x-0 top-0'));
   assert.ok(markup.includes('aria-label="Live tutorial football field"'));
+  assert.ok(markup.includes('Choose a Pro play card'));
+  assert.ok(markup.includes('Open offensive playbook'));
+  assert.ok(!markup.includes('Set the formation'));
+  assert.ok(!markup.includes('Draw a receiver route'));
 });
 
 test('sideline contact uses player radius and the painted field edges', () => {

@@ -226,8 +226,8 @@ export function alignDefenders(
     placeDefender(2, 285, 32, 60, 'CB');
     placeDefender(3, 125, 70, 112, 'LB');
     placeDefender(4, 215, 70, 112, 'LB');
-    placeDefender(5, 105, 185, 245, 'FS');
-    placeDefender(6, 235, 185, 245, 'SS');
+    placeDefender(5, 105, 185, playKey === 'COVER2' ? 245 : 300, 'FS');
+    placeDefender(6, 235, 185, playKey === 'COVER2' ? 245 : 300, 'SS');
   } else if (playKey === 'PRO_COVER1_MAN') {
     placeDefender(0, 170, 24, 24, 'DL', true);
     placeDefender(1, 55, 38, 45, 'CB');
@@ -236,23 +236,30 @@ export function alignDefenders(
     placeDefender(4, 210, 48, 55, 'LB');
     placeDefender(5, 170, 60, 70, 'SS');
     placeDefender(6, 170, 200, 240, 'FS');
-  } else if (playKey === 'ZONE34' || playKey === 'PRO_COVER3_DEEP') {
-    const isProCover3 = playKey === 'PRO_COVER3_DEEP';
+  } else if (playKey === 'PRO_COVER3_DEEP') {
+    placeDefender(0, 170, 24, 24, 'DL', true);
+    placeDefender(1, 55, 200, 320, 'CB');
+    placeDefender(2, 285, 200, 320, 'CB');
+    placeDefender(3, 85, 80, 125, 'LB');
+    placeDefender(4, 255, 80, 125, 'LB');
+    placeDefender(5, 170, 65, 100, 'LB');
+    placeDefender(6, 170, 220, 340, 'FS');
+  } else if (playKey === 'ZONE34') {
     placeDefender(0, 105, 24, 24, 'DL', true);
-    placeDefender(1, 170, 24, 24, 'DL', !isProCover3);
-    placeDefender(2, 235, 24, 24, 'DL', !isProCover3);
+    placeDefender(1, 170, 24, 24, 'DL', true);
+    placeDefender(2, 235, 24, 24, 'DL', true);
     placeDefender(3, 75, 105, 155, 'CB');
     placeDefender(4, 265, 105, 155, 'CB');
     placeDefender(5, 135, 175, 235, 'FS');
     placeDefender(6, 205, 175, 235, 'SS');
   } else if (playKey === 'PRO_COVER4_QUARTERS') {
     placeDefender(0, 170, 24, 24, 'DL', true);
-    placeDefender(1, 50, 150, 210, 'CB');
-    placeDefender(2, 290, 150, 210, 'CB');
+    placeDefender(1, 50, 190, 320, 'CB');
+    placeDefender(2, 290, 190, 320, 'CB');
     placeDefender(3, 120, 60, 95, 'LB');
     placeDefender(4, 220, 60, 95, 'LB');
-    placeDefender(5, 115, 175, 235, 'FS');
-    placeDefender(6, 225, 175, 235, 'SS');
+    placeDefender(5, 115, 210, 340, 'FS');
+    placeDefender(6, 225, 210, 340, 'SS');
   } else if (playKey === 'PRO_BLITZ_ZERO') {
     placeDefender(0, 140, 22, 22, 'DL', true);
     placeDefender(1, 55, 32, 35, 'CB');
@@ -273,10 +280,10 @@ export function alignDefenders(
     placeDefender(0, 170, 24, 24, 'DL', true);
     placeDefender(1, 55, 45, 75, 'CB');
     placeDefender(2, 285, 45, 75, 'CB');
-    placeDefender(3, 170, 85, 175, 'LB');
+    placeDefender(3, 170, 85, 240, 'LB');
     placeDefender(4, 210, 65, 105, 'LB');
-    placeDefender(5, 100, 185, 245, 'FS');
-    placeDefender(6, 240, 185, 245, 'SS');
+    placeDefender(5, 100, 185, 320, 'FS');
+    placeDefender(6, 240, 185, 320, 'SS');
   } else if (playKey === 'ZONE232') {
     placeDefender(0, 130, 24, 24, 'DL', true);
     placeDefender(1, 210, 24, 24, 'DL', true);
@@ -302,7 +309,7 @@ export function alignDefenders(
   const slotReceiverX = centerReceiver?.x ?? 170;
   const clampX = (x: number) => Math.max(35, Math.min(305, x));
 
-  if (playKey === 'COVER2') {
+  if (playKey === 'COVER2' || playKey === 'PRO_COVER2_HARD_FLAT') {
     defenders[1].startX = clampX(leftReceiverX);
     defenders[2].startX = clampX(rightReceiverX);
     defenders[3].startX = clampX(leftReceiverX + (slotReceiverX - leftReceiverX) * 0.35);
@@ -320,6 +327,13 @@ export function alignDefenders(
     [1, 3, 4, 5, 2].forEach((index, position) => {
       defenders[index].startX = clampX(underneathXs[position]);
     });
+  } else if (playKey === 'PRO_COVER3_DEEP' || playKey === 'PRO_COVER4_QUARTERS') {
+    defenders[3].startX = clampX(leftReceiverX + (slotReceiverX - leftReceiverX) * 0.35);
+    defenders[4].startX = clampX(rightReceiverX + (slotReceiverX - rightReceiverX) * 0.35);
+  } else if (playKey === 'PRO_TAMPA2') {
+    defenders[1].startX = clampX(leftReceiverX);
+    defenders[2].startX = clampX(rightReceiverX);
+    defenders[4].startX = clampX(slotReceiverX);
   } else {
     defenders[1].startX = clampX(leftReceiverX);
     defenders[2].startX = clampX(rightReceiverX);
@@ -332,18 +346,30 @@ export function alignDefenders(
   const allReceivers = [...receivers, centerReceiver].filter((r): r is Entity => Boolean(r));
   const rightOverload = allReceivers.filter(r => r.x > 185).length >= 3;
   const leftOverload = allReceivers.filter(r => r.x < 155).length >= 3;
-  if (rightOverload && defenders[6] && playKey !== 'COVER2') {
+  const preserveDeepShell = ['COVER2', 'PRO_COVER2_HARD_FLAT', 'PRO_COVER3_DEEP', 'PRO_COVER4_QUARTERS', 'PRO_TAMPA2'].includes(playKey);
+  if (rightOverload && defenders[6] && !preserveDeepShell) {
     defenders[6].startX = clampX(235);
-  } else if (leftOverload && defenders[6] && playKey !== 'COVER2') {
+  } else if (leftOverload && defenders[6] && !preserveDeepShell) {
     defenders[6].startX = clampX(105);
   }
 
   defenders.forEach(defender => {
+    if (defender.zoneX !== undefined) defender.zoneX = defender.startX;
     defender.x = defender.startX || 170;
     defender.y = defender.startY || lineOfScrimmageY;
     defender.vx = 0;
     defender.vy = 0;
   });
+  if (playKey === 'PRO_COVER1_MAN' || playKey === 'PRO_BLITZ_ZERO') {
+    const threats = allReceivers.filter(receiver => !receiver.isBlocker && receiver.routeType !== 'BLOCK');
+    const coverageIndices = playKey === 'PRO_COVER1_MAN' ? [1, 2, 3, 4] : [1, 2, 5, 6];
+    threats.forEach((receiver, index) => {
+      const defender = defenders[coverageIndices[index]];
+      if (!defender) return;
+      defender.assignedReceiver = receiver;
+      alignDefenderAcrossFromReceiver(defender, receiver, lineOfScrimmageY, attackDirection);
+    });
+  }
 }
 
 export function chooseCpuDefensiveAssignments(

@@ -224,28 +224,18 @@ export function updateRouteMovement(
   phase: string,
   attackDirection: number,
   defenders: Entity[],
-  fieldWidth: number
+  fieldWidth: number,
+  fieldHeight = 1200
 ): void {
   if (!receiver || receiver.caught || (phase !== 'QB_DROP' && phase !== 'THROWN')) return;
   receiver.timer = (receiver.timer || 0) + 1;
-  const direction = attackDirection;
-
-  let isCutting = false;
-  if (receiver.routeType === 'SLANT-L' || receiver.routeType === 'SLANT-R') {
-    isCutting = receiver.timer >= 38 && receiver.timer <= 58;
-  } else if (receiver.routeType === 'FLAG-L' || receiver.routeType === 'FLAG-R') {
-    isCutting = receiver.timer >= 55 && receiver.timer <= 76;
-  } else if (receiver.routeType === 'COMEBACK') {
-    isCutting = receiver.timer >= 60 && receiver.timer <= 80;
-  } else if (receiver.routeType === 'CROSS-L' || receiver.routeType === 'CROSS-R') {
-    isCutting = receiver.timer >= 50 && receiver.timer <= 72;
-  } else if (receiver.routeType === 'POST-L' || receiver.routeType === 'POST-R') {
-    isCutting = receiver.timer >= 45 && receiver.timer <= 70;
-  } else if (receiver.routeType === 'HITCH') {
-    isCutting = receiver.timer >= 32 && receiver.timer <= 52;
-  } else if (receiver.routeType === 'WHEEL') {
-    isCutting = receiver.timer >= 28 && receiver.timer <= 48;
-  }
+  receiver.startX ??= receiver.x;
+  receiver.startY ??= receiver.y;
+  const points = getRouteWaypoints(receiver, attackDirection, fieldWidth, fieldHeight);
+  const waypoint = receiver.routeWaypoint ?? 0;
+  const target = points[Math.min(waypoint, points.length - 1)];
+  if (!target) return;
+  const isCutting = waypoint > 0 && Math.hypot(target.x - receiver.x, target.y - receiver.y) > 5;
   receiver.isCutting = isCutting;
 
   let isChucked = false;
@@ -262,51 +252,43 @@ export function updateRouteMovement(
   const speed = (isDeepRoute
     ? (isChucked ? 1.40 : 1.95)
     : (isCutting ? (isChucked ? 1.15 : 1.55) : 1.40));
-  let targetX = receiver.x;
-  let targetY = receiver.y;
-
-  if (receiver.routeType === 'SLANT-L') {
-    if (receiver.timer < 35) targetY += speed * direction;
-    else { targetY += speed * 0.45 * direction; targetX -= speed * 1.1; }
-  } else if (receiver.routeType === 'SLANT-R') {
-    if (receiver.timer < 35) targetY += speed * direction;
-    else { targetY += speed * 0.45 * direction; targetX += speed * 1.1; }
-  } else if (receiver.routeType === 'FLAG-L') {
-    if (receiver.timer < 45) targetY += speed * 1.1 * direction;
-    else { targetY += speed * 0.7 * direction; targetX -= speed * 1.35; }
-  } else if (receiver.routeType === 'FLAG-R') {
-    if (receiver.timer < 45) targetY += speed * 1.1 * direction;
-    else { targetY += speed * 0.7 * direction; targetX += speed * 1.35; }
-  } else if (receiver.routeType === 'COMEBACK') {
-    if (receiver.timer < 55) targetY += speed * 1.15 * direction;
-    else targetY -= speed * 0.75 * direction;
-  } else if (receiver.routeType === 'CROSS-L') {
-    if (receiver.timer < 45) targetY += speed * direction;
-    else { targetY += speed * 0.35 * direction; targetX -= speed * 1.4; }
-  } else if (receiver.routeType === 'CROSS-R') {
-    if (receiver.timer < 45) targetY += speed * direction;
-    else { targetY += speed * 0.35 * direction; targetX += speed * 1.4; }
-  } else if (receiver.routeType === 'POST-L') {
-    if (receiver.timer < 42) targetY += speed * 1.15 * direction;
-    else { targetY += speed * 0.85 * direction; targetX -= speed * 1.05; }
-  } else if (receiver.routeType === 'POST-R') {
-    if (receiver.timer < 42) targetY += speed * 1.15 * direction;
-    else { targetY += speed * 0.85 * direction; targetX += speed * 1.05; }
-  } else if (receiver.routeType === 'HITCH') {
-    if (receiver.timer < 36) targetY += speed * 1.1 * direction;
-    else targetY -= speed * 0.55 * direction;
-  } else if (receiver.routeType === 'WHEEL') {
-    if (receiver.timer < 28) {
-      const sideDir = (receiver.startX || receiver.x) < fieldWidth / 2 ? -1 : 1;
-      targetX += sideDir * speed * 1.2;
-      targetY += speed * 0.4 * direction;
-    } else {
-      targetY += speed * 1.35 * direction;
-    }
-  } else if (receiver.routeType === 'GO') {
-    targetY += speed * 1.25 * direction;
+  if (Math.hypot(target.x - receiver.x, target.y - receiver.y) <= 2) {
+    receiver.x = target.x;
+    receiver.y = target.y;
+    receiver.vx = 0;
+    receiver.vy = 0;
+    receiver.routeWaypoint = Math.min(waypoint + 1, points.length - 1);
+    return;
   }
-
-  moveToward(receiver, targetX, targetY, isCutting ? 0.35 : 0.25, speed);
+  moveToward(receiver, target.x, target.y, isCutting ? 0.35 : 0.25, speed);
   receiver.x = Math.max(30, Math.min(fieldWidth - 30, receiver.x));
+  clampPlayerToFieldY(receiver, fieldHeight);
+}
+
+export function getRouteWaypoints(
+  receiver: Pick<Entity, 'startX' | 'startY' | 'x' | 'y' | 'routeType' | 'radius'>,
+  attackDirection: number,
+  fieldWidth = 340,
+  fieldHeight = 1200
+): Array<{ x: number; y: number }> {
+  const x = receiver.startX ?? receiver.x;
+  const y = receiver.startY ?? receiver.y;
+  const side = receiver.routeType?.endsWith('-L') ? -1 : 1;
+  let offsets: Array<[number, number]>;
+  switch (receiver.routeType) {
+    case 'SLANT-L': case 'SLANT-R': offsets = [[0, 50], [side * 90, 120]]; break;
+    case 'CROSS-L': case 'CROSS-R': offsets = [[0, 80], [side * 220, 120]]; break;
+    case 'FLAG-L': case 'FLAG-R': offsets = [[0, 160], [side * 70, 300]]; break;
+    case 'POST-L': case 'POST-R': offsets = [[0, 160], [side * 100, 320]]; break;
+    case 'COMEBACK': offsets = [[0, 160], [0, 120]]; break;
+    case 'HITCH': offsets = [[0, 70], [0, 60]]; break;
+    case 'WHEEL': offsets = [[x < fieldWidth / 2 ? -40 : 40, 40], [x < fieldWidth / 2 ? -40 : 40, 320]]; break;
+    case 'GO': offsets = [[0, 350]]; break;
+    default: return [];
+  }
+  const margin = Math.ceil(receiver.radius * 1.95);
+  return offsets.map(([dx, depth]) => ({
+    x: Math.max(30, Math.min(fieldWidth - 30, x + dx)),
+    y: Math.max(margin, Math.min(fieldHeight - margin, y + depth * attackDirection))
+  }));
 }

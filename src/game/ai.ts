@@ -127,6 +127,7 @@ export interface CpuPassReleaseSituation {
   playClock: number;
   bestScore: number;
   isVerticalPlay?: boolean;
+  isIntermediatePlay?: boolean;
   targetDepthYards?: number;
   targetSeparation?: number;
 }
@@ -139,6 +140,11 @@ export function shouldCpuReleasePass(situation: CpuPassReleaseSituation): boolea
     const hasDevelopedTarget = (situation.targetDepthYards ?? 0) >= 15 &&
       (situation.targetSeparation ?? 0) >= 14 && situation.bestScore > 35;
     return (situation.playClock >= 60 && hasDevelopedTarget) || situation.playClock >= 240;
+  }
+  if (situation.isIntermediatePlay) {
+    return pressureReactionComplete || situation.isDeepShotOpportunity ||
+      ((situation.targetDepthYards ?? 0) >= 8 && (situation.targetSeparation ?? 0) >= 14 && situation.bestScore > 15) ||
+      situation.playClock >= 180;
   }
   return situation.isDeepShotOpportunity ||
     (situation.hasOpenBreak && situation.playClock >= 32) ||

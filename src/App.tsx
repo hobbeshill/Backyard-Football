@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Volume2, VolumeX, RefreshCw, HelpCircle, X, Users, Shield, ArrowRight, Search, Pause, Play, Home, Hand, Crosshair, Trophy, Award, RotateCcw, Zap, BookOpen, SlidersHorizontal, Info } from 'lucide-react';
+import { Volume2, VolumeX, RefreshCw, HelpCircle, X, Users, Shield, ArrowRight, Search, Pause, Play, Home, Hand, Crosshair, Trophy, Award, RotateCcw, Zap, BookOpen, SlidersHorizontal, Info, Settings, ArrowLeft } from 'lucide-react';
 import { offensivePlaybook, defensivePlaybook } from './game/playbook';
 import { sounds } from './game/sound';
 import { hasSavedGameSession, mountFootballGame, type GameBoxScore, type GameEngineHandle } from './game/engine';
@@ -25,7 +25,7 @@ function getTeamTextStyle(color: string) {
   };
 }
 
-const CONTROLS_TUTORIAL_KEY = 'backyard-football-controls-tutorial-complete-v1';
+const CONTROLS_TUTORIAL_KEY = 'backyard-football-pro-tutorial-complete-v2';
 
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -46,6 +46,8 @@ export default function App() {
   const [pendingTeam, setPendingTeam] = useState<TeamProfile | null>(null);
   const [teamSearch, setTeamSearch] = useState('');
   const [showTeamModal, setShowTeamModal] = useState(() => !hasSavedGameSession());
+  const [setupStep, setSetupStep] = useState<'MODE' | 'TEAMS'>('MODE');
+  const [showSettings, setShowSettings] = useState(false);
   const [hasKickedOff, setHasKickedOff] = useState(hasSavedGameSession);
   const [showPauseMenu, setShowPauseMenu] = useState(hasSavedGameSession);
   const [showDynastyPreview, setShowDynastyPreview] = useState(false);
@@ -93,6 +95,7 @@ export default function App() {
   const [showHelp, setShowHelp] = useState(false);
   const [showTutorial, setShowTutorial] = useState(false);
   const tutorialResumeRef = useRef(false);
+  const settingsResumeRef = useRef(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
 
   // Synchronize sound toggle
@@ -338,7 +341,10 @@ export default function App() {
       setP2TeamState,
       setGameClockState: (quarter, seconds) => setGameClockState({ quarter, seconds }),
       showAnnouncement,
-      onEngineReady: engine => { engineRef.current = engine; },
+      onEngineReady: engine => {
+        engineRef.current = engine;
+        engine?.setTacticalMode?.('PRO');
+      },
       onGameOver: (p1FinalScore, p2FinalScore, restored, boxScore) => {
         setFinishedGame({
           p1Score: p1FinalScore,
@@ -365,6 +371,16 @@ export default function App() {
   useEffect(() => {
     if (showPauseMenu) engineRef.current?.setPaused(true);
   }, [showPauseMenu]);
+
+  useEffect(() => {
+    if (showSettings) {
+      settingsResumeRef.current = hasKickedOff && !showPauseMenu;
+      engineRef.current?.setPaused(true);
+    } else if (settingsResumeRef.current) {
+      settingsResumeRef.current = false;
+      if (!showPauseMenu && !showTutorial) engineRef.current?.setPaused(false);
+    }
+  }, [showSettings, hasKickedOff, showPauseMenu, showTutorial]);
 
   useEffect(() => {
     if (!showTutorial) return;
@@ -429,7 +445,7 @@ export default function App() {
   };
 
   const handleSetTacticalMode = (mode: TacticalMode) => {
-    if (hasKickedOff || gameMode === 'SEASON') return;
+    if (hasKickedOff) return;
     setTacticalMode(mode);
     engineRef.current?.setTacticalMode?.(mode);
     if (mode === 'PRO') {
@@ -471,6 +487,10 @@ export default function App() {
   };
 
   const handleStartGame = () => {
+    if (gameMode === 'DYNASTY') {
+      setShowDynastyPreview(true);
+      return;
+    }
     finishedGameHandledRef.current = false;
     setFinishedGame(null);
     saveGameMode(gameMode);
@@ -517,6 +537,10 @@ export default function App() {
     setHasKickedOff(false);
     setShowPauseMenu(false);
     setShowTeamModal(true);
+    setSetupStep('MODE');
+    setShowDynastyPreview(false);
+    setTacticalMode('PRO');
+    engineRef.current?.setTacticalMode?.('PRO');
   };
 
   const handlePauseAttemptFieldGoal = () => {
@@ -564,6 +588,7 @@ export default function App() {
   };
 
   const handleContinueSeason = () => {
+    setSetupStep('TEAMS');
     gameModeRef.current = 'SEASON';
     setGameMode('SEASON');
     saveGameMode('SEASON');
@@ -596,6 +621,7 @@ export default function App() {
   };
 
   const handleStartNewSeason = (teamId: string = p1TeamState.id) => {
+    setSetupStep('TEAMS');
     gameModeRef.current = 'SEASON';
     setGameMode('SEASON');
     saveGameMode('SEASON');
@@ -616,6 +642,8 @@ export default function App() {
   };
 
   const handleGameModeChange = (mode: GameMode) => {
+    setTeamSelectionSide('P1');
+    setTeamSearch('');
     if (mode === 'SEASON') {
       const currentSeason = seasonProgressRef.current || loadSeasonProgress();
       if (currentSeason) {
@@ -629,6 +657,7 @@ export default function App() {
     gameModeRef.current = mode;
     setGameMode(mode);
     saveGameMode(mode);
+    setSetupStep('TEAMS');
   };
 
   const visibleTeams = getAllTeams().filter(team =>
@@ -651,8 +680,8 @@ export default function App() {
   const currentRivalry = getRivalryForMatchup(p1TeamState.id, p2TeamState.id);
   const currentWeekNumber = seasonForDisplay.results.length + 1;
   const isUserPreSnapPhase = hasKickedOff && phaseState === 'PRE_SNAP' && !isKickoffActive;
-  const isTacticalModeLocked = hasKickedOff || gameMode === 'SEASON';
-  const showPuntAction = isUserPreSnapPhase && activeOffenseState === 'P1' && is4thDown;
+  const isTacticalModeLocked = hasKickedOff;
+  const showPuntAction = tacticalMode !== 'PRO' && isUserPreSnapPhase && activeOffenseState === 'P1' && is4thDown;
 
   useEffect(() => {
     if (phaseState !== 'PRE_SNAP' || tacticalMode !== 'PRO') {
@@ -660,7 +689,7 @@ export default function App() {
     }
     const canShowPlaybook = hasKickedOff && phaseState === 'PRE_SNAP' &&
       !isKickoffActive && tacticalMode === 'PRO' &&
-      !showPauseMenu && !showTeamModal && !showTutorial && !finishedGame;
+      !showPauseMenu && !showTeamModal && !showTutorial && !showSettings && !finishedGame;
     if (!canShowPlaybook) {
       setShowProPlaybookCards(false);
       return;
@@ -668,10 +697,19 @@ export default function App() {
     if (!proPlaybookCallSelectedRef.current) {
       setShowProPlaybookCards(true);
     }
-  }, [finishedGame, hasKickedOff, isKickoffActive, phaseState, showPauseMenu, showTeamModal, showTutorial, tacticalMode]);
+  }, [finishedGame, hasKickedOff, isKickoffActive, phaseState, showPauseMenu, showTeamModal, showTutorial, showSettings, tacticalMode]);
 
   return (
     <div className="relative w-screen min-h-[100dvh] h-[100dvh] overflow-hidden flex flex-col items-center justify-between py-1 bg-[#030704] text-white font-mono select-none">
+      {!showTutorial && <button
+        type="button"
+        onClick={() => setShowSettings(true)}
+        aria-label="Settings"
+        title="Settings"
+        className="fixed right-2 top-2 z-[130] rounded-lg border border-neutral-600 bg-neutral-950 p-2 text-neutral-200 shadow-lg hover:text-white"
+      >
+        <Settings size={20} />
+      </button>}
       
       {/* Top Header & Scoreboard */}
       <header className="flex flex-col items-center justify-center z-20 mb-0.5 w-full max-w-[430px] px-2 pt-0.5 shrink-0">
@@ -788,37 +826,6 @@ export default function App() {
           </div>
         </div>
 
-        {!isTacticalModeLocked && (
-        <div className="mt-1 flex w-full items-center justify-center gap-1.5 px-0.5">
-          <div className="flex items-center gap-1 rounded-md bg-neutral-900/90 border border-neutral-700 p-0.5">
-            <button
-              type="button"
-              onClick={() => handleSetTacticalMode('PRO')}
-              className={`px-2 py-0.5 text-[0.60rem] font-black uppercase rounded transition cursor-pointer ${
-                tacticalMode === 'PRO'
-                  ? 'bg-amber-500 text-black shadow'
-                  : 'text-neutral-400 hover:text-white'
-              }`}
-              title="Pro Mode: 7v7 Rock-Paper-Scissors Matchups"
-            >
-              PRO MODE
-            </button>
-            <button
-              type="button"
-              onClick={() => handleSetTacticalMode('ELITE')}
-              className={`px-2 py-0.5 text-[0.60rem] font-black uppercase rounded transition cursor-pointer ${
-                tacticalMode === 'ELITE'
-                  ? 'bg-emerald-500 text-black shadow'
-                  : 'text-neutral-400 hover:text-white'
-              }`}
-              title="Elite Mode: Everything moveable & editable"
-            >
-              ELITE MODE
-            </button>
-          </div>
-
-        </div>
-        )}
       </header>
 
       {/* 4th Down Special Teams Punt / Field Goal Action Controls */}
@@ -1049,8 +1056,21 @@ export default function App() {
             </div>
 
             <div className="space-y-3 text-[0.62rem] text-neutral-200 leading-relaxed font-mono">
+              {tacticalMode === 'PRO' ? (
+                <div className="rounded border border-neutral-800 bg-black/60 p-2.5">
+                  <span className="mb-1 block font-bold text-[#00ffff]">1. PRO PLAY CALLING:</span>
+                  <ul className="list-inside list-disc space-y-1 text-neutral-300">
+                    <li>Choose One Game, Season, or the Dynasty preview first, then select your team. One Game also lets you choose the CPU team.</li>
+                    <li>Read down and distance at the top of the playbook. Select an offensive play or defensive scheme card before every snap.</li>
+                    <li>Intermediate and deep routes stretch coverage. Some plays include a short slot hitch for a checkdown; the RB stays in pass protection.</li>
+                    <li>Touch the lower-left joystick or press Space, WASD, or an arrow key to start. On defense, steer the highlighted free defender while teammates execute the chosen scheme.</li>
+                    <li>Punt and Field Goal are in the offensive playbook. Punts require fourth down; field goals use direction and power meters.</li>
+                    <li>Elite freeform gameplay is an optional setting under the top-right Settings button before kickoff.</li>
+                  </ul>
+                </div>
+              ) : (
               <div className="bg-black/60 p-2.5 rounded border border-neutral-800">
-                <span className="text-[#00ffff] font-bold block mb-1">1. BACKYARD PLAYMAKER (LINE DRAWING & RUN BLOCKING):</span>
+                <span className="text-[#00ffff] font-bold block mb-1">1. ELITE PLAYMAKER (LINE DRAWING & RUN BLOCKING):</span>
                 <ul className="list-disc list-inside space-y-1 text-neutral-300">
                   <li><b className="text-white">Draw Routes & Defensive Assignments in the Dirt:</b> Touch any player and draw a line in the direction you want them to play:
                     <ul className="list-disc list-inside ml-2 text-neutral-300">
@@ -1065,6 +1085,7 @@ export default function App() {
                   <li><b className="text-white">Flip Running Back:</b> Quick double-tap left or right of center to shift the RB side.</li>
                 </ul>
               </div>
+              )}
 
               <div className="bg-black/60 p-2.5 rounded border border-neutral-800">
                 <span className="text-[#ffcc00] font-bold block mb-1">2. TAP TO THROW & RELATIVE JOYSTICK CONTROLS:</span>
@@ -1112,7 +1133,7 @@ export default function App() {
               <div className="bg-black/60 p-2.5 rounded border border-neutral-800">
                 <span className="text-[#ffd700] font-bold block mb-1">6. FIELD GOALS & SPECIAL TEAMS (UP TO 60 YARDS):</span>
                 <ul className="list-disc list-inside space-y-1 text-neutral-300">
-                  <li><b className="text-white">Field Goals (3 Points):</b> Can be attempted from up to 60 yards out. Greater distance significantly tightens accuracy margins and requires higher kicking power!</li>
+                  <li><b className="text-white">Field Goals (3 Points):</b> In Pro mode, choose Field Goal from the offensive playbook, then lock direction and power. Can be attempted from up to 60 yards out. Greater distance significantly tightens accuracy margins and requires higher kicking power!</li>
                   <li><b className="text-white">Two-Stage Skill Meter:</b>
                     <ul className="list-disc list-inside ml-2 text-neutral-400">
                       <li><b>Stage 1 (Direction):</b> Tap to lock horizontal aim. Aim must land between the yellow upright target markers. The target window narrows as distance increases!</li>
@@ -1120,7 +1141,7 @@ export default function App() {
                     </ul>
                   </li>
                   <li><b className="text-white">Uprights & Doinks:</b> Kicks hitting the upright post trigger a realistic metallic DOINK! Missed kicks turn possession over to the defense.</li>
-                  <li><b className="text-white">Punts:</b> Flip field position on 4th down with a high soaring spiral punt.</li>
+                  <li><b className="text-white">Punts:</b> Choose Punt from the Pro offensive playbook on 4th down to flip field position with a high soaring spiral punt. Current down and distance are shown at the top of the playbook.</li>
                 </ul>
               </div>
             </div>
@@ -1144,7 +1165,36 @@ export default function App() {
       )}
 
       {/* Franchise & Team Selector Modal */}
-      {showTeamModal && (
+      {showTeamModal && !hasKickedOff && setupStep === 'MODE' && (
+        <section role="dialog" aria-modal="true" aria-labelledby="game-mode-title" className="fixed inset-0 z-[100] flex items-center justify-center bg-[#07110a] p-4">
+          <div className="w-full max-w-2xl rounded-xl border border-neutral-700 bg-[#0d1710] p-5 shadow-2xl sm:p-8">
+            <h1 id="game-mode-title" className="text-center text-2xl font-black uppercase text-amber-300 sm:text-3xl">Backyard Football</h1>
+            <p className="mt-2 text-center text-sm text-neutral-300">Choose how you want to play. Pick your teams next.</p>
+            <div className="mt-6 grid gap-3 sm:grid-cols-3" role="group" aria-label="Game mode">
+              {([
+                ['ONE_GAME', 'One Game', 'Pick your team and the CPU opponent for a single matchup.'],
+                ['SEASON', 'Season', 'Choose your SEC team for a 9-game season and a shot at the championship.'],
+                ['DYNASTY', 'Dynasty', 'Choose your program and preview the coming-soon Dynasty mode.']
+              ] as const).map(([mode, label, description]) => (
+                <button key={mode} type="button" onClick={() => handleGameModeChange(mode)} className="rounded-lg border border-neutral-600 bg-[#15251b] p-4 text-left transition hover:border-amber-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-400">
+                  <span className="block text-lg font-black text-white">{label}</span>
+                  {mode === 'DYNASTY' && <span className="mt-1 block text-[10px] font-bold uppercase text-amber-300">Coming soon</span>}
+                  <span className="mt-2 block text-xs leading-5 text-neutral-300">{description}</span>
+                </button>
+              ))}
+            </div>
+            {seasonProgress && (
+              <button type="button" onClick={handleContinueSeason} className="mt-4 w-full rounded-md border border-emerald-500/50 px-3 py-2 text-sm font-bold text-emerald-300 hover:bg-emerald-900/30">
+                Continue season - {getTeam(seasonProgress.teamId).name}
+              </button>
+            )}
+            <button type="button" onClick={replayTutorial} className="mt-5 flex w-full items-center justify-center gap-2 text-sm font-bold text-neutral-300 hover:text-white">
+              <Hand size={16} /> Learn to play
+            </button>
+          </div>
+        </section>
+      )}
+      {showTeamModal && (hasKickedOff || setupStep === 'TEAMS') && (
         <div
           onPointerDown={(e) => e.stopPropagation()}
           className="fixed inset-0 z-[100] flex flex-col items-center justify-start sm:justify-center bg-[#101713]/90 sm:p-3 backdrop-blur-sm overflow-hidden"
@@ -1162,88 +1212,25 @@ export default function App() {
                 </span>
                 <div>
                   <h2 id="team-selector-title" className="text-xl font-extrabold leading-tight sm:text-2xl">
-                    {!hasKickedOff ? (gameMode === 'SEASON' ? 'Season setup' : 'Choose teams') : 'Team matchup'}
+                    {!hasKickedOff ? (gameMode === 'SEASON' ? 'Season setup' : gameMode === 'DYNASTY' ? 'Choose your Dynasty team' : 'Choose teams') : 'Team matchup'}
                   </h2>
-                  <p className="mt-0.5 text-xs text-[#66756b]">{gameMode === 'SEASON' ? '9-Game SEC season + SEC Championship' : 'Single matchup'}</p>
+                  <p className="mt-0.5 text-xs text-[#66756b]">{gameMode === 'SEASON' ? '9-Game SEC season + SEC Championship' : gameMode === 'DYNASTY' ? 'Select one program to preview Dynasty - coming soon' : 'Single matchup'}</p>
                 </div>
               </div>
               <div className="flex items-center gap-2">
                 <button
-                  type="button"
-                  onClick={() => {
-                    handleStartGame();
-                    showAnnouncement(
-                      `${p1TeamState.name.toUpperCase()} VS ${p2TeamState.name.toUpperCase()} - READY FOR KICKOFF! 🏈`,
-                      p1TeamState.primaryColor,
-                      true
-                    );
-                  }}
-                  className="flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-[#c44d2b] to-[#bd5635] px-3.5 py-2 text-xs font-black uppercase tracking-wider text-white shadow-md hover:from-[#b03f1f] hover:to-[#a9492d] active:scale-95 transition cursor-pointer"
-                  title="Kick off game now"
-                >
-                  <span>
-                    {gameMode === 'SEASON'
-                      ? (seasonForDisplay.results.length > 0 ? '🏈 Continue season · Kick off' : '🏈 Start season · Kick off')
-                      : '🏈 Kick off game'}
-                  </span>
-                  <ArrowRight size={14} />
-                </button>
-                <button
                   onClick={() => {
                     if (hasKickedOff) setShowTeamModal(false);
-                    else handleStartGame();
+                    else setSetupStep('MODE');
                   }}
                   className="rounded-md p-2 text-[#66756b] transition hover:bg-[#edf1ed] hover:text-[#1b3026]"
-                  title="Close / Start"
-                  aria-label="Close team selector"
+                  title={hasKickedOff ? 'Close team selector' : 'Back to game modes'}
+                  aria-label={hasKickedOff ? 'Close team selector' : 'Back to game modes'}
                 >
-                  <X size={18} />
+                  {hasKickedOff ? <X size={18} /> : <ArrowLeft size={18} />}
                 </button>
               </div>
             </div>
-
-            {!hasKickedOff && (
-              <div className="grid shrink-0 grid-cols-4 gap-1 border-b border-[#dce3dd] bg-[#f7f9f7] p-2" role="group" aria-label="Game mode">
-                <button
-                  type="button"
-                  aria-pressed={gameMode === 'ONE_GAME'}
-                  onClick={() => handleGameModeChange('ONE_GAME')}
-                  className={`rounded-md px-2 py-2 text-xs font-bold transition sm:text-sm ${gameMode === 'ONE_GAME' ? 'bg-[#246344] text-white' : 'text-[#59685f] hover:bg-[#e9efea]'}`}
-                >
-                  One Game
-                </button>
-                <button
-                  type="button"
-                  aria-pressed={gameMode === 'SEASON'}
-                  onClick={() => {
-                    const currentSeason = seasonProgressRef.current || loadSeasonProgress();
-                    if (currentSeason) {
-                      setShowSeasonChoiceModal(true);
-                    } else {
-                      handleGameModeChange('SEASON');
-                    }
-                  }}
-                  className={`rounded-md px-2 py-2 text-xs font-bold transition sm:text-sm ${gameMode === 'SEASON' ? 'bg-[#bd5635] text-white' : 'text-[#59685f] hover:bg-[#f4e9e4]'}`}
-                >
-                  Season
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowDynastyPreview(true)}
-                  className="rounded-md border border-amber-300 bg-amber-50 px-2 py-2 text-xs font-bold text-amber-800 transition hover:bg-amber-100 sm:text-sm"
-                  title="Dynasty Mode • Coming Soon"
-                >
-                  Dynasty <span className="ml-0.5 rounded bg-amber-200 px-1 py-0.5 text-[9px] font-black text-amber-900">SOON</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={replayTutorial}
-                  className="flex items-center justify-center gap-1 rounded-md px-2 py-2 text-xs font-bold text-[#246344] transition hover:bg-[#e9efea] sm:text-sm"
-                >
-                  <Hand size={14} aria-hidden="true" /> Tutorial
-                </button>
-              </div>
-            )}
 
             <div className="grid shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-3 border-b border-[#dce3dd] bg-[#e9efea] px-4 py-3 sm:px-6">
               <div className="min-w-0">
@@ -1253,7 +1240,8 @@ export default function App() {
                   {p1TeamState.name}
                 </span>
               </div>
-              <span className="rounded bg-white px-2 py-1 text-[11px] font-bold text-[#6b786f]">VS</span>
+              {gameMode !== 'DYNASTY' && <span className="rounded bg-white px-2 py-1 text-[11px] font-bold text-[#6b786f]">VS</span>}
+              {gameMode !== 'DYNASTY' && (
               <div className="min-w-0 text-right">
                 <span className="mb-1 block text-[11px] font-bold uppercase text-[#b45435]">CPU</span>
                 <span className="flex items-center justify-end gap-2 truncate text-sm font-bold sm:text-base">
@@ -1261,6 +1249,7 @@ export default function App() {
                   <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ backgroundColor: p2TeamState.primaryColor }} />
                 </span>
               </div>
+              )}
             </div>
 
             <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-[#dce3dd] bg-white px-4 py-3 sm:px-6">
@@ -1287,79 +1276,12 @@ export default function App() {
                 )}
               </div>
               <span className="text-xs text-[#758178]">
-                {gameMode === 'SEASON' ? `Next opponent: ${p2TeamState.name}` : `Assigning to ${teamSelectionSide === 'P1' ? 'You' : 'CPU'}`}
+                {gameMode === 'SEASON' ? `Next opponent: ${p2TeamState.name}` : gameMode === 'DYNASTY' ? 'Choose your program' : `Assigning to ${teamSelectionSide === 'P1' ? 'You' : 'CPU'}`}
               </span>
             </div>
 
             <div className="min-h-0 flex-1 overflow-y-auto">
               <div className="p-3 sm:p-5">
-                {!isTacticalModeLocked && (
-                <>
-                {/* Step 1: Choose Gameplay Mode (PRO vs ELITE) */}
-                <div className="mb-4 rounded-xl border border-[#cbd6cd] bg-white p-3.5 shadow-sm text-left">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-black uppercase tracking-wider text-[#1b3026] flex items-center gap-1.5">
-                      <Zap size={14} className="text-[#bd5635]" /> Step 1: Choose Gameplay Mode (Before Kickoff)
-                    </span>
-                    <span className="text-[10px] font-bold text-[#59685f]">
-                      {tacticalMode === 'PRO' ? 'Strategy & Play Calling' : 'Sandbox Playmaker'}
-                    </span>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => handleSetTacticalMode('PRO')}
-                      className={`flex flex-col text-left p-3 rounded-lg border-2 transition cursor-pointer ${
-                        tacticalMode === 'PRO'
-                          ? 'border-amber-500 bg-amber-50/90 shadow-sm ring-1 ring-amber-400'
-                          : 'border-[#dce3dd] bg-white hover:bg-neutral-50 text-neutral-600'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between w-full">
-                        <span className={`text-xs font-black uppercase tracking-wide ${tacticalMode === 'PRO' ? 'text-amber-900' : 'text-neutral-700'}`}>
-                          🏈 PRO MODE
-                        </span>
-                        {tacticalMode === 'PRO' && (
-                          <span className="text-[9px] font-black uppercase bg-amber-500 text-black px-1.5 py-0.5 rounded leading-none">
-                            SELECTED
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-[11px] leading-snug text-neutral-600 mt-1">
-                        Pick plays from the 7v7 Playbook! Strategic rock-paper-scissors matchup counters & route concepts.
-                      </p>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => handleSetTacticalMode('ELITE')}
-                      className={`flex flex-col text-left p-3 rounded-lg border-2 transition cursor-pointer ${
-                        tacticalMode === 'ELITE'
-                          ? 'border-emerald-600 bg-emerald-50/90 shadow-sm ring-1 ring-emerald-500'
-                          : 'border-[#dce3dd] bg-white hover:bg-neutral-50 text-neutral-600'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between w-full">
-                        <span className={`text-xs font-black uppercase tracking-wide ${tacticalMode === 'ELITE' ? 'text-emerald-900' : 'text-neutral-700'}`}>
-                          ✏️ ELITE MODE
-                        </span>
-                        {tacticalMode === 'ELITE' && (
-                          <span className="text-[9px] font-black uppercase bg-emerald-600 text-white px-1.5 py-0.5 rounded leading-none">
-                            SELECTED
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-[11px] leading-snug text-neutral-600 mt-1">
-                        Backyard Playmaker! Draw routes in the dirt, drag any player, and freeform line audibles.
-                      </p>
-                    </button>
-                  </div>
-
-                </div>
-                </>
-                )}
-
                 {/* Step 2: SEC Teams Selection */}
                 <div className="mb-3 flex items-center justify-between gap-3">
                   <h3 className="text-sm font-bold text-[#253a2d]">Step 2: SEC teams <span className="ml-1 text-xs font-normal text-[#718077]">{getAllTeams().length}</span></h3>
@@ -1432,23 +1354,7 @@ export default function App() {
             {/* Sticky, Always-Visible Footer with Prominent Kick Off Game Button */}
             <div className="shrink-0 sticky bottom-0 z-30 border-t-2 border-[#cbd6cd] bg-white px-4 py-3 sm:px-6 shadow-xl">
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-                <div className="flex items-center justify-between sm:justify-start gap-2 min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-[11px] font-bold text-[#59685f]">Mode:</span>
-                    <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider ${
-                      tacticalMode === 'PRO' ? 'bg-amber-500 text-black' : 'bg-emerald-600 text-white'
-                    }`}>
-                      {tacticalMode === 'PRO' ? '🏈 PRO' : '✏️ ELITE'}
-                    </span>
-                  </div>
-                  {!isTacticalModeLocked && <button
-                    type="button"
-                    onClick={() => handleSetTacticalMode(tacticalMode === 'PRO' ? 'ELITE' : 'PRO')}
-                    className="text-[11px] font-bold text-neutral-500 hover:text-neutral-900 underline cursor-pointer"
-                  >
-                    Switch mode
-                  </button>}
-                </div>
+                <span className="text-xs font-bold text-[#59685f]">{gameMode === 'ONE_GAME' ? 'One Game' : gameMode === 'SEASON' ? 'Season' : 'Dynasty preview'}</span>
 
                 <div className="flex items-center gap-2">
                   {hasKickedOff && (
@@ -1472,6 +1378,10 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => {
+                      if (gameMode === 'DYNASTY') {
+                        setShowDynastyPreview(true);
+                        return;
+                      }
                       handleStartGame();
                       const isChampionship = gameMode === 'SEASON' && seasonForDisplay.secChampionship?.userQualified && seasonForDisplay.results.length === seasonForDisplay.opponentIds.length;
                       const rivalry = getRivalryForMatchup(p1TeamState.id, p2TeamState.id);
@@ -1502,7 +1412,7 @@ export default function App() {
                             : (seasonForDisplay.results.length > 0
                                 ? `🏈 Kick off game · Continue season (Wk ${seasonForDisplay.results.length + 1})`
                                 : '🏈 Kick off game · Start season'))
-                        : '🏈 Kick off game'}
+                        : gameMode === 'DYNASTY' ? 'Preview Dynasty' : '🏈 Kick off game'}
                     </span>
                     <ArrowRight size={18} />
                   </button>
@@ -1529,27 +1439,6 @@ export default function App() {
                   <p className="mt-1 text-sm leading-5 text-[#405047]">{pendingTeam.weaknesses}</p>
                 </div>
                 <div className="mt-6 flex flex-wrap justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (teamSelectionSide === 'P1') {
-                        handleSelectP1Team(pendingTeam.id);
-                      } else {
-                        handleSelectP2Team(pendingTeam.id);
-                      }
-                      setPendingTeam(null);
-                      handleStartGame();
-                      showAnnouncement(
-                        `${(teamSelectionSide === 'P1' ? pendingTeam.name : p1TeamState.name).toUpperCase()} READY FOR KICKOFF! 🏈`,
-                        pendingTeam.primaryColor,
-                        true
-                      );
-                    }}
-                    className="flex items-center gap-1.5 rounded-md bg-gradient-to-r from-[#c44d2b] to-[#bd5635] px-4 py-2.5 text-sm font-black uppercase tracking-wider text-white shadow-md hover:from-[#b03f1f] hover:to-[#a9492d] active:scale-95 transition cursor-pointer"
-                  >
-                    <span>🏈 Pick & Kick off</span>
-                    <ArrowRight size={15} />
-                  </button>
                   <button
                     type="button"
                     onClick={() => {
@@ -1609,7 +1498,7 @@ export default function App() {
 
                 <div className="mt-4 space-y-3 text-xs leading-relaxed text-neutral-300">
                   <p className="text-sm font-semibold text-amber-100">
-                    Take the headset as head coach and build an enduring Southeastern Conference powerhouse:
+                    {p1TeamState.name} is your selected program. Dynasty is coming soon and is not playable yet.
                   </p>
                   <ul className="space-y-2 pl-1">
                     <li className="flex items-start gap-2">
@@ -1661,7 +1550,7 @@ export default function App() {
               >
                 <Play size={17} /> Continue game
               </button>
-              <button
+              {tacticalMode !== 'PRO' && <button
                 onClick={handlePauseAttemptFieldGoal}
                 className="flex w-full items-center justify-center gap-2 rounded-md border-2 border-amber-400 bg-gradient-to-r from-amber-600 to-yellow-600 px-4 py-3 text-sm font-black uppercase text-white shadow-xl transition hover:from-amber-500 hover:to-yellow-500 active:scale-95 cursor-pointer"
               >
@@ -1670,7 +1559,7 @@ export default function App() {
                 <span className="text-xs font-semibold opacity-90">
                   ({engineRef.current?.getFieldGoalDistance?.() ?? fgMeterState?.distanceYards ?? 40} YD)
                 </span>
-              </button>
+              </button>}
               <button
                 onClick={handleReturnToMainMenu}
                 className="flex w-full items-center justify-center gap-2 rounded-md border border-[#bd5635] bg-[#32170f] px-4 py-3 text-sm font-bold text-[#ffd8ca] transition hover:bg-[#512116] cursor-pointer"
@@ -1883,12 +1772,39 @@ export default function App() {
         <RealPlayTutorial onFinish={finishTutorial} />
       )}
 
+      {showSettings && (
+        <section role="dialog" aria-modal="true" aria-labelledby="settings-title" className="fixed inset-0 z-[160] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-xl border border-neutral-600 bg-[#0d1710] p-5 shadow-2xl">
+            <div className="flex items-center justify-between">
+              <h2 id="settings-title" className="text-lg font-black text-white">Settings</h2>
+              <button type="button" onClick={() => setShowSettings(false)} aria-label="Close settings" className="rounded p-2 text-neutral-300 hover:text-white"><X size={20} /></button>
+            </div>
+            <p className="mt-3 text-xs text-neutral-300">Playbook-based Pro gameplay is the default. Elite unlocks freeform routes and assignments.</p>
+            <button type="button" disabled={isTacticalModeLocked} aria-pressed={tacticalMode === 'ELITE'}
+              onClick={() => handleSetTacticalMode(tacticalMode === 'ELITE' ? 'PRO' : 'ELITE')}
+              className="mt-4 w-full rounded-md border border-emerald-500 bg-emerald-950 px-4 py-3 text-sm font-bold text-emerald-200 hover:bg-emerald-900 disabled:cursor-not-allowed disabled:opacity-40">
+              {tacticalMode === 'ELITE' ? 'Disable Elite Mode' : 'Enable Elite Mode'}
+            </button>
+            {isTacticalModeLocked && <p className="mt-2 text-xs text-neutral-400">Gameplay mode is locked during a game. Return to the main menu to change it.</p>}
+            <button type="button" onClick={toggleSound} className="mt-3 w-full rounded-md border border-neutral-600 px-4 py-2 text-sm text-neutral-200">{soundEnabled ? 'Mute sound' : 'Enable sound'}</button>
+            <button type="button" onClick={() => { setShowSettings(false); replayTutorial(); }} className="mt-3 w-full rounded-md border border-neutral-600 px-4 py-2 text-sm text-neutral-200">Pro controls tutorial</button>
+          </div>
+        </section>
+      )}
+
       {showProPlaybookCards && (
         <ProPlaybookCards
           activeOffensePlay={p1OffPlayState}
           activeDefensePlay={p1DefPlayState}
           initialTab={activeOffenseState === 'P2' ? 'DEFENSE' : 'OFFENSE'}
           selectionOnly
+          downDistanceText={downDistanceText}
+          canPunt={is4thDown}
+          fieldGoalDistance={engineRef.current?.getFieldGoalDistance?.()}
+          onSelectSpecialTeams={activeOffenseState === 'P1' ? (playId) => {
+            proPlaybookCallSelectedRef.current = true;
+            handleSelectOffensePlay(playId);
+          } : undefined}
           onSelectOffensePlay={(playId) => {
             proPlaybookCallSelectedRef.current = true;
             handleSelectOffensePlay(playId);

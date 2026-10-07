@@ -8,6 +8,9 @@ import {
   ProDefensePlayId
 } from './proMode';
 import { offensivePlaybook, defensivePlaybook, eliteOffensiveKeys, eliteDefensiveKeys, proOffensiveKeys, proDefensiveKeys } from './playbook';
+import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { ProPlaybookCards } from './ProPlaybookCards';
 
 test('Pro Mode 7-on-7 Playbooks contain exactly 7 offensive and 7 defensive plays', () => {
   const offKeys = Object.keys(PRO_OFFENSE_PLAYS) as ProOffensePlayId[];
@@ -111,6 +114,60 @@ test('every Pro passing play keeps the RB in pass protection', () => {
     assert.equal(play.rbRoute, 'BLOCK', `${play.id} should keep an RB pass protector`);
     assert.equal(offensivePlaybook[play.id].rbRoute, 'BLOCK', `${play.id} engine routes should match its card`);
   }
+});
+
+test('Pro card routes match all four receivers in the engine playbook', () => {
+  for (const play of Object.values(PRO_OFFENSE_PLAYS)) {
+    const enginePlay = offensivePlaybook[play.id];
+    assert.deepEqual(
+      [play.leftRoute, play.rightRoute, play.centerRoute, play.slotRoute],
+      [enginePlay.left, enginePlay.right, enginePlay.center, enginePlay.slot],
+      play.id
+    );
+  }
+  for (const playId of ['PRO_QUICK_SLANTS', 'PRO_MESH', 'PRO_DOUBLE_MOVES'] as const) {
+    assert.equal(offensivePlaybook[playId].slot, 'HITCH', `${playId} needs a short checkdown`);
+  }
+  assert.equal(offensivePlaybook.PRO_VERTS.slot, 'GO');
+});
+
+test('live Pro playbook shows situation and special teams, with punts restricted to fourth down', () => {
+  const render = (canPunt: boolean, initialTab: 'OFFENSE' | 'DEFENSE' = 'OFFENSE') =>
+    renderToStaticMarkup(React.createElement(ProPlaybookCards, {
+      onClose: () => {},
+      selectionOnly: true,
+      initialTab,
+      downDistanceText: '3rd & 12 at OPP 30',
+      canPunt,
+      fieldGoalDistance: 47,
+      onSelectSpecialTeams: () => {}
+    }));
+  const offense = render(false);
+  assert.ok(offense.indexOf('3rd &amp; 12 at OPP 30') < offense.indexOf('Choose an Offensive Play'));
+  assert.match(offense, /Field Goal \(47 YD\)/);
+  assert.match(offense, /<button[^>]*disabled=""[^>]*>.*?Punt/s);
+  assert.doesNotMatch(render(true), /disabled=""/);
+  const defense = render(false, 'DEFENSE');
+  assert.match(defense, /3rd &amp; 12 at OPP 30/);
+  assert.doesNotMatch(defense, /Field Goal|>Punt</);
+});
+
+test('tutorial playbook can limit cards to passing plays without affecting the normal playbook', () => {
+  const markup = renderToStaticMarkup(React.createElement(ProPlaybookCards, {
+    onClose: () => {}, selectionOnly: true,
+    offensePlayIds: ['PRO_QUICK_SLANTS', 'PRO_MESH', 'PRO_VERTS', 'PRO_DOUBLE_MOVES', 'PRO_SCREEN']
+  }));
+  assert.match(markup, /Select Mesh Concept/);
+  assert.match(markup, /Select Verts/);
+  assert.doesNotMatch(markup, /Select Jet Sweep|Select Draw/);
+  const specialTeams = renderToStaticMarkup(React.createElement(ProPlaybookCards, {
+    onClose: () => {}, selectionOnly: true, specialTeamsOnly: true,
+    canPunt: true, fieldGoalDistance: 47, onSelectSpecialTeams: () => {}
+  }));
+  assert.match(specialTeams, /Choose a Special Teams Play/);
+  assert.match(specialTeams, /Punt/);
+  assert.match(specialTeams, /Field Goal \(47 YD\)/);
+  assert.doesNotMatch(specialTeams, /Select Mesh|Select Quick Slants|disabled=""/);
 });
 
 test('Pro mode allows players to pick every defensive scheme with valid counters and descriptions', () => {
