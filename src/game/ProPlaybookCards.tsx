@@ -61,13 +61,13 @@ export const ProPlaybookCards: React.FC<ProPlaybookCardsProps> = ({
                   onSelectDefensePlay?.(play.id);
                   onClose();
                 }}
-                className="group flex min-h-0 flex-col overflow-hidden rounded-md border border-neutral-700 bg-[#121c27] text-left transition hover:border-cyan-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-400"
+                className="group flex min-h-[220px] flex-col overflow-hidden rounded-md border border-neutral-700 bg-[#121c27] text-left transition hover:border-cyan-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-400 sm:min-h-[252px]"
                 aria-label={`Select ${play.name}`}
               >
-                <div className="w-full flex-1 overflow-hidden bg-[#09150d]">
+                <div className="h-44 w-full shrink-0 overflow-hidden bg-[#09150d] sm:h-52">
                   <DefenseSchemeDiagram defense={play} />
                 </div>
-                <span className="w-full border-t border-neutral-700 px-2 py-2 text-center text-[11px] font-black uppercase leading-tight text-white group-hover:text-cyan-300 sm:text-xs">
+                <span className="w-full shrink-0 border-t border-neutral-700 px-2 py-2 text-center text-[11px] font-black uppercase leading-tight text-white group-hover:text-cyan-300 sm:text-xs">
                   {play.name}
                 </span>
               </button>
@@ -79,13 +79,13 @@ export const ProPlaybookCards: React.FC<ProPlaybookCardsProps> = ({
                   onSelectOffensePlay?.(play.id);
                   onClose();
                 }}
-                className="group flex min-h-0 flex-col overflow-hidden rounded-md border border-neutral-700 bg-[#121c27] text-left transition hover:border-amber-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-400"
+                className="group flex min-h-[220px] flex-col overflow-hidden rounded-md border border-neutral-700 bg-[#121c27] text-left transition hover:border-amber-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-400 sm:min-h-[252px]"
                 aria-label={`Select ${play.name}`}
               >
-                <div className="w-full flex-1 overflow-hidden bg-[#09150d]">
+                <div className="h-44 w-full shrink-0 overflow-hidden bg-[#09150d] sm:h-52">
                   <OffenseRouteDiagram play={play} />
                 </div>
-                <span className="w-full border-t border-neutral-700 px-2 py-2 text-center text-[11px] font-black uppercase leading-tight text-white group-hover:text-amber-300 sm:text-xs">
+                <span className="w-full shrink-0 border-t border-neutral-700 px-2 py-2 text-center text-[11px] font-black uppercase leading-tight text-white group-hover:text-amber-300 sm:text-xs">
                   {play.name}
                 </span>
               </button>
