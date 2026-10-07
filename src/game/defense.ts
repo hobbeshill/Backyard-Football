@@ -221,14 +221,22 @@ export function alignDefenders(
     defender.passRusher = passRusher;
   };
 
-  if (playKey === 'COVER2') {
-    placeDefender(1, 55, 42, 72, 'CB');
-    placeDefender(2, 285, 42, 72, 'CB');
+  if (playKey === 'COVER2' || playKey === 'PRO_COVER2_HARD_FLAT') {
+    placeDefender(1, 55, 32, 60, 'CB');
+    placeDefender(2, 285, 32, 60, 'CB');
     placeDefender(3, 125, 70, 112, 'LB');
     placeDefender(4, 215, 70, 112, 'LB');
     placeDefender(5, 105, 185, 245, 'FS');
     placeDefender(6, 235, 185, 245, 'SS');
-  } else if (playKey === 'ZONE34') {
+  } else if (playKey === 'PRO_COVER1_MAN') {
+    placeDefender(0, 170, 24, 24, 'DL', true);
+    placeDefender(1, 55, 38, 45, 'CB');
+    placeDefender(2, 285, 38, 45, 'CB');
+    placeDefender(3, 130, 48, 55, 'LB');
+    placeDefender(4, 210, 48, 55, 'LB');
+    placeDefender(5, 170, 60, 70, 'SS');
+    placeDefender(6, 170, 200, 240, 'FS');
+  } else if (playKey === 'ZONE34' || playKey === 'PRO_COVER3_DEEP') {
     placeDefender(0, 105, 24, 24, 'DL', true);
     placeDefender(1, 170, 24, 24, 'DL', true);
     placeDefender(2, 235, 24, 24, 'DL', true);
@@ -236,6 +244,38 @@ export function alignDefenders(
     placeDefender(4, 265, 105, 155, 'CB');
     placeDefender(5, 135, 175, 235, 'FS');
     placeDefender(6, 205, 175, 235, 'SS');
+  } else if (playKey === 'PRO_COVER4_QUARTERS') {
+    placeDefender(0, 170, 24, 24, 'DL', true);
+    placeDefender(1, 50, 150, 210, 'CB');
+    placeDefender(2, 290, 150, 210, 'CB');
+    placeDefender(3, 120, 60, 95, 'LB');
+    placeDefender(4, 220, 60, 95, 'LB');
+    placeDefender(5, 115, 175, 235, 'FS');
+    placeDefender(6, 225, 175, 235, 'SS');
+  } else if (playKey === 'PRO_BLITZ_ZERO') {
+    placeDefender(0, 140, 22, 22, 'DL', true);
+    placeDefender(1, 55, 32, 35, 'CB');
+    placeDefender(2, 285, 32, 35, 'CB');
+    placeDefender(3, 170, 22, 22, 'LB', true);
+    placeDefender(4, 200, 22, 22, 'LB', true);
+    placeDefender(5, 110, 45, 50, 'SS');
+    placeDefender(6, 230, 45, 50, 'FS');
+  } else if (playKey === 'PRO_RUN_STOP_BOX') {
+    placeDefender(0, 135, 20, 20, 'DL', true);
+    placeDefender(1, 65, 24, 24, 'DL', true);
+    placeDefender(2, 275, 24, 24, 'DL', true);
+    placeDefender(3, 105, 22, 22, 'LB', true);
+    placeDefender(4, 170, 22, 22, 'LB', true);
+    placeDefender(5, 235, 22, 22, 'LB', true);
+    placeDefender(6, 170, 130, 160, 'FS');
+  } else if (playKey === 'PRO_TAMPA2') {
+    placeDefender(0, 170, 24, 24, 'DL', true);
+    placeDefender(1, 55, 45, 75, 'CB');
+    placeDefender(2, 285, 45, 75, 'CB');
+    placeDefender(3, 170, 85, 175, 'LB');
+    placeDefender(4, 210, 65, 105, 'LB');
+    placeDefender(5, 100, 185, 245, 'FS');
+    placeDefender(6, 240, 185, 245, 'SS');
   } else if (playKey === 'ZONE232') {
     placeDefender(0, 130, 24, 24, 'DL', true);
     placeDefender(1, 210, 24, 24, 'DL', true);

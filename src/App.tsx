@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Volume2, VolumeX, RefreshCw, HelpCircle, X, Users, Shield, ArrowRight, Search, Pause, Play, Home, Hand, Crosshair, Trophy, Award, RotateCcw } from 'lucide-react';
+import { Volume2, VolumeX, RefreshCw, HelpCircle, X, Users, Shield, ArrowRight, Search, Pause, Play, Home, Hand, Crosshair, Trophy, Award, RotateCcw, Zap, BookOpen, SlidersHorizontal, Info } from 'lucide-react';
 import { offensivePlaybook, defensivePlaybook } from './game/playbook';
 import { sounds } from './game/sound';
 import { hasSavedGameSession, mountFootballGame, type GameBoxScore, type GameEngineHandle } from './game/engine';
@@ -8,6 +8,9 @@ import { RealPlayTutorial } from './game/RealPlayTutorial';
 import { TEAM_KEYS, TEAMS, getAllTeams, getTeam, type TeamProfile } from './game/teams';
 import { createSeason, getSeasonRecord, loadGameMode, loadSeasonProgress, recordSeasonGame, saveGameMode, saveSeasonProgress, type GameMode, type SeasonProgress } from './game/season';
 import { getRivalryForMatchup, type RivalryGame } from './game/rivalries';
+import type { TacticalMode } from './game/types';
+import { PRO_OFFENSE_PLAYS, PRO_DEFENSE_PLAYS, type ProOffensePlayId, type ProDefensePlayId } from './game/proMode';
+import { ProPlaybookCards } from './game/ProPlaybookCards';
 
 function getTeamTextStyle(color: string) {
   const hex = color.replace('#', '');
@@ -58,6 +61,8 @@ export default function App() {
   const [kickoffSide, setKickoffSide] = useState<{ kicking: 'P1' | 'P2'; receiving: 'P1' | 'P2' }>({ kicking: 'P2', receiving: 'P1' });
   const [is4thDown, setIs4thDown] = useState(false);
   const [fgMeterState, setFgMeterState] = useState<{ stage: 'AIM' | 'POWER' | 'KICKING'; aim: number; power: number; distanceYards: number } | null>(null);
+  const [tacticalMode, setTacticalMode] = useState<TacticalMode>('PRO');
+  const [showProPlaybookCards, setShowProPlaybookCards] = useState(false);
   const [phaseState, setPhaseState] = useState('PRE_SNAP');
   const [kickMeterPower, setKickMeterPower] = useState(0.55);
   const [momentumState, setMomentumState] = useState(0);
@@ -402,18 +407,50 @@ export default function App() {
 
   // Handlers for user changing offensive/defensive plays (user only controls their own side)
   const handleSelectOffensePlay = (key: string) => {
+    setP1OffPlayState(key);
     if (activeOffenseState === 'P1' && engineRef.current?.phase === 'PRE_SNAP' &&
       !engineRef.current.isKickoffActive() && (key !== 'PUNT' || is4thDown)) {
-      setP1OffPlayState(key);
       engineRef.current.selectOffense(key);
     }
   };
 
   const handleSelectDefensePlay = (key: string) => {
+    setP1DefPlayState(key);
     if (activeOffenseState === 'P2') {
-      setP1DefPlayState(key);
       if (engineRef.current) {
         engineRef.current.selectDefense(key);
+      }
+    }
+  };
+
+  const handleSetTacticalMode = (mode: TacticalMode) => {
+    setTacticalMode(mode);
+    engineRef.current?.setTacticalMode?.(mode);
+    if (mode === 'PRO') {
+      if (!p1OffPlayState.startsWith('PRO_') && p1OffPlayState !== 'FIELD_GOAL' && p1OffPlayState !== 'PUNT') {
+        setP1OffPlayState('PRO_QUICK_SLANTS');
+        if (activeOffenseState === 'P1') {
+          engineRef.current?.selectOffense?.('PRO_QUICK_SLANTS');
+        }
+      }
+      if (!p1DefPlayState.startsWith('PRO_')) {
+        setP1DefPlayState('PRO_COVER2_HARD_FLAT');
+        if (activeOffenseState === 'P2') {
+          engineRef.current?.selectDefense?.('PRO_COVER2_HARD_FLAT');
+        }
+      }
+    } else {
+      if (p1OffPlayState.startsWith('PRO_')) {
+        setP1OffPlayState('SHORT_PASS');
+        if (activeOffenseState === 'P1') {
+          engineRef.current?.selectOffense?.('SHORT_PASS');
+        }
+      }
+      if (p1DefPlayState.startsWith('PRO_')) {
+        setP1DefPlayState('COVER2');
+        if (activeOffenseState === 'P2') {
+          engineRef.current?.selectDefense?.('COVER2');
+        }
       }
     }
   };
@@ -459,6 +496,11 @@ export default function App() {
     setUserScore(0);
     setCpuScore(0);
     engineRef.current?.resetGame();
+    engineRef.current?.setTacticalMode?.(tacticalMode);
+    if (tacticalMode === 'PRO') {
+      engineRef.current?.selectOffense(p1OffPlayState);
+      engineRef.current?.selectDefense(p1DefPlayState);
+    }
     setHasKickedOff(true);
     setShowPauseMenu(false);
     setShowTeamModal(false);
@@ -476,7 +518,6 @@ export default function App() {
   };
 
   const handlePauseAttemptFieldGoal = () => {
-    if (activeOffenseState !== 'P1' || isKickoffActive) return;
     setShowPauseMenu(false);
     if (engineRef.current) {
       engineRef.current.setPaused(false);
@@ -616,22 +657,41 @@ export default function App() {
       {/* Top Header & Scoreboard */}
       <header className="flex flex-col items-center justify-center z-20 mb-0.5 w-full max-w-[430px] px-2 pt-0.5 shrink-0">
         {/* Team Matchup Selector Button */}
-        <button
-          onClick={() => setShowTeamModal(true)}
-          className="flex max-w-full flex-wrap items-center justify-center gap-1.5 px-2.5 py-0.5 mb-1 bg-black/85 hover:bg-neutral-900 border border-[#ffcc00]/60 rounded text-[0.60rem] font-bold text-neutral-200 transition cursor-pointer active:scale-95 shadow-md"
-          title="Change Teams, Rosters & Strengths/Weaknesses"
-        >
-          <Users size={11} className="text-[#ffcc00]" />
-          <span className="rounded-sm px-0.5" style={getTeamTextStyle(p1TeamState.primaryColor)}>{p1TeamState.name}</span>
-          <span className="text-neutral-400 font-normal">VS</span>
-          <span className="rounded-sm px-0.5" style={getTeamTextStyle(p2TeamState.primaryColor)}>{p2TeamState.name}</span>
-          {gameMode === 'SEASON' && (
-            <span className="text-emerald-400 font-bold ml-0.5">
-              • {isChampionshipWeek ? '🏆 SEC TITLE' : `WK ${currentWeekNumber} (${getSeasonRecord(seasonForDisplay).wins}-${getSeasonRecord(seasonForDisplay).losses})`}
-            </span>
+        <div className="flex items-center gap-1.5 mb-1 max-w-full">
+          <button
+            onClick={() => setShowTeamModal(true)}
+            className="flex max-w-full flex-wrap items-center justify-center gap-1.5 px-2.5 py-0.5 bg-black/85 hover:bg-neutral-900 border border-[#ffcc00]/60 rounded text-[0.60rem] font-bold text-neutral-200 transition cursor-pointer active:scale-95 shadow-md"
+            title="Change Teams, Rosters & Strengths/Weaknesses"
+          >
+            <Users size={11} className="text-[#ffcc00]" />
+            <span className="rounded-sm px-0.5" style={getTeamTextStyle(p1TeamState.primaryColor)}>{p1TeamState.name}</span>
+            <span className="text-neutral-400 font-normal">VS</span>
+            <span className="rounded-sm px-0.5" style={getTeamTextStyle(p2TeamState.primaryColor)}>{p2TeamState.name}</span>
+            {gameMode === 'SEASON' && (
+              <span className="text-emerald-400 font-bold ml-0.5">
+                • {isChampionshipWeek ? '🏆 SEC TITLE' : `WK ${currentWeekNumber} (${getSeasonRecord(seasonForDisplay).wins}-${getSeasonRecord(seasonForDisplay).losses})`}
+              </span>
+            )}
+            <span className="text-[#ffcc00] ml-1">▾ TEAMS</span>
+          </button>
+          {!hasKickedOff && (
+            <button
+              type="button"
+              onClick={() => {
+                handleStartGame();
+                showAnnouncement(
+                  `${p1TeamState.name.toUpperCase()} VS ${p2TeamState.name.toUpperCase()} - READY FOR KICKOFF! 🏈`,
+                  p1TeamState.primaryColor,
+                  true
+                );
+              }}
+              className="flex items-center gap-1 rounded bg-gradient-to-r from-[#c44d2b] to-[#bd5635] px-2.5 py-0.5 text-[0.62rem] font-black uppercase tracking-wider text-white shadow-md hover:from-[#b03f1f] hover:to-[#a9492d] active:scale-95 transition cursor-pointer"
+              title="Kick off game now"
+            >
+              <span>🏈 KICK OFF</span>
+            </button>
           )}
-          <span className="text-[#ffcc00] ml-1">▾ TEAMS</span>
-        </button>
+        </div>
 
         <div className="grid grid-cols-3 items-center gap-1 w-full bg-black/90 border-2 border-[#ffcc00] px-3 py-1.5 rounded-lg shadow-xl">
           {/* P2 CPU Score */}
@@ -708,7 +768,156 @@ export default function App() {
             </span>
           </div>
         </div>
+
+        {/* Mode Selector & Visual Playbook Cards Toggle */}
+        <div className="mt-1 flex w-full items-center justify-between gap-1.5 px-0.5">
+          <div className="flex items-center gap-1 rounded-md bg-neutral-900/90 border border-neutral-700 p-0.5">
+            <button
+              type="button"
+              onClick={() => handleSetTacticalMode('PRO')}
+              className={`px-2 py-0.5 text-[0.60rem] font-black uppercase rounded transition cursor-pointer ${
+                tacticalMode === 'PRO'
+                  ? 'bg-amber-500 text-black shadow'
+                  : 'text-neutral-400 hover:text-white'
+              }`}
+              title="Pro Mode: 7v7 Rock-Paper-Scissors Matchups"
+            >
+              PRO MODE
+            </button>
+            <button
+              type="button"
+              onClick={() => handleSetTacticalMode('ELITE')}
+              className={`px-2 py-0.5 text-[0.60rem] font-black uppercase rounded transition cursor-pointer ${
+                tacticalMode === 'ELITE'
+                  ? 'bg-emerald-500 text-black shadow'
+                  : 'text-neutral-400 hover:text-white'
+              }`}
+              title="Elite Mode: Everything moveable & editable"
+            >
+              ELITE MODE
+            </button>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setShowProPlaybookCards(true)}
+            className="flex items-center gap-1 rounded-md border border-amber-400/80 bg-neutral-900/90 hover:bg-neutral-800 px-2 py-0.5 text-[0.60rem] font-black uppercase tracking-wider text-amber-300 shadow transition active:scale-95 cursor-pointer"
+            title="View Offensive & Defensive Playbook Schematic Cards"
+          >
+            <BookOpen size={11} className="text-amber-400" />
+            <span>PLAYBOOK CARDS</span>
+          </button>
+        </div>
       </header>
+
+      {/* PRO MODE Pre-Snap Play Calling Bar */}
+      {tacticalMode === 'PRO' && isUserPreSnapPhase && (
+        <div className="z-30 w-full max-w-[440px] px-2 mb-1 shrink-0">
+          <div className="rounded-lg border-2 border-amber-400/90 bg-neutral-950/95 p-1.5 shadow-2xl backdrop-blur-md">
+            {/* Play Header / Category & Open Playbook Modal Button */}
+            <div className="flex items-center justify-between gap-1 mb-1 px-1">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span className={`px-1.5 py-0.2 rounded text-[0.62rem] font-black uppercase tracking-wider ${
+                  activeOffenseState === 'P1'
+                    ? 'bg-amber-500 text-black'
+                    : 'bg-cyan-500 text-black'
+                }`}>
+                  {activeOffenseState === 'P1' ? 'OFFENSE PLAY' : 'DEFENSE SCHEME'}
+                </span>
+                <span className="text-[0.70rem] font-bold text-white truncate">
+                  {activeOffenseState === 'P1'
+                    ? (PRO_OFFENSE_PLAYS[p1OffPlayState as ProOffensePlayId]?.name || p1OffPlayState)
+                    : (PRO_DEFENSE_PLAYS[p1DefPlayState as ProDefensePlayId]?.name || p1DefPlayState)}
+                </span>
+                <span className="text-[0.60rem] text-neutral-400 hidden xs:inline">
+                  {activeOffenseState === 'P1'
+                    ? `(${PRO_OFFENSE_PLAYS[p1OffPlayState as ProOffensePlayId]?.category || 'Pass'})`
+                    : `(${PRO_DEFENSE_PLAYS[p1DefPlayState as ProDefensePlayId]?.scheme || 'Zone'})`}
+                </span>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowProPlaybookCards(true)}
+                className="shrink-0 flex items-center gap-1 rounded border border-amber-400 bg-amber-500/20 hover:bg-amber-500/30 px-2 py-0.5 text-[0.62rem] font-black uppercase text-amber-300 transition cursor-pointer"
+                title="Open full interactive Playbook with diagrams and matchup counters"
+              >
+                <BookOpen size={11} />
+                <span>Playbook</span>
+              </button>
+            </div>
+
+            {/* Quick-Pick Play Chips Strip */}
+            <div className="flex items-center gap-1 overflow-x-auto pb-0.5 scrollbar-none">
+              {activeOffenseState === 'P1' ? (
+                // Offense Playbook Options
+                Object.values(PRO_OFFENSE_PLAYS).map((play) => {
+                  const isSelected = p1OffPlayState === play.id;
+                  let icon = '⚡';
+                  if (play.id === 'PRO_MESH') icon = '🔄';
+                  else if (play.id === 'PRO_VERTS') icon = '🚀';
+                  else if (play.id === 'PRO_DOUBLE_MOVES') icon = '✨';
+                  else if (play.id === 'PRO_SCREEN') icon = '🧱';
+                  else if (play.id === 'PRO_JET_SWEEP') icon = '💨';
+                  else if (play.id === 'PRO_DRAW') icon = '🏃';
+
+                  return (
+                    <button
+                      key={play.id}
+                      type="button"
+                      onClick={() => {
+                        handleSelectOffensePlay(play.id);
+                        showAnnouncement(`PLAY CALLED: ${play.name.toUpperCase()} 🏈`, '#ffcc00');
+                      }}
+                      className={`shrink-0 flex items-center gap-1 rounded px-2 py-1 text-[0.62rem] font-extrabold uppercase transition cursor-pointer border ${
+                        isSelected
+                          ? 'bg-amber-500 text-black border-amber-300 shadow-md ring-1 ring-amber-400 scale-[1.02]'
+                          : 'bg-neutral-900 text-neutral-300 border-neutral-700 hover:bg-neutral-800 hover:text-white'
+                      }`}
+                      title={`${play.name} - ${play.category}: ${play.description}`}
+                    >
+                      <span>{icon}</span>
+                      <span>{play.name}</span>
+                    </button>
+                  );
+                })
+              ) : (
+                // Defense Playbook Options
+                Object.values(PRO_DEFENSE_PLAYS).map((def) => {
+                  const isSelected = p1DefPlayState === def.id;
+                  let icon = '🛡️';
+                  if (def.id === 'PRO_COVER1_MAN') icon = '👤';
+                  else if (def.id === 'PRO_COVER3_DEEP') icon = '☁️';
+                  else if (def.id === 'PRO_COVER4_QUARTERS') icon = '📐';
+                  else if (def.id === 'PRO_BLITZ_ZERO') icon = '💥';
+                  else if (def.id === 'PRO_RUN_STOP_BOX') icon = '🛑';
+                  else if (def.id === 'PRO_TAMPA2') icon = '⭐';
+
+                  return (
+                    <button
+                      key={def.id}
+                      type="button"
+                      onClick={() => {
+                        handleSelectDefensePlay(def.id);
+                        showAnnouncement(`DEFENSE: ${def.name.toUpperCase()} 🛡️`, '#00ffff');
+                      }}
+                      className={`shrink-0 flex items-center gap-1 rounded px-2 py-1 text-[0.62rem] font-extrabold uppercase transition cursor-pointer border ${
+                        isSelected
+                          ? 'bg-cyan-500 text-black border-cyan-300 shadow-md ring-1 ring-cyan-400 scale-[1.02]'
+                          : 'bg-neutral-900 text-neutral-300 border-neutral-700 hover:bg-neutral-800 hover:text-white'
+                      }`}
+                      title={`${def.name} - ${def.scheme}: ${def.description}`}
+                    >
+                      <span>{icon}</span>
+                      <span>{def.name}</span>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 4th Down Special Teams Punt / Field Goal Action Controls */}
       {((showPuntAction && p1OffPlayState !== 'PUNT' && p1OffPlayState !== 'FIELD_GOAL') ||
@@ -895,6 +1104,45 @@ export default function App() {
           ref={canvasRef}
           className="bg-[#176620] shadow-[0_8px_30px_rgba(0,0,0,0.9)] rounded-md border-2 border-white touch-none"
         />
+
+        {/* On-Field Kickoff Action Button */}
+        {(!hasKickedOff || isKickoffActive) && !showTeamModal && !showPauseMenu && !finishedGame && (
+          <div className="absolute top-[28%] sm:top-[24%] left-1/2 -translate-x-1/2 z-35 flex flex-col items-center gap-2 pointer-events-auto select-none">
+            <button
+              type="button"
+              onClick={() => {
+                if (!hasKickedOff) {
+                  handleStartGame();
+                  showAnnouncement(
+                    `${p1TeamState.name.toUpperCase()} VS ${p2TeamState.name.toUpperCase()} - READY FOR KICKOFF! 🏈`,
+                    p1TeamState.primaryColor,
+                    true
+                  );
+                } else {
+                  engineRef.current?.startKickoff?.();
+                  sounds.playWhistle();
+                }
+              }}
+              className="flex items-center gap-2.5 rounded-full border-2 border-amber-300 bg-gradient-to-r from-amber-600 via-orange-600 to-amber-500 px-6 sm:px-8 py-3.5 sm:py-4 text-sm sm:text-base font-black uppercase tracking-wider text-white shadow-[0_10px_35px_rgba(245,158,11,0.7)] transition hover:scale-105 active:scale-95 animate-pulse cursor-pointer ring-4 ring-amber-400/40"
+            >
+              <span>🏈 KICK OFF GAME</span>
+              <ArrowRight size={18} />
+            </button>
+            {!hasKickedOff && (
+              <button
+                type="button"
+                onClick={() => setShowTeamModal(true)}
+                className="flex items-center gap-1.5 rounded-full bg-black/85 hover:bg-black border border-[#ffcc00]/60 px-3 py-1 text-xs font-bold text-neutral-200 transition cursor-pointer shadow-md"
+              >
+                <Users size={12} className="text-[#ffcc00]" />
+                <span>Choose Teams & Mode ({tacticalMode === 'PRO' ? '🏈 PRO' : '✏️ ELITE'})</span>
+              </button>
+            )}
+            <span className="text-[10px] font-bold text-amber-300 drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)] bg-black/80 px-2.5 py-0.5 rounded-full border border-amber-400/50">
+              Tap button, touch joystick, or press Space to kick off
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Footer Controls & Info */}
@@ -907,9 +1155,13 @@ export default function App() {
       <footer className="mt-0.5 text-[0.52rem] text-[#adff2f] text-center z-20 px-2 max-w-[420px] flex items-center justify-between gap-2 shrink-0">
         <span className="font-bold opacity-90">v2.8.6 • 7v7 Football</span>
         <span className="text-neutral-300">
-          {activeOffenseState === 'P1'
-            ? 'Draw Routes • Swipe RB Left/Right for Run Play • Touch Joystick to Start'
-            : 'Move Highlighted Defender • Touch Joystick to Start'}
+          {tacticalMode === 'PRO'
+            ? (activeOffenseState === 'P1'
+                ? 'Pick Play Above • Touch Joystick to Snap'
+                : 'Pick Defensive Scheme • Touch Joystick to Start')
+            : (activeOffenseState === 'P1'
+                ? 'Draw Routes • Swipe RB Left/Right for Run Play • Touch Joystick to Start'
+                : 'Move Highlighted Defender • Touch Joystick to Start')}
         </span>
       </footer>
       <p className="keyboard-controls hidden sm:block mt-0.5 max-w-[420px] px-2 text-center text-[11px] text-neutral-300 shrink-0">
@@ -1031,13 +1283,13 @@ export default function App() {
       {showTeamModal && (
         <div
           onPointerDown={(e) => e.stopPropagation()}
-          className="absolute inset-0 z-[100] flex flex-col items-center justify-center bg-[#101713]/75 p-3 backdrop-blur-sm"
+          className="fixed inset-0 z-[100] flex flex-col items-center justify-start sm:justify-center bg-[#101713]/90 sm:p-3 backdrop-blur-sm overflow-hidden"
         >
           <div
             role="dialog"
             aria-modal="true"
             aria-labelledby="team-selector-title"
-            className="team-selector-panel flex max-h-[90dvh] w-full max-w-5xl flex-col overflow-hidden rounded-lg border border-[#d5ded7] bg-[#f2f5f2] text-left text-[#1b3026] shadow-2xl"
+            className="team-selector-panel flex flex-col h-full sm:h-auto sm:max-h-[94vh] w-full max-w-5xl rounded-none sm:rounded-xl border-0 sm:border border-[#d5ded7] bg-[#f2f5f2] text-left text-[#1b3026] shadow-2xl overflow-hidden"
           >
             <div className="flex shrink-0 items-center justify-between border-b border-[#dce3dd] bg-white px-4 py-3 sm:px-6">
               <div className="flex items-center gap-3">
@@ -1051,17 +1303,39 @@ export default function App() {
                   <p className="mt-0.5 text-xs text-[#66756b]">{gameMode === 'SEASON' ? '9-Game SEC season + SEC Championship' : 'Single matchup'}</p>
                 </div>
               </div>
-              <button
-                onClick={() => {
-                  if (hasKickedOff) setShowTeamModal(false);
-                  else handleStartGame();
-                }}
-                className="rounded-md p-2 text-[#66756b] transition hover:bg-[#edf1ed] hover:text-[#1b3026]"
-                title="Close / Start"
-                aria-label="Close team selector"
-              >
-                <X size={18} />
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleStartGame();
+                    showAnnouncement(
+                      `${p1TeamState.name.toUpperCase()} VS ${p2TeamState.name.toUpperCase()} - READY FOR KICKOFF! 🏈`,
+                      p1TeamState.primaryColor,
+                      true
+                    );
+                  }}
+                  className="flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-[#c44d2b] to-[#bd5635] px-3.5 py-2 text-xs font-black uppercase tracking-wider text-white shadow-md hover:from-[#b03f1f] hover:to-[#a9492d] active:scale-95 transition cursor-pointer"
+                  title="Kick off game now"
+                >
+                  <span>
+                    {gameMode === 'SEASON'
+                      ? (seasonForDisplay.results.length > 0 ? '🏈 Continue season · Kick off' : '🏈 Start season · Kick off')
+                      : '🏈 Kick off game'}
+                  </span>
+                  <ArrowRight size={14} />
+                </button>
+                <button
+                  onClick={() => {
+                    if (hasKickedOff) setShowTeamModal(false);
+                    else handleStartGame();
+                  }}
+                  className="rounded-md p-2 text-[#66756b] transition hover:bg-[#edf1ed] hover:text-[#1b3026]"
+                  title="Close / Start"
+                  aria-label="Close team selector"
+                >
+                  <X size={18} />
+                </button>
+              </div>
             </div>
 
             {!hasKickedOff && (
@@ -1155,8 +1429,142 @@ export default function App() {
 
             <div className="min-h-0 flex-1 overflow-y-auto">
               <div className="p-3 sm:p-5">
+                {/* Step 1: Choose Gameplay Mode (PRO vs ELITE) */}
+                <div className="mb-4 rounded-xl border border-[#cbd6cd] bg-white p-3.5 shadow-sm text-left">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-black uppercase tracking-wider text-[#1b3026] flex items-center gap-1.5">
+                      <Zap size={14} className="text-[#bd5635]" /> Step 1: Choose Gameplay Mode (Before Kickoff)
+                    </span>
+                    <span className="text-[10px] font-bold text-[#59685f]">
+                      {tacticalMode === 'PRO' ? 'Strategy & Play Calling' : 'Sandbox Playmaker'}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleSetTacticalMode('PRO')}
+                      className={`flex flex-col text-left p-3 rounded-lg border-2 transition cursor-pointer ${
+                        tacticalMode === 'PRO'
+                          ? 'border-amber-500 bg-amber-50/90 shadow-sm ring-1 ring-amber-400'
+                          : 'border-[#dce3dd] bg-white hover:bg-neutral-50 text-neutral-600'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between w-full">
+                        <span className={`text-xs font-black uppercase tracking-wide ${tacticalMode === 'PRO' ? 'text-amber-900' : 'text-neutral-700'}`}>
+                          🏈 PRO MODE
+                        </span>
+                        {tacticalMode === 'PRO' && (
+                          <span className="text-[9px] font-black uppercase bg-amber-500 text-black px-1.5 py-0.5 rounded leading-none">
+                            SELECTED
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] leading-snug text-neutral-600 mt-1">
+                        Pick plays from the 7v7 Playbook! Strategic rock-paper-scissors matchup counters & route concepts.
+                      </p>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleSetTacticalMode('ELITE')}
+                      className={`flex flex-col text-left p-3 rounded-lg border-2 transition cursor-pointer ${
+                        tacticalMode === 'ELITE'
+                          ? 'border-emerald-600 bg-emerald-50/90 shadow-sm ring-1 ring-emerald-500'
+                          : 'border-[#dce3dd] bg-white hover:bg-neutral-50 text-neutral-600'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between w-full">
+                        <span className={`text-xs font-black uppercase tracking-wide ${tacticalMode === 'ELITE' ? 'text-emerald-900' : 'text-neutral-700'}`}>
+                          ✏️ ELITE MODE
+                        </span>
+                        {tacticalMode === 'ELITE' && (
+                          <span className="text-[9px] font-black uppercase bg-emerald-600 text-white px-1.5 py-0.5 rounded leading-none">
+                            SELECTED
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] leading-snug text-neutral-600 mt-1">
+                        Backyard Playmaker! Draw routes in the dirt, drag any player, and freeform line audibles.
+                      </p>
+                    </button>
+                  </div>
+
+                  {tacticalMode === 'PRO' && (
+                    <div className="mt-3 pt-3 border-t border-[#e2eae4]">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
+                        <div>
+                          <div className="flex items-center gap-1.5 text-xs font-black uppercase text-[#1b3026]">
+                            <BookOpen size={13} className="text-amber-600" />
+                            <span>Pick Opening Play from 7v7 Playbook</span>
+                          </div>
+                          <p className="text-[10px] text-[#59685f]">
+                            Tap a play below to pick your opening call:
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setShowProPlaybookCards(true)}
+                          className="self-start sm:self-auto shrink-0 flex items-center gap-1 text-[11px] font-bold text-amber-800 bg-amber-100 hover:bg-amber-200 border border-amber-300 rounded px-2.5 py-1 transition cursor-pointer shadow-sm active:scale-95"
+                          title="Open full interactive Playbook with diagrams and matchup counters"
+                        >
+                          <BookOpen size={12} />
+                          <span>View Diagrams & Counters</span>
+                        </button>
+                      </div>
+
+                      {/* 7-Play Quick Selection Grid */}
+                      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-1.5">
+                        {Object.values(PRO_OFFENSE_PLAYS).map((play) => {
+                          const isSelected = p1OffPlayState === play.id;
+                          let icon = '⚡';
+                          if (play.id === 'PRO_MESH') icon = '🔄';
+                          else if (play.id === 'PRO_VERTS') icon = '🚀';
+                          else if (play.id === 'PRO_DOUBLE_MOVES') icon = '✨';
+                          else if (play.id === 'PRO_SCREEN') icon = '🧱';
+                          else if (play.id === 'PRO_JET_SWEEP') icon = '💨';
+                          else if (play.id === 'PRO_DRAW') icon = '🏃';
+
+                          return (
+                            <button
+                              key={play.id}
+                              type="button"
+                              onClick={() => {
+                                handleSelectOffensePlay(play.id);
+                                sounds.playThrow();
+                              }}
+                              className={`flex flex-col text-left p-2 rounded-lg border-2 transition cursor-pointer ${
+                                isSelected
+                                  ? 'border-amber-500 bg-amber-50 shadow-md ring-2 ring-amber-400/50 scale-[1.02]'
+                                  : 'border-[#dce3dd] bg-white hover:bg-neutral-50 text-neutral-700'
+                              }`}
+                              title={`${play.name} (${play.category}): ${play.description}`}
+                            >
+                              <div className="flex items-center justify-between w-full">
+                                <span className="text-sm">{icon}</span>
+                                {isSelected && (
+                                  <span className="text-[8px] font-black uppercase bg-amber-500 text-black px-1 py-0.2 rounded leading-none">
+                                    CALLED
+                                  </span>
+                                )}
+                              </div>
+                              <span className={`text-[11px] font-black tracking-tight leading-tight mt-1 truncate w-full ${isSelected ? 'text-amber-900' : 'text-neutral-800'}`}>
+                                {play.name}
+                              </span>
+                              <span className="text-[9px] text-[#6b786f] font-semibold mt-0.5 truncate w-full">
+                                {play.category}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Step 2: SEC Teams Selection */}
                 <div className="mb-3 flex items-center justify-between gap-3">
-                  <h3 className="text-sm font-bold text-[#253a2d]">SEC teams <span className="ml-1 text-xs font-normal text-[#718077]">{getAllTeams().length}</span></h3>
+                  <h3 className="text-sm font-bold text-[#253a2d]">Step 2: SEC teams <span className="ml-1 text-xs font-normal text-[#718077]">{getAllTeams().length}</span></h3>
                   <label className="flex w-44 items-center gap-2 rounded-md border border-[#dce3dd] bg-white px-2.5 py-2 text-[#718077] focus-within:border-[#7da78a] sm:w-56">
                     <Search size={15} aria-hidden="true" />
                     <input
@@ -1176,16 +1584,44 @@ export default function App() {
                     const isActiveSide = teamSelectionSide === 'P1' ? isP1 : isP2;
 
                     return (
-                      <button
+                      <div
                         key={team.id}
-                        type="button"
-                        aria-pressed={isActiveSide}
-                        onClick={() => setPendingTeam(team)}
-                        className={`flex items-center gap-2 rounded-md border px-3 py-2 text-left text-sm font-bold transition-colors ${isActiveSide ? 'border-[#246344] bg-[#e8f0ea] text-[#1e573b]' : 'border-[#dce3dd] bg-white text-[#1b3026] hover:bg-[#f8faf8]'} focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#246344]`}
+                        className={`flex items-center justify-between gap-1.5 rounded-lg border px-3 py-2 transition-all ${
+                          isActiveSide
+                            ? 'border-[#246344] bg-[#e8f0ea] text-[#1e573b] shadow-sm ring-2 ring-[#246344]/50'
+                            : 'border-[#dce3dd] bg-white text-[#1b3026] hover:bg-[#f8faf8] hover:border-neutral-400'
+                        }`}
                       >
-                        <HelmetSpritePreview team={team} />
-                        <span>{team.name}</span>
-                      </button>
+                        <button
+                          type="button"
+                          aria-pressed={isActiveSide}
+                          onClick={() => {
+                            if (teamSelectionSide === 'P1') {
+                              handleSelectP1Team(team.id);
+                            } else {
+                              handleSelectP2Team(team.id);
+                            }
+                          }}
+                          className="flex flex-1 items-center gap-2 text-left text-sm font-bold min-w-0 cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#246344]"
+                        >
+                          <HelmetSpritePreview team={team} />
+                          <span>{team.name}</span>
+                          {isActiveSide && (
+                            <span className="shrink-0 rounded bg-[#246344] text-white px-1.5 py-0.5 text-[9px] font-black uppercase ml-auto">
+                              {teamSelectionSide === 'P1' ? 'YOU' : 'CPU'}
+                            </span>
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setPendingTeam(team)}
+                          className="shrink-0 rounded p-1 text-neutral-400 hover:text-neutral-800 hover:bg-black/5 transition cursor-pointer"
+                          title={`View ${team.name} scouting report`}
+                          aria-label={`View ${team.name} scouting report`}
+                        >
+                          <Info size={15} />
+                        </button>
+                      </div>
                     );
                   })}
                 </div>
@@ -1195,10 +1631,48 @@ export default function App() {
               </div>
             </div>
 
-            <div className="shrink-0 border-t border-[#dce3dd] bg-white px-4 py-3 sm:px-6">
-              {!hasKickedOff ? (
-                <div className="flex flex-col gap-2">
+            {/* Sticky, Always-Visible Footer with Prominent Kick Off Game Button */}
+            <div className="shrink-0 sticky bottom-0 z-30 border-t-2 border-[#cbd6cd] bg-white px-4 py-3 sm:px-6 shadow-xl">
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+                <div className="flex items-center justify-between sm:justify-start gap-2 min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[11px] font-bold text-[#59685f]">Mode:</span>
+                    <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider ${
+                      tacticalMode === 'PRO' ? 'bg-amber-500 text-black' : 'bg-emerald-600 text-white'
+                    }`}>
+                      {tacticalMode === 'PRO' ? '🏈 PRO' : '✏️ ELITE'}
+                    </span>
+                  </div>
                   <button
+                    type="button"
+                    onClick={() => handleSetTacticalMode(tacticalMode === 'PRO' ? 'ELITE' : 'PRO')}
+                    className="text-[11px] font-bold text-neutral-500 hover:text-neutral-900 underline cursor-pointer"
+                  >
+                    Switch mode
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  {hasKickedOff && (
+                    <button
+                      type="button"
+                      onClick={() => setShowTeamModal(false)}
+                      className="rounded-md border border-[#cbd6cd] bg-white px-3 py-2.5 text-xs font-bold text-[#405047] transition hover:bg-[#edf1ed] cursor-pointer"
+                    >
+                      Save & resume
+                    </button>
+                  )}
+                  {gameMode === 'SEASON' && seasonForDisplay.results.length > 0 && !seasonComplete && !hasKickedOff && (
+                    <button
+                      type="button"
+                      onClick={() => handleStartNewSeason(p1TeamState.id)}
+                      className="rounded-md border border-[#cbd6cd] bg-white px-3 py-2.5 text-xs font-bold text-[#59685f] transition hover:bg-[#f2f5f2] cursor-pointer"
+                    >
+                      <RotateCcw size={13} className="inline mr-1" /> Start new season
+                    </button>
+                  )}
+                  <button
+                    type="button"
                     onClick={() => {
                       handleStartGame();
                       const isChampionship = gameMode === 'SEASON' && seasonForDisplay.secChampionship?.userQualified && seasonForDisplay.results.length === seasonForDisplay.opponentIds.length;
@@ -1221,36 +1695,21 @@ export default function App() {
                         );
                       }
                     }}
-                    className="flex w-full items-center justify-center gap-2 rounded-md bg-[#bd5635] px-4 py-3 text-sm font-bold text-white transition hover:bg-[#a9492d] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#bd5635]"
+                    className="flex-1 sm:flex-initial flex items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-[#c44d2b] to-[#bd5635] px-6 py-3 text-sm sm:text-base font-black uppercase tracking-wider text-white shadow-xl transition hover:from-[#b03f1f] hover:to-[#a9492d] active:scale-95 cursor-pointer ring-2 ring-[#bd5635]/40"
                   >
-                    {gameMode === 'SEASON'
-                      ? (isChampionshipWeek
-                          ? 'Play SEC Championship Game 🏆'
-                          : seasonComplete
-                            ? 'Start new season'
-                            : seasonForDisplay.results.length
-                              ? `Continue season · Week ${seasonForDisplay.results.length + 1}`
-                              : 'Start season')
-                      : 'Kick off game'} <ArrowRight size={17} />
+                    <span>
+                      {gameMode === 'SEASON'
+                        ? (isChampionshipWeek
+                            ? '🏆 Kick off Championship'
+                            : (seasonForDisplay.results.length > 0
+                                ? `🏈 Kick off game · Continue season (Wk ${seasonForDisplay.results.length + 1})`
+                                : '🏈 Kick off game · Start season'))
+                        : '🏈 Kick off game'}
+                    </span>
+                    <ArrowRight size={18} />
                   </button>
-                  {gameMode === 'SEASON' && seasonForDisplay.results.length > 0 && !seasonComplete && (
-                    <button
-                      type="button"
-                      onClick={() => handleStartNewSeason(p1TeamState.id)}
-                      className="flex w-full items-center justify-center gap-1.5 rounded-md border border-[#cbd6cd] bg-white px-4 py-2 text-xs font-bold text-[#59685f] transition hover:bg-[#f2f5f2] hover:text-[#1b3026]"
-                    >
-                      <RotateCcw size={14} /> Start new season
-                    </button>
-                  )}
                 </div>
-              ) : (
-                <button
-                  onClick={() => setShowTeamModal(false)}
-                  className="flex w-full items-center justify-center gap-2 rounded-md bg-[#bd5635] px-4 py-3 text-sm font-bold text-white transition hover:bg-[#a9492d] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#bd5635]"
-                >
-                  Save and resume <ArrowRight size={17} />
-                </button>
-              )}
+              </div>
             </div>
           </div>
           {pendingTeam && (
@@ -1271,7 +1730,28 @@ export default function App() {
                   <h3 className="mt-4 text-xs font-bold uppercase text-[#a34d32]">Weaknesses</h3>
                   <p className="mt-1 text-sm leading-5 text-[#405047]">{pendingTeam.weaknesses}</p>
                 </div>
-                <div className="mt-6 flex justify-end gap-2">
+                <div className="mt-6 flex flex-wrap justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (teamSelectionSide === 'P1') {
+                        handleSelectP1Team(pendingTeam.id);
+                      } else {
+                        handleSelectP2Team(pendingTeam.id);
+                      }
+                      setPendingTeam(null);
+                      handleStartGame();
+                      showAnnouncement(
+                        `${(teamSelectionSide === 'P1' ? pendingTeam.name : p1TeamState.name).toUpperCase()} READY FOR KICKOFF! 🏈`,
+                        pendingTeam.primaryColor,
+                        true
+                      );
+                    }}
+                    className="flex items-center gap-1.5 rounded-md bg-gradient-to-r from-[#c44d2b] to-[#bd5635] px-4 py-2.5 text-sm font-black uppercase tracking-wider text-white shadow-md hover:from-[#b03f1f] hover:to-[#a9492d] active:scale-95 transition cursor-pointer"
+                  >
+                    <span>🏈 Pick & Kick off</span>
+                    <ArrowRight size={15} />
+                  </button>
                   <button
                     type="button"
                     onClick={() => {
@@ -1282,14 +1762,14 @@ export default function App() {
                       }
                       setPendingTeam(null);
                     }}
-                    className="rounded-md bg-[#246344] px-4 py-2.5 text-sm font-bold text-white transition hover:bg-[#1e573b] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#246344]"
+                    className="rounded-md bg-[#246344] px-4 py-2.5 text-sm font-bold text-white transition hover:bg-[#1e573b] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#246344] cursor-pointer"
                   >
                     pick this team
                   </button>
                   <button
                     type="button"
                     onClick={() => setPendingTeam(null)}
-                    className="rounded-md border border-[#cbd6cd] bg-white px-4 py-2.5 text-sm font-bold text-[#405047] transition hover:bg-[#edf1ed] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#246344]"
+                    className="rounded-md border border-[#cbd6cd] bg-white px-4 py-2.5 text-sm font-bold text-[#405047] transition hover:bg-[#edf1ed] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#246344] cursor-pointer"
                   >
                     close
                   </button>
@@ -1383,18 +1863,16 @@ export default function App() {
               >
                 <Play size={17} /> Continue game
               </button>
-              {activeOffenseState === 'P1' && !isKickoffActive && (
-                <button
-                  onClick={handlePauseAttemptFieldGoal}
-                  className="flex w-full items-center justify-center gap-2 rounded-md border-2 border-amber-400 bg-gradient-to-r from-amber-600 to-yellow-600 px-4 py-3 text-sm font-black uppercase text-white shadow-xl transition hover:from-amber-500 hover:to-yellow-500 active:scale-95 cursor-pointer"
-                >
-                  <Crosshair size={17} />
-                  <span>Attempt Field Goal</span>
-                  <span className="text-xs font-semibold opacity-90">
-                    ({engineRef.current?.getFieldGoalDistance?.() ?? fgMeterState?.distanceYards ?? 40} YD)
-                  </span>
-                </button>
-              )}
+              <button
+                onClick={handlePauseAttemptFieldGoal}
+                className="flex w-full items-center justify-center gap-2 rounded-md border-2 border-amber-400 bg-gradient-to-r from-amber-600 to-yellow-600 px-4 py-3 text-sm font-black uppercase text-white shadow-xl transition hover:from-amber-500 hover:to-yellow-500 active:scale-95 cursor-pointer"
+              >
+                <Crosshair size={17} />
+                <span>Attempt Field Goal</span>
+                <span className="text-xs font-semibold opacity-90">
+                  ({engineRef.current?.getFieldGoalDistance?.() ?? fgMeterState?.distanceYards ?? 40} YD)
+                </span>
+              </button>
               <button
                 onClick={handleReturnToMainMenu}
                 className="flex w-full items-center justify-center gap-2 rounded-md border border-[#bd5635] bg-[#32170f] px-4 py-3 text-sm font-bold text-[#ffd8ca] transition hover:bg-[#512116] cursor-pointer"
@@ -1605,6 +2083,23 @@ export default function App() {
 
       {showTutorial && (
         <RealPlayTutorial onFinish={finishTutorial} />
+      )}
+
+      {showProPlaybookCards && (
+        <ProPlaybookCards
+          activeOffensePlay={p1OffPlayState}
+          activeDefensePlay={p1DefPlayState}
+          initialTab={activeOffenseState === 'P2' ? 'DEFENSE' : 'OFFENSE'}
+          onSelectOffensePlay={(playId) => {
+            handleSelectOffensePlay(playId);
+            showAnnouncement(`PLAY CALLED: ${PRO_OFFENSE_PLAYS[playId]?.name.toUpperCase() || playId} 🏈`, '#ffcc00');
+          }}
+          onSelectDefensePlay={(playId) => {
+            handleSelectDefensePlay(playId);
+            showAnnouncement(`DEFENSE: ${PRO_DEFENSE_PLAYS[playId]?.name.toUpperCase() || playId} 🛡️`, '#00ffff');
+          }}
+          onClose={() => setShowProPlaybookCards(false)}
+        />
       )}
 
     </div>

@@ -158,6 +158,97 @@ export const offensivePlaybook: Record<string, PlayOption> = {
     risk: 'SAFE',
     routeType: 'SHORT',
     expectedGain: [0, 0]
+  },
+  PRO_QUICK_SLANTS: {
+    name: 'Quick Slants',
+    type: 'PASS',
+    alignment: 'SPREAD',
+    left: 'SLANT-L',
+    right: 'SLANT-R',
+    center: 'SLANT-R',
+    rbRoute: 'FLAT',
+    desc: 'Quick 3-step drop, slot receivers cross underneath zone coverage for fast yardage',
+    risk: 'SAFE',
+    routeType: 'SHORT',
+    expectedGain: [4, 9]
+  },
+  PRO_MESH: {
+    name: 'Mesh Concept',
+    type: 'PASS',
+    alignment: 'SPREAD',
+    left: 'CROSS-R',
+    right: 'CROSS-L',
+    center: 'HITCH',
+    rbRoute: 'FLAT',
+    desc: 'Two receivers cross underneath at shallow depths to create a natural rub/pick against man coverage',
+    risk: 'SAFE',
+    routeType: 'SHORT',
+    expectedGain: [4, 9]
+  },
+  PRO_VERTS: {
+    name: 'Verts / 4-Verticals',
+    type: 'PASS',
+    alignment: 'SPREAD',
+    left: 'GO',
+    right: 'GO',
+    center: 'GO',
+    rbRoute: 'WHEEL',
+    desc: 'All four primary receivers run vertical go-routes to stress deep zones and safeties',
+    risk: 'EXPLOSIVE',
+    routeType: 'VERTICAL',
+    expectedGain: [15, 35]
+  },
+  PRO_DOUBLE_MOVES: {
+    name: 'Double Moves / Out-and-Up',
+    type: 'PASS',
+    alignment: 'SPREAD',
+    left: 'FLAG-L',
+    right: 'FLAG-R',
+    center: 'POST-R',
+    rbRoute: 'BLOCK',
+    desc: 'Wide receiver fakes an out route before breaking deep downfield to beat flat or man coverage',
+    risk: 'EXPLOSIVE',
+    routeType: 'VERTICAL',
+    expectedGain: [15, 35]
+  },
+  PRO_SCREEN: {
+    name: 'Screen / Bubble Screen',
+    type: 'PASS',
+    alignment: 'TRIPS',
+    left: 'BLOCK',
+    right: 'HITCH',
+    center: 'BLOCK',
+    rbRoute: 'FLAT',
+    desc: 'Quick perimeter swing pass behind a wall of blockers to catch aggressive linebackers/rushers off guard',
+    risk: 'SAFE',
+    routeType: 'SHORT',
+    expectedGain: [3, 8]
+  },
+  PRO_JET_SWEEP: {
+    name: 'Jet Sweep',
+    type: 'SWEEP',
+    alignment: 'SPREAD',
+    left: 'GO',
+    right: 'GO',
+    center: 'BLOCK',
+    rbRoute: 'FLAT',
+    desc: 'Slot receiver motions across the backfield at full speed and takes a handoff heading toward the edge',
+    risk: 'BALANCED',
+    routeType: 'MEDIUM',
+    expectedGain: [4, 12]
+  },
+  PRO_DRAW: {
+    name: 'Draw / RB Fake-Pass Run',
+    type: 'ISO',
+    alignment: 'SPREAD',
+    left: 'GO',
+    right: 'GO',
+    center: 'BLOCK',
+    rbRoute: 'FLAT',
+    desc: 'Play-action pass look designed to freeze coverage before the quarterback hands off late up the middle',
+    risk: 'BALANCED',
+    routeType: 'MEDIUM',
+    expectedGain: [4, 12]
   }
 };
 
@@ -187,6 +278,69 @@ export const defensivePlaybook: Record<string, DefOption> = {
     vulnerableRouteType: 'VERTICAL'
   }
 };
+
+export const proDefensivePlaybook: Record<string, DefOption> = {
+  PRO_COVER2_HARD_FLAT: {
+    name: 'Cover 2 Hard Flat',
+    desc: 'Corners and flat defenders jump short routes immediately; vulnerable over top',
+    weakness: 'deep sideline seams and vertical routes',
+    vulnerableRouteType: 'VERTICAL'
+  },
+  PRO_COVER1_MAN: {
+    name: 'Cover 1 Man-Free',
+    desc: 'Single-high safety with man-to-man coverage across the board. Great for locking down short routes, vulnerable to deep double-moves',
+    weakness: 'double-moves and crossing rubs',
+    vulnerableRouteType: 'VERTICAL'
+  },
+  PRO_COVER3_DEEP: {
+    name: 'Cover 3 Deep Zone',
+    desc: 'Three deep defenders split the field into thirds; excellent for preventing deep bombs, vulnerable underneath',
+    weakness: 'underneath crossers and flat routes',
+    vulnerableRouteType: 'SHORT'
+  },
+  PRO_COVER4_QUARTERS: {
+    name: 'Cover 4 Quarters',
+    desc: 'Four deep defenders match vertical routes. Excellent against deep passes, but soft against runs and quick underneath routes',
+    weakness: 'draw runs, jet sweeps, and underneath routes',
+    vulnerableRouteType: 'SHORT'
+  },
+  PRO_BLITZ_ZERO: {
+    name: 'Aggressive Blitz / Zero Coverage',
+    desc: 'Heavy pressure scheme with zero deep safeties. Shuts down runs and quick passes instantly, but high risk against deep plays',
+    weakness: 'deep vertical routes (4-verts, double-moves)',
+    vulnerableRouteType: 'VERTICAL'
+  },
+  PRO_RUN_STOP_BOX: {
+    name: 'Run-Stop 6-1 / Box Stack',
+    desc: 'Linebackers and defensive backs crowd the line of scrimmage to completely stuff the run game',
+    weakness: 'deep vertical passing plays',
+    vulnerableRouteType: 'VERTICAL'
+  },
+  PRO_TAMPA2: {
+    name: 'Cover 2 Zone-Vapor / Tampa 2',
+    desc: 'Middle linebacker drops deep to help safeties while underneath zones play moderate depth. Good generalist defense',
+    weakness: 'sideline boundary windows and overloaded seams',
+    vulnerableRouteType: 'MEDIUM'
+  }
+};
+
+export const allDefensivePlaybook: Record<string, DefOption> = {
+  ...defensivePlaybook,
+  ...proDefensivePlaybook
+};
+
+export const eliteOffensiveKeys = ['SHORT_PASS', 'CONTROL_PASS', 'DEEP_SHOT', 'ISO', 'SWEEP', 'POWER', 'MESH', 'SMASH', 'POST_WHEEL'];
+export const proOffensiveKeys = ['PRO_QUICK_SLANTS', 'PRO_MESH', 'PRO_VERTS', 'PRO_DOUBLE_MOVES', 'PRO_SCREEN', 'PRO_JET_SWEEP', 'PRO_DRAW'];
+export const eliteDefensiveKeys = ['COVER2', 'ZONE34', 'ZONE232', 'ZONE151'];
+export const proDefensiveKeys = [
+  'PRO_COVER2_HARD_FLAT',
+  'PRO_COVER1_MAN',
+  'PRO_COVER3_DEEP',
+  'PRO_COVER4_QUARTERS',
+  'PRO_BLITZ_ZERO',
+  'PRO_RUN_STOP_BOX',
+  'PRO_TAMPA2'
+];
 
 export const defensiveKeys = Object.keys(defensivePlaybook);
 export const offensiveKeys = Object.keys(offensivePlaybook);
