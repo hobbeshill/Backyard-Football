@@ -476,6 +476,7 @@ export default function App() {
   };
 
   const handlePauseAttemptFieldGoal = () => {
+    if (activeOffenseState !== 'P1' || isKickoffActive) return;
     setShowPauseMenu(false);
     if (engineRef.current) {
       engineRef.current.setPaused(false);
@@ -1382,16 +1383,18 @@ export default function App() {
               >
                 <Play size={17} /> Continue game
               </button>
-              <button
-                onClick={handlePauseAttemptFieldGoal}
-                className="flex w-full items-center justify-center gap-2 rounded-md border-2 border-amber-400 bg-gradient-to-r from-amber-600 to-yellow-600 px-4 py-3 text-sm font-black uppercase text-white shadow-xl transition hover:from-amber-500 hover:to-yellow-500 active:scale-95 cursor-pointer"
-              >
-                <Crosshair size={17} />
-                <span>Attempt Field Goal</span>
-                <span className="text-xs font-semibold opacity-90">
-                  ({engineRef.current?.getFieldGoalDistance?.() ?? fgMeterState?.distanceYards ?? 40} YD)
-                </span>
-              </button>
+              {activeOffenseState === 'P1' && !isKickoffActive && (
+                <button
+                  onClick={handlePauseAttemptFieldGoal}
+                  className="flex w-full items-center justify-center gap-2 rounded-md border-2 border-amber-400 bg-gradient-to-r from-amber-600 to-yellow-600 px-4 py-3 text-sm font-black uppercase text-white shadow-xl transition hover:from-amber-500 hover:to-yellow-500 active:scale-95 cursor-pointer"
+                >
+                  <Crosshair size={17} />
+                  <span>Attempt Field Goal</span>
+                  <span className="text-xs font-semibold opacity-90">
+                    ({engineRef.current?.getFieldGoalDistance?.() ?? fgMeterState?.distanceYards ?? 40} YD)
+                  </span>
+                </button>
+              )}
               <button
                 onClick={handleReturnToMainMenu}
                 className="flex w-full items-center justify-center gap-2 rounded-md border border-[#bd5635] bg-[#32170f] px-4 py-3 text-sm font-bold text-[#ffd8ca] transition hover:bg-[#512116] cursor-pointer"

@@ -1,10 +1,10 @@
 import type { Ball, DefensiveAssignment, Entity, FumbleBall } from './types';
 import { defensiveKeys, defensivePlaybook, middleRoutes, offensiveKeys, offensivePlaybook, outsideRoutes, runningBackRoutes, wrRoutes } from './playbook';
 import { alignDefenderAcrossFromReceiver, alignDefenderAcrossFromRunningBack, alignDefenderToZone, alignDefenders, chooseCpuDefensiveAssignments, constrainDefendersToFieldSide, getBlitzAlignmentY, getBracketCoverageTarget, getDefensiveLineAlignmentY, matchCpuDefendersToReceivers, separateDefenderAlignments } from './defense';
-import { evaluateCpuOffensiveAudibles, evaluateCpuBallCarrierMoves, isCpuPressureRecognized, shouldCpuGoForItOnFourthDown, shouldCpuReleasePass, shouldCpuScramble, scoreRunBlockTarget } from './ai';
+import { evaluateCpuOffensiveAudibles, evaluateCpuBallCarrierMoves, getSuccessfulPlayCounter, isCpuPressureRecognized, shouldCpuGoForItOnFourthDown, shouldCpuReleasePass, shouldCpuScramble, scoreRunBlockTarget } from './ai';
 import { createFumbleBall, getCarrierFumbleChance } from './fumbles';
-import { canEngagePassBlock, clampPlayerToFieldY, createSimulationClock, distToSegment, GAME_SPEED_SCALE, getBallCarrierRunSpeed, getDesignedRunLateralBias, getFatigueSpeedMultiplier, getPassBlockBaseHoldFrames, getPassBlockHoldFrames, getDirectionalInput, getReturnPursuitSpeed, getReturnTeamBlockers, getUserRunnerVelocity, getRunPursuitMovement, getUserDefenderSpeed, isRusherActivelyBlocked, moveToward, resolveCollisions, shouldApplyRunBlockStun, shouldHoldPassBlock, updatePlayerStamina, updateReceiverTargetStamina, updateRouteMovement, USER_CONTROL_SPEED_MULTIPLIER } from './movement';
-import { resolvePlayResult, isSafety, calculateBrokenTackleChance, calculateYardsToGo, getDriveStartY, getSnapBallPosition, getPassArcHeight, getPassArcMaxHeight, getPassFlightFrames, findTappedPassReceiver, shouldReleaseUserPass, getPassLeadTarget, getRoutePassLeadTarget, canDefenderDeflectPass, canTackleQuarterback, resolveCatchContestOutcome, evaluateQbThrowAccuracy, getCpuThrowAimVariance, calculateKickoffFlight, calculatePuntFlight, getTouchbackYardLineY, getKickoffLineY, getDefenderPassReachHeight, isPlayerOutOfBounds, calculateFieldGoalFlight, getFieldGoalDistanceYards, GOALPOST_CENTER_X, GOALPOST_LEFT_UPRIGHT_X, GOALPOST_RIGHT_UPRIGHT_X, GOALPOST_CROSSBAR_HEIGHT_Z } from './rules';
+import { canEngagePassBlock, clampPlayerToFieldY, createSimulationClock, distToSegment, GAME_SPEED_SCALE, getBallCarrierRunSpeed, getDesignedRunLateralBias, getFatigueSpeedMultiplier, getPassBlockBaseHoldFrames, getPassBlockHoldFrames, getDirectionalInput, getReturnPursuitSpeed, getReturnTeamBlockers, getUserRunnerVelocity, getRunPursuitMovement, getUserDefenderSpeed, isRusherActivelyBlocked, moveToward, resolveCollisions, shouldApplyRunBlockStun, shouldHoldPassBlock, updatePlayerStamina, updateReceiverTargetStamina, updateRunningBackStamina, updateRouteMovement, USER_CONTROL_SPEED_MULTIPLIER } from './movement';
+import { resolvePlayResult, isSafety, calculateBrokenTackleChance, calculateYardsToGo, getDriveStartY, getSnapBallPosition, getPassArcHeight, getFieldGoalBallHeight, getPassArcMaxHeight, getPassFlightFrames, findTappedPassReceiver, shouldReleaseUserPass, getPassLeadTarget, getRoutePassLeadTarget, canDefenderDeflectPass, canTackleQuarterback, resolveCatchContestOutcome, evaluateQbThrowAccuracy, getCpuThrowAimVariance, calculateKickoffFlight, calculatePuntFlight, getTouchbackYardLineY, getInterceptionTouchbackY, getKickoffLineY, getDefenderPassReachHeight, isPlayerOutOfBounds, calculateFieldGoalFlight, getFieldGoalDistanceYards, GOALPOST_CENTER_X, GOALPOST_LEFT_UPRIGHT_X, GOALPOST_RIGHT_UPRIGHT_X, GOALPOST_CROSSBAR_HEIGHT_Z } from './rules';
 import { sounds } from './sound';
 import { evaluateDirtSwipeGesture, drawDirtSwipeGesture } from './chalkMenu';
 import { getHelmetDesign, type HelmetDesign } from './helmetDesigns';
@@ -400,6 +400,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     down: number;
     distance: number;
     yardsGained: number;
+    isSuccessful?: boolean;
     isQbRun?: boolean;
     targetWasRb?: boolean;
     isFlatPass?: boolean;
@@ -1031,6 +1032,9 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   function getAdaptiveDefensiveCall(): string {
     const totalPlays = userPlayHistory.length;
 
+    const successfulCounter = getSuccessfulPlayCounter(userPlayHistory);
+    if (successfulCounter && Math.random() < 0.75) return successfulCounter;
+
     // 1. Situational down & distance rules
     // 3rd & Long or 4th & Long (> 6 yards): player must target first down marker
     if ((currentDown === 3 || currentDown === 4) && yardsToGo > 6) {
@@ -1499,12 +1503,13 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       return;
     }
 
+    const touchbackY = getInterceptionTouchbackY(y, fieldHeight, endZoneHeight, attackDirection);
     gameClockRunning = true;
     activeOffense = activeOffense === 'P1' ? 'P2' : 'P1';
     activeDefense = activeDefense === 'P1' ? 'P2' : 'P1';
     setActiveOffenseState(activeOffense);
     attackDirection *= -1;
-    lineOfScrimmageY = y;
+    lineOfScrimmageY = touchbackY ?? y;
     currentDown = 1;
     yardsToGo = 10;
     firstDownMarkerY = lineOfScrimmageY + (100 * attackDirection);
@@ -1515,7 +1520,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     qb.hasBall = false;
     returner.hasBall = true;
     returner.x = x;
-    returner.y = y;
+    returner.y = lineOfScrimmageY;
     returner.vx = 0;
     returner.vy = 0;
     returner.tackleImmunity = 0;
@@ -1524,6 +1529,11 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     isAiming = false;
     ball = null;
     playClock = 0;
+    if (touchbackY !== null) {
+      phase = 'DEAD';
+      handlePlayEnd(touchbackY, 'TACKLE', undefined, undefined, true);
+      return;
+    }
     phase = 'RUNNING';
     screenShakeTimer = 26;
     sounds.playCatch();
@@ -1612,7 +1622,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     }, 1600);
   }
 
-  function handlePlayEnd(endingY: number, resultType: string, customMessage?: string, customColor?: string) {
+  function handlePlayEnd(endingY: number, resultType: string, customMessage?: string, customColor?: string, interceptionTouchback = false) {
     if (playEnding) return;
     if (options.tutorial) {
       gameClockRunning = false;
@@ -1641,6 +1651,9 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     playEnding = true;
     const endedInterceptionReturn = isInterceptionReturn;
     const endedOffense = activeOffense;
+    const endedDown = currentDown;
+    const endedDistance = yardsToGo;
+    const endedPlayKey = endedOffense === 'P1' ? p1OffPlay : p2OffPlay;
     receivers.forEach(receiver => {
       if (!receiver.rosterKey) return;
       receiver.stamina = updateReceiverTargetStamina(receiver.stamina ?? 100, Boolean(receiver.targetedThisPlay));
@@ -1652,8 +1665,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     isSpecialTeamsReturn = false;
     specialTeamsReturnType = null;
 
-    const activePlayKey = (activeOffense === 'P1') ? p1OffPlay : p2OffPlay;
-    const matchup = getPlayMatchup(activePlayKey, getOpponentDefenseKey());
+    const matchup = getPlayMatchup(endedPlayKey, getOpponentDefenseKey());
     const playResult = resolvePlayResult({
       lineOfScrimmageY,
       endingY,
@@ -1663,6 +1675,23 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       endZoneHeight
     });
     const yardsGained = playResult.yardsGained;
+    const successThreshold = endedDown === 1
+      ? Math.max(3, Math.ceil(endedDistance * 0.4))
+      : endedDown === 2
+        ? Math.max(2, Math.ceil(endedDistance * 0.6))
+        : endedDistance;
+    const isSuccessful = playResult.isTouchdown || yardsGained >= successThreshold;
+
+    Object.keys(rosterStamina).forEach(rosterKey => {
+      if (!rosterKey.endsWith(':rb')) return;
+      const wasCarrier = rosterKey === rb?.rosterKey && rb.team === endedOffense && activeEntity === rb;
+      rosterStamina[rosterKey] = updateRunningBackStamina(
+        rosterStamina[rosterKey],
+        wasCarrier,
+        wasCarrier ? yardsGained : 0
+      );
+      if (rosterKey === rb?.rosterKey) rb.stamina = rosterStamina[rosterKey];
+    });
 
     if (isSafety(endingY, attackDirection, fieldHeight, endZoneHeight, resultType)) {
       gameClockRunning = false;
@@ -1806,7 +1835,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       const newOffenseName = (newOffense === 'P1' ? p1Team : p2Team).name.toUpperCase();
       const isUser = newOffense === 'P1';
       showAnnouncement(
-        `INTERCEPTION RETURNED FOR ${yardsGained} YARDS! 🏈🛡️`,
+        interceptionTouchback ? 'INTERCEPTION TOUCHBACK! BALL AT THE 20-YARD LINE 🏈🛡️' : `INTERCEPTION RETURNED FOR ${yardsGained} YARDS! 🏈🛡️`,
         isUser ? '#00ffff' : '#ff4444',
         true,
         {
@@ -1825,11 +1854,12 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       const isQbRun = Boolean(activeEntity === qb);
       const isRbPlay = Boolean(activeEntity === rb || lastTargetWasRb);
       userPlayHistory.push({
-        play: p1OffPlay,
-        isPass: offensivePlaybook[p1OffPlay]?.type === 'PASS',
-        down: currentDown,
-        distance: yardsToGo,
+        play: endedPlayKey,
+        isPass: offensivePlaybook[endedPlayKey]?.type === 'PASS',
+        down: endedDown,
+        distance: endedDistance,
         yardsGained,
+        isSuccessful,
         isQbRun,
         targetWasRb: isRbPlay,
         isFlatPass: Boolean(isRbPlay && (rb?.routeType === 'FLAT' || (rb && Math.abs(rb.x - 170) > 45))),
@@ -1845,11 +1875,12 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       if (userPlayHistory.length > 12) userPlayHistory.shift();
     } else {
       cpuPlayHistory.push({
-        play: p2OffPlay,
-        isPass: offensivePlaybook[p2OffPlay]?.type === 'PASS',
-        down: currentDown,
-        distance: yardsToGo,
+        play: endedPlayKey,
+        isPass: offensivePlaybook[endedPlayKey]?.type === 'PASS',
+        down: endedDown,
+        distance: endedDistance,
         yardsGained,
+        isSuccessful,
         isQbRun: activeEntity === qb,
         targetWasRb: activeEntity === rb || lastTargetWasRb,
         routes: { left: receivers[0]?.routeType, slot: receivers[1]?.routeType, center: centerReceiver?.routeType, right: receivers[2]?.routeType, rb: rb?.routeType }
@@ -2093,6 +2124,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       receivingTeam: puntingTeam === 'P1' ? 'P2' : 'P1',
       kickPower: power,
       fgDistance: flight.distanceYards,
+      fgArrivalZ: flight.arrivalZ,
       fgIsGood: flight.isGood,
       fgMissReason: flight.missReason
     };
@@ -2710,7 +2742,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       }
     },
     callFieldGoal: (force = false) => {
-      if (gameOver) return;
+      if (gameOver || activeOffense !== 'P1' || (force && isKickoffPhase)) return;
       if (!force && (activeOffense !== 'P1' || phase !== 'PRE_SNAP' || isKickoffPhase)) return;
       if (force) {
         isKickoffPhase = false;
@@ -5576,7 +5608,9 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       ball.y += ball.vy;
 
       const progress = ball.currentFrame / ball.flightFrames;
-      ball.z = getPassArcHeight(ball.maxZ, progress);
+      ball.z = ball.isFieldGoal
+        ? getFieldGoalBallHeight(ball.maxZ, ball.fgArrivalZ ?? 14, progress)
+        : getPassArcHeight(ball.maxZ, progress);
 
       if (ball.isFieldGoal) {
         // Special Teams Field Goal in flight
@@ -5598,9 +5632,9 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           }
         });
 
-        // Arrival at or past the goalpost uprights plane
-        const passedEndLine = attackDirection === -1 ? ball.y <= 0 : ball.y >= fieldHeight;
-        if (progress >= 1.0 || ball.currentFrame >= ball.flightFrames || passedEndLine) {
+        // Let the ball visibly clear the goalpost plane before resolving the kick.
+        const clearedGoalposts = attackDirection === -1 ? ball.y <= -20 : ball.y >= fieldHeight + 20;
+        if (clearedGoalposts) {
           resolveFieldGoalResult();
           return;
         }

@@ -2,7 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   calculateFieldGoalFlight,
+  getFieldGoalBallHeight,
   getFieldGoalDistanceYards,
+  getInterceptionTouchbackY,
   GOALPOST_CENTER_X,
   GOALPOST_LEFT_UPRIGHT_X,
   GOALPOST_RIGHT_UPRIGHT_X,
@@ -23,6 +25,22 @@ test('Field goals can be made from up to 60 yards out with accurate aim and powe
     'Ball must pass between the uprights'
   );
   assert.equal(fg60.missReason, undefined);
+});
+
+test('Field goal flight reaches the calculated height at the uprights', () => {
+  const goodKick = calculateFieldGoalFlight(42, 0, 0.85, -1);
+  const shortKick = calculateFieldGoalFlight(52, 0, 0.50, -1);
+
+  assert.equal(getFieldGoalBallHeight(goodKick.maxZ, goodKick.arrivalZ, 1), goodKick.arrivalZ);
+  assert.equal(getFieldGoalBallHeight(goodKick.maxZ, goodKick.arrivalZ, 1.1), goodKick.arrivalZ);
+  assert.ok(getFieldGoalBallHeight(goodKick.maxZ, goodKick.arrivalZ, 1) >= GOALPOST_CROSSBAR_HEIGHT_Z);
+  assert.ok(getFieldGoalBallHeight(shortKick.maxZ, shortKick.arrivalZ, 1) < GOALPOST_CROSSBAR_HEIGHT_Z);
+});
+
+test('End-zone interceptions spot the new offense at its own 20-yard line', () => {
+  assert.equal(getInterceptionTouchbackY(80, 1200, 100, -1), 300);
+  assert.equal(getInterceptionTouchbackY(1120, 1200, 100, 1), 900);
+  assert.equal(getInterceptionTouchbackY(300, 1200, 100, -1), null);
 });
 
 test('Field goals become more difficult as distance increases (lateral drift and power requirements scale with distance)', () => {
@@ -210,7 +228,7 @@ test('Field goal execution launches ball with isFieldGoal flag and proper target
   if (cleanup) cleanup();
 });
 
-test('Pause menu anytime Field Goal allows user to attempt FG at any time with forced alignment', () => {
+test('Pause menu Field Goal is rejected on defense and available to P1 on offense', () => {
   let engineHandle: any = null;
   let fgMeterState: any = null;
   let p1OffPlay = 'SHORT_PASS';
@@ -240,7 +258,17 @@ test('Pause menu anytime Field Goal allows user to attempt FG at any time with f
   // Meter should be null initially on kickoff
   assert.equal(fgMeterState, null, 'Field goal meter must be null on kickoff');
 
-  // Attempt FG anytime from Pause menu
+  // A forced pause-menu attempt must not interrupt a kickoff.
+  engineHandle.callFieldGoal(true);
+  assert.notEqual(engineHandle.p1OffPlay, 'FIELD_GOAL');
+  assert.equal(engineHandle.isKickoffActive(), true);
+
+  // It must also be rejected when P1 is on defense during a live possession.
+  engineHandle.setPossessionForTest?.('P2');
+  engineHandle.callFieldGoal(true);
+  assert.notEqual(engineHandle.p1OffPlay, 'FIELD_GOAL');
+
+  engineHandle.setPossessionForTest?.('P1');
   engineHandle.callFieldGoal(true);
   assert.equal(engineHandle.p1OffPlay, 'FIELD_GOAL');
   assert.equal(p1OffPlay, 'FIELD_GOAL');

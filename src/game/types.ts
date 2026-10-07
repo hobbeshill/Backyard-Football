@@ -126,6 +126,7 @@ export interface Ball {
   isPunt?: boolean;
   isFieldGoal?: boolean;
   fgDistance?: number;
+  fgArrivalZ?: number;
   fgIsGood?: boolean;
   fgMissReason?: 'WIDE_LEFT' | 'WIDE_RIGHT' | 'SHORT' | 'UPRIGHT_DOINK';
   kickingTeam?: 'P1' | 'P2';

@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { isCpuPressureRecognized, scoreRunBlockTarget, shouldCpuReleasePass, shouldCpuScramble } from './ai';
+import { getSuccessfulPlayCounter, isCpuPressureRecognized, scoreRunBlockTarget, shouldCpuReleasePass, shouldCpuScramble } from './ai';
 import { alignDefenderAcrossFromReceiver, alignDefenderAcrossFromRunningBack, alignDefenderToZone, alignDefenders, chooseCpuDefensiveAssignments, constrainDefendersToFieldSide, getBlitzAlignmentY, getBracketCoverageTarget, getDefensiveLineAlignmentY, matchCpuDefendersToReceivers, separateDefenderAlignments } from './defense';
 import { getCarrierFumbleChance } from './fumbles';
 import { calculateYardsToGo, canDefenderDeflectPass, canTackleQuarterback, findTappedPassReceiver, getCatchCompletionChance, getDefenderPassReachHeight, getDriveStartY, getSnapBallPosition, getPassArcHeight, getPassArcMaxHeight, getPassFlightFrames, getPassLeadTarget, getRoutePassLeadTarget, isSafety, resolveCatchContestOutcome, resolvePlayResult } from './rules';
-import { canEngagePassBlock, clampPlayerToFieldY, GAME_SPEED_SCALE, getBallCarrierRunSpeed, getFatigueSpeedMultiplier, getPassBlockBaseHoldFrames, getPassBlockHoldFrames, getRunDirectionSpeedFactor, getRunPursuitMovement, getUserDefenderSpeed, isRusherActivelyBlocked, moveToward, shouldHoldPassBlock, updatePlayerStamina, updateReceiverTargetStamina, updateRouteMovement, USER_CONTROL_SPEED_MULTIPLIER } from './movement';
+import { canEngagePassBlock, clampPlayerToFieldY, GAME_SPEED_SCALE, getBallCarrierRunSpeed, getFatigueSpeedMultiplier, getPassBlockBaseHoldFrames, getPassBlockHoldFrames, getRunDirectionSpeedFactor, getRunPursuitMovement, getUserDefenderSpeed, isRusherActivelyBlocked, moveToward, shouldHoldPassBlock, updatePlayerStamina, updateReceiverTargetStamina, updateRunningBackStamina, updateRouteMovement, USER_CONTROL_SPEED_MULTIPLIER } from './movement';
 import type { Entity } from './types';
 
 test('coverage reduces catches smoothly and touching players are not wide open', () => {
@@ -74,6 +74,39 @@ test('fatigue follows workload and endurance, with bounded recovery and speed pe
   assert.equal(updatePlayerStamina(99, 0, 1, 5), 100);
   assert.equal(getFatigueSpeedMultiplier(100), 1);
   assert.equal(getFatigueSpeedMultiplier(-20), 0.65);
+});
+
+test('running backs tire on carries and recover fully after two plays off', () => {
+  let stamina = updateRunningBackStamina(100, true, 30);
+  assert.equal(stamina, 29);
+  assert.ok(getFatigueSpeedMultiplier(stamina) < 0.9);
+  stamina = updateRunningBackStamina(stamina, false);
+  assert.equal(stamina, 79);
+  stamina = updateRunningBackStamina(stamina, false);
+  assert.equal(stamina, 100);
+  assert.equal(updateRunningBackStamina(100, true, 5), 59);
+});
+
+test('CPU counters repeated successful run, deep-pass, short-pass, and RB-target tendencies', () => {
+  const successful = (play: string, isPass: boolean, extra: Record<string, unknown> = {}) => ({
+    play, isPass, isSuccessful: true, ...extra
+  });
+  assert.equal(getSuccessfulPlayCounter([
+    successful('POWER', false), successful('SWEEP', false)
+  ]), 'ZONE34');
+  assert.equal(getSuccessfulPlayCounter([
+    successful('DEEP_SHOT', true), successful('POST_WHEEL', true)
+  ]), 'ZONE232');
+  assert.equal(getSuccessfulPlayCounter([
+    successful('MESH', true), successful('SHORT_PASS', true)
+  ]), 'ZONE151');
+  assert.equal(getSuccessfulPlayCounter([
+    successful('CONTROL_PASS', true, { targetWasRb: true }),
+    successful('SHORT_PASS', true, { isFlatPass: true })
+  ]), 'ZONE151');
+  assert.equal(getSuccessfulPlayCounter([
+    successful('POWER', false), { play: 'ISO', isPass: false, isSuccessful: false }
+  ]), null);
 });
 
 test('three WR targets exhaust stamina and two untargeted plays restore it', () => {

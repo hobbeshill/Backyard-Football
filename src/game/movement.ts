@@ -15,6 +15,11 @@ export function updateReceiverTargetStamina(stamina: number, wasTargeted: boolea
   return Math.max(0, Math.min(100, stamina + (wasTargeted ? -100 / 3 : 50)));
 }
 
+export function updateRunningBackStamina(stamina: number, wasCarrier: boolean, yardsCarried = 0): number {
+  const change = wasCarrier ? -(35 + Math.max(0, yardsCarried) * 1.2) : 50;
+  return Math.max(0, Math.min(100, stamina + change));
+}
+
 export function createSimulationClock() {
   let lastTimestamp: number | null = null;
   let accumulatedTime = 0;

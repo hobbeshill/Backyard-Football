@@ -94,6 +94,11 @@ export function getPassArcHeight(maxHeight: number, progress: number): number {
   return Math.max(2, baseHeight + arcHeight);
 }
 
+export function getFieldGoalBallHeight(maxHeight: number, arrivalHeight: number, progress: number): number {
+  const clampedProgress = Math.max(0, Math.min(1, progress));
+  return getPassArcHeight(maxHeight, clampedProgress) + (arrivalHeight - 14) * clampedProgress;
+}
+
 export function getDefenderPassReachHeight(defenderType?: string): number {
   return defenderType === 'DL' ? 14 : 18;
 }
@@ -366,6 +371,19 @@ export function getTouchbackYardLineY(
   // AttackDirection 1: moving down towards y=fieldHeight. Own goal line is at endZoneHeight. 25 yards down: + 250
   const ownGoalLineY = attackDirection === -1 ? (fieldHeight - endZoneHeight) : endZoneHeight;
   return ownGoalLineY + (touchbackYards * 10 * attackDirection);
+}
+
+export function getInterceptionTouchbackY(
+  interceptionY: number,
+  fieldHeight: number,
+  endZoneHeight: number,
+  offenseAttackDirection: number
+): number | null {
+  const wasInterceptedInEndZone = offenseAttackDirection === -1
+    ? interceptionY <= endZoneHeight
+    : interceptionY >= fieldHeight - endZoneHeight;
+  if (!wasInterceptedInEndZone) return null;
+  return getTouchbackYardLineY(fieldHeight, endZoneHeight, -offenseAttackDirection, 20);
 }
 
 export function getKickoffLineY(

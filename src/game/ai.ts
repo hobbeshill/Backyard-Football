@@ -17,6 +17,40 @@ export interface CpuFourthDownSituation {
   scoreDifferential: number;
 }
 
+export interface CpuOffensiveTendencyPlay {
+  play: string;
+  isPass: boolean;
+  isSuccessful?: boolean;
+  isQbRun?: boolean;
+  targetWasRb?: boolean;
+  isFlatPass?: boolean;
+  routes?: Record<string, string | undefined>;
+}
+
+export function getSuccessfulPlayCounter(recentPlays: readonly CpuOffensiveTendencyPlay[]): string | null {
+  const sample = recentPlays.slice(-6);
+  const isDeepPass = (play: CpuOffensiveTendencyPlay) => play.isPass && (
+    ['DEEP_SHOT', 'POST_WHEEL'].includes(play.play) ||
+    Object.values(play.routes ?? {}).some(route => ['GO', 'POST-L', 'POST-R', 'FLAG-L', 'FLAG-R', 'WHEEL'].includes(route || ''))
+  );
+  const tendencies: Array<{ defense: string; matches: (play: CpuOffensiveTendencyPlay) => boolean }> = [
+    { defense: 'ZONE34', matches: play => Boolean(play.isQbRun) },
+    { defense: 'ZONE151', matches: play => Boolean(play.targetWasRb || play.isFlatPass) },
+    { defense: 'ZONE34', matches: play => !play.isPass && !play.isQbRun },
+    { defense: 'ZONE232', matches: isDeepPass },
+    { defense: 'ZONE151', matches: play => play.isPass && !isDeepPass(play) }
+  ];
+
+  for (const tendency of tendencies) {
+    const attempts = sample.filter(tendency.matches);
+    const successes = attempts.filter(play => play.isSuccessful).length;
+    if (attempts.length >= 2 && successes >= 2 && successes / attempts.length >= 2 / 3) {
+      return tendency.defense;
+    }
+  }
+  return null;
+}
+
 export function shouldCpuGoForItOnFourthDown(situation: CpuFourthDownSituation): boolean {
   const isGoalLineOpportunity = situation.distanceToEndzoneYards <= 15 && situation.yardsToGo <= 3;
   if (isGoalLineOpportunity) return true;
