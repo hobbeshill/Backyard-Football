@@ -105,6 +105,14 @@ test('Pro mode allows players to pick every offensive play with valid route assi
   }
 });
 
+test('every Pro passing play keeps the RB in pass protection', () => {
+  for (const play of Object.values(PRO_OFFENSE_PLAYS)) {
+    if (play.isRun) continue;
+    assert.equal(play.rbRoute, 'BLOCK', `${play.id} should keep an RB pass protector`);
+    assert.equal(offensivePlaybook[play.id].rbRoute, 'BLOCK', `${play.id} engine routes should match its card`);
+  }
+});
+
 test('Pro mode allows players to pick every defensive scheme with valid counters and descriptions', () => {
   for (const defId of proDefensiveKeys) {
     const def = PRO_DEFENSE_PLAYS[defId as ProDefensePlayId];

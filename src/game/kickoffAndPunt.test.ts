@@ -353,11 +353,24 @@ test('offensive playbook includes SPECIAL TEAMS: PUNT option', () => {
   assert.equal(offensivePlaybook.PUNT.rbRoute, 'BLOCK');
 });
 
-test('game engine mounts with kickoff active at the beginning of the game', () => {
+test('game engine publishes phase changes from the opening kickoff', (context) => {
+  const originalRequest = globalThis.requestAnimationFrame;
+  const originalCancel = globalThis.cancelAnimationFrame;
+  const frameCallbacks: FrameRequestCallback[] = [];
+  context.after(() => {
+    globalThis.requestAnimationFrame = originalRequest;
+    globalThis.cancelAnimationFrame = originalCancel;
+  });
+  globalThis.requestAnimationFrame = callback => {
+    frameCallbacks.push(callback);
+    return frameCallbacks.length;
+  };
+  globalThis.cancelAnimationFrame = () => {};
   let engineInstance: GameEngineHandle | null = null;
   let isKickoff = false;
   let kickingSide = '';
   let receivingSide = '';
+  let currentPhase = '';
 
   const mockCanvas = createMockCanvas();
 
@@ -376,6 +389,7 @@ test('game engine mounts with kickoff active at the beginning of the game', () =
     setGameClockState: () => {},
     showAnnouncement: () => {},
     onEngineReady: engine => { engineInstance = engine; },
+    setPhaseState: phase => { currentPhase = phase; },
     setIsKickoffState: (active, kicking, receiving) => {
       isKickoff = active;
       kickingSide = kicking;
@@ -385,16 +399,27 @@ test('game engine mounts with kickoff active at the beginning of the game', () =
 
   assert.ok(engineInstance);
   const engine = engineInstance as GameEngineHandle;
+  frameCallbacks.shift()?.(0);
+  assert.equal(currentPhase, 'KICKOFF');
   assert.equal(engine.isKickoffActive(), true);
   assert.equal(isKickoff, true);
   assert.equal(kickingSide, 'P2');
   assert.equal(receivingSide, 'P1');
 
+  engine.setTacticalMode?.('PRO');
+  engine.selectDefense('PRO_COVER1_MAN');
+  assert.equal(engine.p1DefPlay, 'PRO_COVER2_HARD_FLAT');
+  assert.equal(engine.isKickoffActive(), true);
+
   // Launch kickoff
   engine.kickoff(0.95);
+  frameCallbacks.shift()?.(16);
+  assert.equal(currentPhase, 'THROWN');
   assert.equal(isKickoff, false);
 
   engine.resetGame();
+  frameCallbacks.shift()?.(32);
+  assert.equal(currentPhase, 'KICKOFF');
   assert.equal(engine.isKickoffActive(), true);
   assert.equal(isKickoff, true);
 

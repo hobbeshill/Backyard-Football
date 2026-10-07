@@ -17,6 +17,7 @@ interface ProPlaybookCardsProps {
   activeOffensePlay?: string;
   activeDefensePlay?: string;
   initialTab?: 'OFFENSE' | 'DEFENSE' | 'MATRIX';
+  selectionOnly?: boolean;
 }
 
 export const ProPlaybookCards: React.FC<ProPlaybookCardsProps> = ({
@@ -25,7 +26,8 @@ export const ProPlaybookCards: React.FC<ProPlaybookCardsProps> = ({
   onSelectDefensePlay,
   activeOffensePlay,
   activeDefensePlay,
-  initialTab = 'OFFENSE'
+  initialTab = 'OFFENSE',
+  selectionOnly = false
 }) => {
   const [activeTab, setActiveTab] = useState<'OFFENSE' | 'DEFENSE' | 'MATRIX'>(initialTab);
   const [selectedOffenseId, setSelectedOffenseId] = useState<ProOffensePlayId>(
@@ -39,6 +41,60 @@ export const ProPlaybookCards: React.FC<ProPlaybookCardsProps> = ({
   const defensePlayList = Object.values(PRO_DEFENSE_PLAYS);
   const currentOffense = PRO_OFFENSE_PLAYS[selectedOffenseId] || offensePlayList[0];
   const currentDefense = PRO_DEFENSE_PLAYS[selectedDefenseId] || defensePlayList[0];
+
+  if (selectionOnly) {
+    const isDefense = initialTab === 'DEFENSE';
+    const title = isDefense ? 'Choose a Defensive Scheme' : 'Choose an Offensive Play';
+
+    return (
+      <div className="fixed inset-0 z-[150] flex items-center justify-center bg-black/90 p-2 sm:p-4 backdrop-blur-sm">
+        <div className="flex max-h-[96dvh] w-full max-w-5xl flex-col overflow-hidden rounded-lg border border-neutral-700 bg-[#0d131a] text-neutral-200 shadow-2xl">
+          <h2 className="shrink-0 border-b border-neutral-800 px-4 py-3 text-center text-sm font-black uppercase text-white">
+            {title}
+          </h2>
+          <div className="grid min-h-0 flex-1 grid-cols-2 gap-2 overflow-y-auto p-2 sm:grid-cols-3 sm:gap-3 sm:p-3 lg:grid-cols-4">
+            {isDefense ? defensePlayList.map((play) => (
+              <button
+                key={play.id}
+                type="button"
+                onClick={() => {
+                  onSelectDefensePlay?.(play.id);
+                  onClose();
+                }}
+                className="group flex min-h-0 flex-col overflow-hidden rounded-md border border-neutral-700 bg-[#121c27] text-left transition hover:border-cyan-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-400"
+                aria-label={`Select ${play.name}`}
+              >
+                <div className="w-full flex-1 overflow-hidden bg-[#09150d]">
+                  <DefenseSchemeDiagram defense={play} />
+                </div>
+                <span className="w-full border-t border-neutral-700 px-2 py-2 text-center text-[11px] font-black uppercase leading-tight text-white group-hover:text-cyan-300 sm:text-xs">
+                  {play.name}
+                </span>
+              </button>
+            )) : offensePlayList.map((play) => (
+              <button
+                key={play.id}
+                type="button"
+                onClick={() => {
+                  onSelectOffensePlay?.(play.id);
+                  onClose();
+                }}
+                className="group flex min-h-0 flex-col overflow-hidden rounded-md border border-neutral-700 bg-[#121c27] text-left transition hover:border-amber-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-400"
+                aria-label={`Select ${play.name}`}
+              >
+                <div className="w-full flex-1 overflow-hidden bg-[#09150d]">
+                  <OffenseRouteDiagram play={play} />
+                </div>
+                <span className="w-full border-t border-neutral-700 px-2 py-2 text-center text-[11px] font-black uppercase leading-tight text-white group-hover:text-amber-300 sm:text-xs">
+                  {play.name}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-[150] flex items-center justify-center bg-black/85 p-3 sm:p-5 backdrop-blur-md">
@@ -544,8 +600,6 @@ const OffenseRouteDiagram: React.FC<{ play: ProOffensePlay }> = ({ play }) => {
           <path d="M 290 130 L 290 110 L 225 80" fill="none" stroke="#fbbf24" strokeWidth="2.5" markerEnd="url(#arrowAmber)" />
           {/* Slot underneath slant */}
           <path d="M 230 130 L 230 115 L 155 92" fill="none" stroke="#fbbf24" strokeWidth="2" markerEnd="url(#arrowAmber)" />
-          {/* RB flat */}
-          <path d="M 140 165 C 105 160 80 130 80 110" fill="none" stroke="#34d399" strokeWidth="1.8" markerEnd="url(#arrowEmerald)" />
         </g>
       )}
 
@@ -570,8 +624,6 @@ const OffenseRouteDiagram: React.FC<{ play: ProOffensePlay }> = ({ play }) => {
           <path d="M 125 130 L 125 25" fill="none" stroke="#fbbf24" strokeWidth="2" markerEnd="url(#arrowAmber)" />
           <path d="M 215 130 L 215 25" fill="none" stroke="#fbbf24" strokeWidth="2" markerEnd="url(#arrowAmber)" />
           <path d="M 290 130 L 290 25" fill="none" stroke="#fbbf24" strokeWidth="2.5" markerEnd="url(#arrowAmber)" />
-          {/* RB wheel / seam */}
-          <path d="M 140 165 Q 110 150 120 120 L 120 40" fill="none" stroke="#34d399" strokeWidth="1.8" markerEnd="url(#arrowEmerald)" />
           <text x="170" y="32" fill="#fbbf24" fontSize="8" fontWeight="black" textAnchor="middle">STRETCH DEEP SAFETIES</text>
         </g>
       )}
@@ -587,8 +639,6 @@ const OffenseRouteDiagram: React.FC<{ play: ProOffensePlay }> = ({ play }) => {
           <path d="M 290 130 L 290 100 L 312 100 L 312 25" fill="none" stroke="#fbbf24" strokeWidth="2.5" markerEnd="url(#arrowAmber)" />
           {/* Slot deep post */}
           <path d="M 230 130 L 230 85 L 170 30" fill="none" stroke="#38bdf8" strokeWidth="2" markerEnd="url(#arrowCyan)" />
-          {/* RB pass block */}
-          <circle cx="160" cy="150" r="7" fill="none" stroke="#60a5fa" strokeWidth="1.5" strokeDasharray="3 2" />
         </g>
       )}
 
@@ -630,6 +680,13 @@ const OffenseRouteDiagram: React.FC<{ play: ProOffensePlay }> = ({ play }) => {
           <path d="M 50 130 L 50 60" fill="none" stroke="#38bdf8" strokeWidth="1.5" strokeDasharray="3 2" />
           <path d="M 290 130 L 290 60" fill="none" stroke="#38bdf8" strokeWidth="1.5" strokeDasharray="3 2" />
           <text x="170" y="110" fill="#facc15" fontSize="7" fontWeight="bold" textAnchor="middle">DELAYED CREASE</text>
+        </g>
+      )}
+
+      {!play.isRun && (
+        <g>
+          <circle cx="140" cy="165" r="8" fill="none" stroke="#60a5fa" strokeWidth="1.5" strokeDasharray="3 2" />
+          <text x="140" y="192" fill="#93c5fd" fontSize="6" fontWeight="bold" textAnchor="middle">RB PASS PRO</text>
         </g>
       )}
     </svg>

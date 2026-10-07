@@ -2,7 +2,7 @@ import type { Ball, DefensiveAssignment, Entity, FumbleBall, TacticalMode } from
 import { defensiveKeys, defensivePlaybook, proDefensivePlaybook, allDefensivePlaybook, middleRoutes, offensiveKeys, offensivePlaybook, outsideRoutes, runningBackRoutes, wrRoutes, proOffensiveKeys, proDefensiveKeys } from './playbook';
 import { evaluateProMatchup, PRO_OFFENSE_PLAYS, type ProMatchupResult, type ProOffensePlayId, type ProDefensePlayId } from './proMode';
 import { alignDefenderAcrossFromReceiver, alignDefenderAcrossFromRunningBack, alignDefenderToZone, alignDefenders, chooseCpuDefensiveAssignments, constrainDefendersToFieldSide, getBlitzAlignmentY, getBracketCoverageTarget, getDefensiveLineAlignmentY, matchCpuDefendersToReceivers, separateDefenderAlignments } from './defense';
-import { evaluateCpuOffensiveAudibles, evaluateCpuBallCarrierMoves, getSuccessfulPlayCounter, isCpuPressureRecognized, shouldCpuGoForItOnFourthDown, shouldCpuReleasePass, shouldCpuScramble, scoreRunBlockTarget } from './ai';
+import { chooseProDefensiveCall, evaluateCpuOffensiveAudibles, evaluateCpuBallCarrierMoves, getSuccessfulPlayCounter, isCpuPressureRecognized, shouldCpuGoForItOnFourthDown, shouldCpuReleasePass, shouldCpuScramble, scoreRunBlockTarget } from './ai';
 import { createFumbleBall, getCarrierFumbleChance } from './fumbles';
 import { canEngagePassBlock, clampPlayerToFieldY, createSimulationClock, distToSegment, GAME_SPEED_SCALE, getBallCarrierRunSpeed, getDesignedRunLateralBias, getFatigueSpeedMultiplier, getPassBlockBaseHoldFrames, getPassBlockHoldFrames, getDirectionalInput, getReturnPursuitSpeed, getReturnTeamBlockers, getUserRunnerVelocity, getRunPursuitMovement, getUserDefenderSpeed, isRusherActivelyBlocked, moveToward, resolveCollisions, shouldApplyRunBlockStun, shouldHoldPassBlock, updatePlayerStamina, updateReceiverTargetStamina, updateRunningBackStamina, updateRouteMovement, USER_CONTROL_SPEED_MULTIPLIER } from './movement';
 import { resolvePlayResult, isSafety, calculateBrokenTackleChance, calculateYardsToGo, getDriveStartY, getSnapBallPosition, getPassArcHeight, getFieldGoalBallHeight, getPassArcMaxHeight, getPassFlightFrames, findTappedPassReceiver, shouldReleaseUserPass, getPassLeadTarget, getRoutePassLeadTarget, canDefenderDeflectPass, canTackleQuarterback, resolveCatchContestOutcome, evaluateQbThrowAccuracy, getCpuThrowAimVariance, calculateKickoffFlight, calculatePuntFlight, getTouchbackYardLineY, getInterceptionTouchbackY, getKickoffLineY, getDefenderPassReachHeight, isPlayerOutOfBounds, calculateFieldGoalFlight, getFieldGoalDistanceYards, GOALPOST_CENTER_X, GOALPOST_LEFT_UPRIGHT_X, GOALPOST_RIGHT_UPRIGHT_X, GOALPOST_CROSSBAR_HEIGHT_Z } from './rules';
@@ -363,6 +363,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   let brokenTackleEffect: { x: number; y: number; timer: number } | null = null;
   let activeEntity: Entity = qb;
   let phase = 'PRE_SNAP';
+  let requiresProPlaybookSelection = false;
 
   let activeOffense: 'P1' | 'P2' = 'P1';
   let activeDefense: 'P1' | 'P2' = 'P2';
@@ -372,6 +373,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
   let tacticalMode: TacticalMode = 'ELITE';
   let p1OffPlay = 'SHORT_PASS';
+  let p1PlayFlipped = false;
   let p1OffFormation: 'SPREAD' | 'STACK' | 'TRIPS' = 'SPREAD';
   let p1DefPlay = 'COVER2';
   let p2OffPlay = 'SHORT_PASS';
@@ -551,6 +553,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       p2DefPlay = allDefensivePlaybook[state.p2DefPlay] ? state.p2DefPlay : 'COVER2';
       cpuPreSnapTimer = state.cpuPreSnapTimer; isAllBlocking = state.isAllBlocking;
       openingReceivingTeam = state.openingReceivingTeam; isKickoffPhase = state.isKickoffPhase;
+      requiresProPlaybookSelection = tacticalMode === 'PRO' && phase === 'PRE_SNAP' && !isKickoffPhase;
       kickoffKickingTeam = state.kickoffKickingTeam; kickoffReceivingTeam = state.kickoffReceivingTeam;
       kickMeterPower = state.kickMeterPower; kickMeterDirection = state.kickMeterDirection;
       cpuKickoffDelayTimer = state.cpuKickoffDelayTimer; isSpecialTeamsReturn = state.isSpecialTeamsReturn;
@@ -1066,27 +1069,12 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   // Adaptive CPU Defensive Counter-Calling (Tendency Countering)
   function getAdaptiveDefensiveCall(): string {
     if (tacticalMode === 'PRO') {
-      const recentPlays = userPlayHistory.slice(-4);
-      const recentDeepCount = recentPlays.filter(p => p.play === 'PRO_VERTS' || p.play === 'PRO_DOUBLE_MOVES').length;
-      const recentRunCount = recentPlays.filter(p => p.play === 'PRO_JET_SWEEP' || p.play === 'PRO_DRAW').length;
-      const recentSlantsCount = recentPlays.filter(p => p.play === 'PRO_QUICK_SLANTS').length;
-      const recentMeshCount = recentPlays.filter(p => p.play === 'PRO_MESH').length;
-      const recentScreenCount = recentPlays.filter(p => p.play === 'PRO_SCREEN').length;
-
-      if (recentRunCount >= 2) return Math.random() < 0.7 ? 'PRO_RUN_STOP_BOX' : 'PRO_BLITZ_ZERO';
-      if (recentDeepCount >= 2) return Math.random() < 0.7 ? 'PRO_COVER4_QUARTERS' : 'PRO_COVER3_DEEP';
-      if (recentSlantsCount >= 2) return 'PRO_COVER1_MAN';
-      if (recentMeshCount >= 2) return 'PRO_COVER3_DEEP';
-      if (recentScreenCount >= 2) return 'PRO_BLITZ_ZERO';
-
-      if ((currentDown === 3 || currentDown === 4) && yardsToGo > 7) {
-        return Math.random() < 0.5 ? 'PRO_COVER4_QUARTERS' : 'PRO_COVER3_DEEP';
-      }
-      if ((currentDown === 3 || currentDown === 4) && yardsToGo <= 3) {
-        return Math.random() < 0.5 ? 'PRO_RUN_STOP_BOX' : 'PRO_COVER1_MAN';
-      }
-
-      return proDefensiveKeys[Math.floor(Math.random() * proDefensiveKeys.length)];
+      return chooseProDefensiveCall({
+        recentPlays: userPlayHistory,
+        down: currentDown,
+        yardsToGo,
+        previousCall: p2DefPlay
+      });
     }
 
     const totalPlays = userPlayHistory.length;
@@ -2379,6 +2367,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     formationTransitions = [];
     if (gameOver || quarterBreakRemainingMs > 0) return;
     phase = 'PRE_SNAP';
+    requiresProPlaybookSelection = tacticalMode === 'PRO' && !isKickoffPhase;
     playEnding = false;
     isInterceptionReturn = false;
     isAllBlocking = false;
@@ -2590,16 +2579,32 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     }
     const activePlay = offensivePlaybook[activePlayName];
     const alignment = activeOffense === 'P1' ? p1OffFormation : activePlay.alignment || 'SPREAD';
-    const alignmentPositions = alignment === 'STACK'
+    const baseAlignmentPositions = alignment === 'STACK'
       ? { left: 80, slot: 105, center: 215, right: 275, rb: 220, rbSide: 'right' as const }
       : alignment === 'TRIPS'
         ? { left: 50, slot: 215, center: 250, right: 290, rb: 90, rbSide: 'left' as const }
         : { left: 45, slot: 115, center: 225, right: 295, rb: 220, rbSide: 'right' as const };
 
-    const leftRoute = activePlay.left || 'GO';
-    const rightRoute = activePlay.right || 'GO';
-    const centerRoute = activePlay.center || 'SLANT-R';
-    const slotRoute = activePlay.type === 'PASS' ? (alignment === 'TRIPS' ? 'CROSS-L' : 'SLANT-L') : 'BLOCK';
+    const isP1PlayFlipped = activeOffense === 'P1' && tacticalMode === 'PRO' && p1PlayFlipped;
+    const alignmentPositions = isP1PlayFlipped
+      ? {
+          ...baseAlignmentPositions,
+          left: fieldWidth - baseAlignmentPositions.left,
+          slot: fieldWidth - baseAlignmentPositions.slot,
+          center: fieldWidth - baseAlignmentPositions.center,
+          right: fieldWidth - baseAlignmentPositions.right,
+          rb: fieldWidth - baseAlignmentPositions.rb,
+          rbSide: baseAlignmentPositions.rbSide === 'right' ? 'left' as const : 'right' as const
+        }
+      : baseAlignmentPositions;
+
+    const leftRoute = isP1PlayFlipped ? mirrorPlayRoute(activePlay.right || 'GO') : activePlay.left || 'GO';
+    const rightRoute = isP1PlayFlipped ? mirrorPlayRoute(activePlay.left || 'GO') : activePlay.right || 'GO';
+    const centerRoute = isP1PlayFlipped
+      ? mirrorPlayRoute(activePlay.center || 'SLANT-R')
+      : activePlay.center || 'SLANT-R';
+    const baseSlotRoute = activePlay.type === 'PASS' ? (alignment === 'TRIPS' ? 'CROSS-L' : 'SLANT-L') : 'BLOCK';
+    const slotRoute = isP1PlayFlipped ? mirrorPlayRoute(baseSlotRoute) : baseSlotRoute;
 
     const offTeam = activeOffense === 'P1' ? p1Team : p2Team;
     const defTeam = activeDefense === 'P1' ? p1Team : p2Team;
@@ -2711,7 +2716,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   }
 
   function triggerCpuOffensiveAudible(silent = false) {
-    if (options.tutorial) return;
+    if (options.tutorial || tacticalMode === 'PRO') return;
     if (activeOffense !== 'P2') return;
     const cpuPlay = offensivePlaybook[p2OffPlay];
     if (!cpuPlay) return;
@@ -2804,6 +2809,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       cpuPlayHistory.length = 0;
       defenseOverrides.clear();
       setMomentumState(0);
+      p1PlayFlipped = false;
       openingReceivingTeam = 'P1';
       callbacks.setP1OffFormationState?.('SPREAD');
       callbacks.setP1DefPlayState('COVER2');
@@ -2836,6 +2842,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       if (activeOffense === 'P1' && phase === 'PRE_SNAP' && offensivePlaybook[key] &&
         (key !== 'PUNT' || (currentDown === 4 && !isKickoffPhase))) {
         p1OffPlay = key;
+        p1PlayFlipped = false;
         if (key !== 'FIELD_GOAL') {
           callbacks.setFieldGoalMeterState?.(null);
         }
@@ -2844,10 +2851,11 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           callbacks.setP1OffFormationState?.(p1OffFormation);
         }
         resetDrill(true);
+        requiresProPlaybookSelection = false;
       }
     },
     selectDefense: (key: string) => {
-      if (activeDefense === 'P1' && allDefensivePlaybook[key]) {
+      if (activeDefense === 'P1' && phase === 'PRE_SNAP' && !isKickoffPhase && allDefensivePlaybook[key]) {
         lastDefenseSelectTime = Date.now();
         const previousPositions = defenders.map(({ x, y }) => ({ x, y }));
         p1DefPlay = key;
@@ -2855,6 +2863,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         defenseOverrides.clear();
         applyDefensiveAlignment();
         startFormationTransition(defenders, previousPositions);
+        if (tacticalMode === 'PRO') requiresProPlaybookSelection = false;
         if (activeOffense === 'P2') {
           triggerCpuOffensiveAudible(false);
         }
@@ -2862,6 +2871,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     },
     setTacticalMode: (mode: TacticalMode) => {
       tacticalMode = mode;
+      requiresProPlaybookSelection = mode === 'PRO' && phase === 'PRE_SNAP' && !isKickoffPhase;
       if (mode === 'PRO') {
         if (activeOffense === 'P1' && !p1OffPlay.startsWith('PRO_') && p1OffPlay !== 'PUNT' && p1OffPlay !== 'FIELD_GOAL') {
           p1OffPlay = 'PRO_QUICK_SLANTS';
@@ -3040,6 +3050,20 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   };
   callbacks.onEngineReady(engineHandle);
 
+  function mirrorPlayRoute(route: string): string {
+    if (route.endsWith('-L')) return `${route.slice(0, -1)}R`;
+    if (route.endsWith('-R')) return `${route.slice(0, -1)}L`;
+    return route;
+  }
+
+  function flipP1ProPlay(): void {
+    if (activeOffense !== 'P1' || tacticalMode !== 'PRO' || !p1OffPlay.startsWith('PRO_')) return;
+    p1PlayFlipped = !p1PlayFlipped;
+    resetDrill(true);
+    requiresProPlaybookSelection = false;
+    sounds.playJuke();
+  }
+
   function cyclePreSnapFormation(direction: number) {
     if (activeOffense === 'P1') {
       const formations: Array<'SPREAD' | 'STACK' | 'TRIPS'> = ['SPREAD', 'STACK', 'TRIPS'];
@@ -3148,6 +3172,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
   function startReadyPlay(): void {
     if (phase !== 'PRE_SNAP') return;
+    if (requiresProPlaybookSelection) return;
     if (activeDefense === 'P1') {
       startCpuPlay();
       return;
@@ -3729,6 +3754,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
   const handlePointerUp = (e: PointerEvent) => {
     if (isPaused) return;
+    const currentTacticalMode: TacticalMode = typeof tacticalMode !== 'undefined' ? tacticalMode : 'ELITE';
 
     const wasJoystick = typeof joystick !== 'undefined' && joystick.active && e.pointerId === joystick.pointerId;
     if (wasJoystick) {
@@ -3853,8 +3879,14 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       }
 
       // Check if user swiped open field / bottom of screen horizontally to change formations / alignments!
-      if (isSwipeGesture) {
-        cyclePreSnapFormation(worldDeltaX < 0 ? 1 : -1);
+      const startedOnOffensivePlayer = activeOffense === 'P1' && [qb, rb, centerReceiver, ...receivers]
+        .some(player => player && Math.hypot(player.x - preSnapFieldSwipeStartX, player.y - preSnapFieldSwipeStartY) < (player.radius || 10) + touchHitPadding);
+      if (isSwipeGesture && !startedOnOffensivePlayer) {
+        if (currentTacticalMode === 'ELITE') {
+          cyclePreSnapFormation(worldDeltaX < 0 ? 1 : -1);
+        } else if (activeOffense === 'P1') {
+          flipP1ProPlay();
+        }
         return;
       }
 
@@ -7538,6 +7570,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         }
       }
     }
+    publishPhaseIfNeeded();
     draw();
     if (options.tutorial) {
       const target = tutorialStep === 2 ? receivers[0]

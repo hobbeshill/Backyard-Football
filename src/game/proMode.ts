@@ -64,7 +64,7 @@ export const PRO_OFFENSE_PLAYS: Record<ProOffensePlayId, ProOffensePlay> = {
     leftRoute: 'SLANT-L',
     rightRoute: 'SLANT-R',
     centerRoute: 'SLANT-R',
-    rbRoute: 'FLAT',
+    rbRoute: 'BLOCK',
     routesSummary: 'Dual perimeter slants breaking inside at 4 yards with slot slant underneath.',
     matchups: {
       PRO_COVER2_HARD_FLAT: 'EFFECTIVE',
@@ -89,7 +89,7 @@ export const PRO_OFFENSE_PLAYS: Record<ProOffensePlayId, ProOffensePlay> = {
     leftRoute: 'CROSS-R',
     rightRoute: 'CROSS-L',
     centerRoute: 'HITCH',
-    rbRoute: 'FLAT',
+    rbRoute: 'BLOCK',
     routesSummary: 'Underneath crossing drags at 4-5 yards create natural rub; slot sits in intermediate hole.',
     matchups: {
       PRO_COVER2_HARD_FLAT: 'EFFECTIVE',
@@ -114,7 +114,7 @@ export const PRO_OFFENSE_PLAYS: Record<ProOffensePlayId, ProOffensePlay> = {
     leftRoute: 'GO',
     rightRoute: 'GO',
     centerRoute: 'GO',
-    rbRoute: 'WHEEL',
+    rbRoute: 'BLOCK',
     routesSummary: 'All 4 eligible targets streak vertically downfield stretching deep safeties to their limits.',
     matchups: {
       PRO_COVER2_HARD_FLAT: 'MODERATE',
@@ -164,7 +164,7 @@ export const PRO_OFFENSE_PLAYS: Record<ProOffensePlayId, ProOffensePlay> = {
     leftRoute: 'BLOCK',
     rightRoute: 'HITCH',
     centerRoute: 'BLOCK',
-    rbRoute: 'FLAT',
+    rbRoute: 'BLOCK',
     routesSummary: 'Receiver catches behind LOS while slot and tackle seal the perimeter wall for RAC yards.',
     matchups: {
       PRO_COVER2_HARD_FLAT: 'MODERATE',

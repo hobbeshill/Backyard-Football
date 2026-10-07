@@ -237,9 +237,10 @@ export function alignDefenders(
     placeDefender(5, 170, 60, 70, 'SS');
     placeDefender(6, 170, 200, 240, 'FS');
   } else if (playKey === 'ZONE34' || playKey === 'PRO_COVER3_DEEP') {
+    const isProCover3 = playKey === 'PRO_COVER3_DEEP';
     placeDefender(0, 105, 24, 24, 'DL', true);
-    placeDefender(1, 170, 24, 24, 'DL', true);
-    placeDefender(2, 235, 24, 24, 'DL', true);
+    placeDefender(1, 170, 24, 24, 'DL', !isProCover3);
+    placeDefender(2, 235, 24, 24, 'DL', !isProCover3);
     placeDefender(3, 75, 105, 155, 'CB');
     placeDefender(4, 265, 105, 155, 'CB');
     placeDefender(5, 135, 175, 235, 'FS');
@@ -262,11 +263,11 @@ export function alignDefenders(
     placeDefender(6, 230, 45, 50, 'FS');
   } else if (playKey === 'PRO_RUN_STOP_BOX') {
     placeDefender(0, 135, 20, 20, 'DL', true);
-    placeDefender(1, 65, 24, 24, 'DL', true);
-    placeDefender(2, 275, 24, 24, 'DL', true);
-    placeDefender(3, 105, 22, 22, 'LB', true);
-    placeDefender(4, 170, 22, 22, 'LB', true);
-    placeDefender(5, 235, 22, 22, 'LB', true);
+    placeDefender(1, 65, 24, 24, 'DL');
+    placeDefender(2, 275, 24, 24, 'DL');
+    placeDefender(3, 105, 22, 22, 'LB');
+    placeDefender(4, 170, 22, 22, 'LB');
+    placeDefender(5, 235, 22, 22, 'LB');
     placeDefender(6, 170, 130, 160, 'FS');
   } else if (playKey === 'PRO_TAMPA2') {
     placeDefender(0, 170, 24, 24, 'DL', true);

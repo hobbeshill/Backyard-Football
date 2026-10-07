@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { getSuccessfulPlayCounter, isCpuPressureRecognized, scoreRunBlockTarget, shouldCpuReleasePass, shouldCpuScramble } from './ai';
+import { chooseProDefensiveCall, getSuccessfulPlayCounter, isCpuPressureRecognized, scoreRunBlockTarget, shouldCpuReleasePass, shouldCpuScramble } from './ai';
 import { alignDefenderAcrossFromReceiver, alignDefenderAcrossFromRunningBack, alignDefenderToZone, alignDefenders, chooseCpuDefensiveAssignments, constrainDefendersToFieldSide, getBlitzAlignmentY, getBracketCoverageTarget, getDefensiveLineAlignmentY, matchCpuDefendersToReceivers, separateDefenderAlignments } from './defense';
 import { getCarrierFumbleChance } from './fumbles';
 import { calculateYardsToGo, canDefenderDeflectPass, canTackleQuarterback, findTappedPassReceiver, getCatchCompletionChance, getDefenderPassReachHeight, getDriveStartY, getSnapBallPosition, getPassArcHeight, getPassArcMaxHeight, getPassFlightFrames, getPassLeadTarget, getRoutePassLeadTarget, isSafety, resolveCatchContestOutcome, resolvePlayResult } from './rules';
@@ -24,6 +24,20 @@ test('double coverage, ball-side positioning, receiver hands and fatigue affect 
   assert.ok(getCatchCompletionChance({ ...contest, stamina: 0 }) < baseline);
   assert.equal(getCatchCompletionChance({ ...contest, isTargetSpammed: true, isRbFlatSpammed: true }), baseline);
   assert.equal(getCatchCompletionChance({ ...contest, effectiveDefDist: 80, effectiveBallDist: 80, stamina: 0 }), 0.905);
+});
+
+test('Pro defensive AI uses heavy fronts situationally and alternates away from repeated pressure', () => {
+  const runTendency = [{ play: 'PRO_JET_SWEEP' }, { play: 'PRO_DRAW' }];
+  const screenTendency = [{ play: 'PRO_SCREEN' }, { play: 'PRO_SCREEN' }];
+  const base = { recentPlays: runTendency, down: 1, yardsToGo: 10, previousCall: 'PRO_COVER2_HARD_FLAT' };
+
+  assert.equal(chooseProDefensiveCall(base, () => 0), 'PRO_RUN_STOP_BOX');
+  assert.equal(chooseProDefensiveCall({ ...base, previousCall: 'PRO_RUN_STOP_BOX' }, () => 0), 'PRO_TAMPA2');
+  assert.equal(chooseProDefensiveCall({ ...base, previousCall: 'PRO_BLITZ_ZERO' }, () => 0), 'PRO_TAMPA2');
+  assert.equal(chooseProDefensiveCall({ ...base, recentPlays: screenTendency }, () => 0), 'PRO_BLITZ_ZERO');
+  assert.equal(chooseProDefensiveCall({ ...base, recentPlays: screenTendency, previousCall: 'PRO_BLITZ_ZERO' }, () => 0), 'PRO_TAMPA2');
+  assert.equal(chooseProDefensiveCall({ ...base, down: 3, yardsToGo: 2, recentPlays: [] }, () => 0), 'PRO_RUN_STOP_BOX');
+  assert.equal(chooseProDefensiveCall({ ...base, recentPlays: [], previousCall: 'PRO_COVER2_HARD_FLAT' }, () => 0), 'PRO_COVER2_HARD_FLAT');
 });
 
 test('catch outcomes favor breakups over picks and boundary decisions use actual position', () => {
@@ -681,6 +695,24 @@ test('CPU MAN assignments align at the LOS while ZONE landmarks stay deeper', ()
   assert.equal(manDefender.startX, manDefender.assignedReceiver.x);
   assert.equal(manDefender.startY, getDefensiveLineAlignmentY(lineOfScrimmageY, attackDirection, manDefender.radius));
   assert.ok(zoneDepth > (manDefender.startY! - lineOfScrimmageY) * attackDirection);
+});
+
+test('Pro coverage and run fronts rush one defender unless an all-out blitz is called', () => {
+  const makeDefenders = () => Array.from({ length: 7 }, (_, index) => ({
+    x: 45 + index * 40,
+    y: 450,
+    radius: 10,
+    type: 'DB'
+  })) as Entity[];
+  const alignedPassRushers = (play: string) => {
+    const defenders = makeDefenders();
+    alignDefenders(defenders, play, -1, 500, [], null);
+    return defenders.filter(defender => defender.passRusher).length;
+  };
+
+  assert.equal(alignedPassRushers('PRO_COVER3_DEEP'), 1);
+  assert.equal(alignedPassRushers('PRO_RUN_STOP_BOX'), 1);
+  assert.equal(alignedPassRushers('PRO_BLITZ_ZERO'), 3);
 });
 
 test('CPU brackets a lone receiving threat instead of defending blockers or sitting in deep zones', () => {
@@ -1435,12 +1467,12 @@ test('offensive double-taps only reposition the RB on offset and scaled canvases
   const handlers = stripTypeScriptTypes(source.slice(downStart, moveStart) + source.slice(upStart, listenersStart));
   let timestamp = 1000;
   context.mock.method(Date, 'now', () => timestamp);
-  const createHandlers = new Function('cyclePreSnapFormation', 'canvasLeft', 'canvasTop', 'scale', `
+  const createHandlers = new Function('cyclePreSnapFormation', 'canvasLeft', 'canvasTop', 'scale', 'tacticalMode', 'flipP1ProPlay', `
     let phase = 'PRE_SNAP', activeOffense = 'P1', activeDefense = 'P2';
     const isPaused = false, options = {}, tutorialStep = 0;
     const completeTutorialAction = () => {};
     const receiverHitPadding = 20, touchHitPadding = 18;
-    const p1OffPlay = 'SHORT_PASS', logicalCanvasWidth = 340, logicalCanvasHeight = 450;
+    const p1OffPlay = 'PRO_QUICK_SLANTS', logicalCanvasWidth = 340, logicalCanvasHeight = 450;
     const getJoystickAnchor = () => ({ x: 89.3, y: 364 });
     const isOffenseJoystickStartZone = (x, y, anchorX, anchorY, width, height) =>
       Math.abs(x - anchorX) <= width * 0.15 && Math.abs(y - anchorY) <= height * 0.12;
@@ -1456,14 +1488,14 @@ test('offensive double-taps only reposition the RB on offset and scaled canvases
     const getScreenCoords = (clientX, clientY) => ({ x: clientX - canvasLeft, y: clientY - canvasTop });
     ${handlers}
     return { down: handlePointerDown, up: handlePointerUp, getRunningBack: () => ({ ...rb }) };
-  `) as (cycle: (direction: number) => void, left: number, top: number, scale: number) => {
+  `) as (cycle: (direction: number) => void, left: number, top: number, scale: number, mode?: 'ELITE' | 'PRO', flip?: () => void) => {
     down: (event: { clientX: number; clientY: number }) => void;
     up: (event: { clientX: number; clientY: number }) => void;
     getRunningBack: () => { x: number; y: number; startX: number; side: string; routeType: string; isBlocker: boolean };
   };
   for (const [left, top, scale] of [[420, 80, 1.5], [20, 120, 0.75]]) {
     const formationChanges: number[] = [];
-    const handlers = createHandlers(direction => formationChanges.push(direction), left, top, scale);
+    const handlers = createHandlers(direction => formationChanges.push(direction), left, top, scale, 'ELITE', () => {});
     const eventAt = (x: number) => ({ clientX: left + x * scale, clientY: top + 80 * scale });
     for (const [tapX, expectedX, expectedSide] of [[35, 120, 'left'], [285, 220, 'right']] as const) {
       timestamp += 500;
@@ -1486,6 +1518,32 @@ test('offensive double-taps only reposition the RB on offset and scaled canvases
     handlers.up(eventAt(100));
     assert.deepEqual(formationChanges, [-1]);
   }
+
+  const proFormationChanges: number[] = [];
+  let proPlayFlips = 0;
+  const proHandlers = createHandlers(direction => proFormationChanges.push(direction), 420, 80, 1.5, 'PRO', () => { proPlayFlips++; });
+  const proEventAt = (x: number) => ({ clientX: 420 + x * 1.5, clientY: 80 + 80 * 1.5 });
+  timestamp += 500;
+  proHandlers.down(proEventAt(35));
+  proHandlers.up(proEventAt(35));
+  timestamp += 100;
+  proHandlers.down(proEventAt(35));
+  proHandlers.up(proEventAt(95));
+  assert.deepEqual(proHandlers.getRunningBack(), {
+    x: 120,
+    y: 975,
+    startX: 120,
+    radius: 10,
+    side: 'left',
+    routeType: 'FLAT',
+    isBlocker: false
+  });
+
+  timestamp += 500;
+  proHandlers.down(proEventAt(35));
+  proHandlers.up(proEventAt(95));
+  assert.equal(proPlayFlips, 1);
+  assert.deepEqual(proFormationChanges, []);
 });
 
 test('snap releases and small pointer movements do not throw a pass', async () => {

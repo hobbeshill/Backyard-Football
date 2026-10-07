@@ -69,6 +69,49 @@ export function shouldCpuGoForItOnFourthDown(situation: CpuFourthDownSituation):
   return isShortInScoringRange || isShortNearMidfield || isShortInSecondHalf;
 }
 
+export interface ProDefensiveCallSituation {
+  recentPlays: readonly { play: string }[];
+  down: number;
+  yardsToGo: number;
+  previousCall: string;
+}
+
+export function chooseProDefensiveCall(
+  situation: ProDefensiveCallSituation,
+  random: () => number = Math.random
+): string {
+  const recentPlays = situation.recentPlays.slice(-4);
+  const recentDeepCount = recentPlays.filter(play => play.play === 'PRO_VERTS' || play.play === 'PRO_DOUBLE_MOVES').length;
+  const recentRunCount = recentPlays.filter(play => play.play === 'PRO_JET_SWEEP' || play.play === 'PRO_DRAW').length;
+  const recentSlantsCount = recentPlays.filter(play => play.play === 'PRO_QUICK_SLANTS').length;
+  const recentMeshCount = recentPlays.filter(play => play.play === 'PRO_MESH').length;
+  const recentScreenCount = recentPlays.filter(play => play.play === 'PRO_SCREEN').length;
+  const previousCallWasHeavy = situation.previousCall === 'PRO_BLITZ_ZERO' || situation.previousCall === 'PRO_RUN_STOP_BOX';
+  const isCrucialShortDown = (situation.down === 3 || situation.down === 4) && situation.yardsToGo <= 3;
+  const isLongDown = (situation.down === 3 || situation.down === 4) && situation.yardsToGo > 7;
+
+  if (previousCallWasHeavy) {
+    if (isLongDown) return random() < 0.5 ? 'PRO_COVER4_QUARTERS' : 'PRO_COVER3_DEEP';
+    return 'PRO_TAMPA2';
+  }
+  if (isLongDown) return random() < 0.5 ? 'PRO_COVER4_QUARTERS' : 'PRO_COVER3_DEEP';
+  if (isCrucialShortDown) return random() < 0.55 ? 'PRO_RUN_STOP_BOX' : 'PRO_COVER1_MAN';
+  if (recentScreenCount >= 2) return 'PRO_BLITZ_ZERO';
+  if (recentRunCount >= 2) return random() < 0.35 ? 'PRO_RUN_STOP_BOX' : 'PRO_COVER1_MAN';
+  if (recentDeepCount >= 2) return random() < 0.7 ? 'PRO_COVER4_QUARTERS' : 'PRO_COVER3_DEEP';
+  if (recentSlantsCount >= 2) return 'PRO_COVER1_MAN';
+  if (recentMeshCount >= 2) return 'PRO_COVER3_DEEP';
+
+  const balancedCalls = [
+    'PRO_COVER2_HARD_FLAT',
+    'PRO_COVER1_MAN',
+    'PRO_COVER3_DEEP',
+    'PRO_COVER4_QUARTERS',
+    'PRO_TAMPA2'
+  ];
+  return balancedCalls[Math.floor(random() * balancedCalls.length)];
+}
+
 export interface CpuCarrierMoveResult {
   moveType?: 'JUKE' | 'TRUCK';
   announcement?: string;
