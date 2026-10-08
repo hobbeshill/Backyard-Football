@@ -27,6 +27,16 @@ function getTeamTextStyle(color: string) {
 
 const CONTROLS_TUTORIAL_KEY = 'backyard-football-pro-tutorial-complete-v2';
 
+const DEFENDER_ROLES = [
+  { id: 'DL', shortLabel: 'DL #1', label: 'Pass Rusher / DL' },
+  { id: 'LB1', shortLabel: 'LB #2', label: 'Left Linebacker' },
+  { id: 'LB2', shortLabel: 'LB #3', label: 'Right Linebacker' },
+  { id: 'CB1', shortLabel: 'CB #4', label: 'Lockdown Corner' },
+  { id: 'CB2', shortLabel: 'CB #5', label: 'Boundary Corner' },
+  { id: 'MLB', shortLabel: 'MLB #6', label: 'Middle Linebacker' },
+  { id: 'FS', shortLabel: 'FS #7', label: 'Free Safety' }
+];
+
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   
@@ -64,6 +74,7 @@ export default function App() {
   const [is4thDown, setIs4thDown] = useState(false);
   const [fgMeterState, setFgMeterState] = useState<{ stage: 'AIM' | 'POWER' | 'KICKING'; aim: number; power: number; distanceYards: number } | null>(null);
   const [tacticalMode, setTacticalMode] = useState<TacticalMode>('PRO');
+  const [selectedDefenderIndex, setSelectedDefenderIndex] = useState(0);
   const [showProPlaybookCards, setShowProPlaybookCards] = useState(false);
   const proPlaybookCallSelectedRef = useRef(false);
   const [phaseState, setPhaseState] = useState('PRE_SNAP');
@@ -360,6 +371,7 @@ export default function App() {
       setIs4thDownState: (val) => setIs4thDown(val),
       setKickMeterPowerState: (power) => setKickMeterPower(power),
       setFieldGoalMeterState: (state) => setFgMeterState(state),
+      onControlledDefenderChange: (index) => setSelectedDefenderIndex(index),
       setP1OffPlayState
     });
   }, []);
@@ -700,7 +712,7 @@ export default function App() {
   }, [finishedGame, hasKickedOff, isKickoffActive, phaseState, showPauseMenu, showTeamModal, showTutorial, showSettings, tacticalMode]);
 
   return (
-    <div className="relative w-screen min-h-[100dvh] h-[100dvh] overflow-hidden flex flex-col items-center justify-between py-1 bg-[#030704] text-white font-mono select-none">
+    <div className="relative w-screen min-h-[100dvh] h-[100dvh] overflow-hidden flex flex-col items-center justify-between pt-1 pb-0 bg-[#030704] text-white font-mono select-none">
       {!showTutorial && <button
         type="button"
         onClick={() => setShowSettings(true)}
@@ -713,49 +725,41 @@ export default function App() {
       
       {/* Top Header & Scoreboard */}
       <header className="flex flex-col items-center justify-center z-20 mb-0.5 w-full max-w-[430px] px-2 pt-0.5 shrink-0">
-        {/* Team Matchup Selector Button */}
-        <div className="flex items-center gap-1.5 mb-1 max-w-full">
-          <button
-            onClick={() => setShowTeamModal(true)}
-            className="flex max-w-full flex-wrap items-center justify-center gap-1.5 px-2.5 py-0.5 bg-black/85 hover:bg-neutral-900 border border-[#ffcc00]/60 rounded text-[0.60rem] font-bold text-neutral-200 transition cursor-pointer active:scale-95 shadow-md"
-            title="Change Teams, Rosters & Strengths/Weaknesses"
-          >
-            <Users size={11} className="text-[#ffcc00]" />
-            <span className="rounded-sm px-0.5" style={getTeamTextStyle(p1TeamState.primaryColor)}>{p1TeamState.name}</span>
-            <span className="text-neutral-400 font-normal">VS</span>
-            <span className="rounded-sm px-0.5" style={getTeamTextStyle(p2TeamState.primaryColor)}>{p2TeamState.name}</span>
+        {/* Relocated Footer / Game Status Bar */}
+        <footer className="mb-1 text-[0.52rem] text-[#adff2f] text-center z-20 px-2 w-full max-w-[430px] flex items-center justify-between gap-2 shrink-0">
+          <span className="font-bold opacity-90 whitespace-nowrap">
+            v2.8.6 • 7v7 Football
             {gameMode === 'SEASON' && (
-              <span className="text-emerald-400 font-bold ml-0.5">
+              <span className="text-emerald-400 font-bold ml-1">
                 • {isChampionshipWeek ? '🏆 SEC TITLE' : `WK ${currentWeekNumber} (${getSeasonRecord(seasonForDisplay).wins}-${getSeasonRecord(seasonForDisplay).losses})`}
               </span>
             )}
-            <span className="text-[#ffcc00] ml-1">▾ TEAMS</span>
-          </button>
-          {!hasKickedOff && (
-            <button
-              type="button"
-              onClick={() => {
-                handleStartGame();
-                showAnnouncement(
-                  `${p1TeamState.name.toUpperCase()} VS ${p2TeamState.name.toUpperCase()} - READY FOR KICKOFF! 🏈`,
-                  p1TeamState.primaryColor,
-                  true
-                );
-              }}
-              className="flex items-center gap-1 rounded bg-gradient-to-r from-[#c44d2b] to-[#bd5635] px-2.5 py-0.5 text-[0.62rem] font-black uppercase tracking-wider text-white shadow-md hover:from-[#b03f1f] hover:to-[#a9492d] active:scale-95 transition cursor-pointer"
-              title="Kick off game now"
-            >
-              <span>🏈 KICK OFF</span>
-            </button>
-          )}
-        </div>
+          </span>
+          <span className="text-neutral-300 truncate text-right">
+            {isKickoffActive
+              ? 'Touch Field or Joystick to Kick Off • WASD/Arrows to Steer Return'
+              : tacticalMode === 'PRO'
+              ? (activeOffenseState === 'P1'
+                  ? 'Choose a Play Card • Touch Joystick to Snap'
+                  : 'Pick Defender to Control • Touch Joystick to Start')
+              : (activeOffenseState === 'P1'
+                  ? 'Draw Routes • Swipe RB Left/Right for Run Play • Touch Joystick to Start'
+                  : 'Pick Defender to Control • Touch Joystick to Start')}
+          </span>
+        </footer>
 
         <div className="grid grid-cols-3 items-center gap-1 w-full bg-black/90 border-2 border-[#ffcc00] px-3 py-1.5 rounded-lg shadow-xl">
           {/* P2 CPU Score */}
           <div className="flex min-w-0 flex-col items-center gap-1.5 text-center">
-            <span className="rounded-sm px-0.5 font-extrabold text-[0.60rem]" style={getTeamTextStyle(p2TeamState.primaryColor)}>
+            <button
+              type="button"
+              onClick={() => setShowTeamModal(true)}
+              className="rounded-sm px-0.5 font-extrabold text-[0.60rem] hover:underline cursor-pointer transition active:scale-95"
+              style={getTeamTextStyle(p2TeamState.primaryColor)}
+              title="Change Teams"
+            >
               {p2TeamState.name} (CPU)
-            </span>
+            </button>
             <span className="text-white text-base font-black bg-red-950/80 border border-red-500/50 px-2 py-0.5 rounded leading-none">
               {cpuScore}
             </span>
@@ -779,6 +783,15 @@ export default function App() {
             </div>
             <div className="mt-0.5 flex items-center justify-center gap-1 border-t border-white/15 pt-0.5">
               <button
+                type="button"
+                onClick={() => setShowTeamModal(true)}
+                className="p-1 text-[#ffcc00] hover:text-white transition cursor-pointer"
+                title="Change Teams"
+              >
+                <Users size={13} />
+              </button>
+              <button
+                type="button"
                 onClick={toggleSound}
                 className="p-1 text-[#ffcc00] hover:text-white transition cursor-pointer"
                 title={soundEnabled ? "Mute" : "Unmute"}
@@ -786,6 +799,7 @@ export default function App() {
                 {soundEnabled ? <Volume2 size={13} /> : <VolumeX size={13} className="text-neutral-500" />}
               </button>
               <button
+                type="button"
                 onClick={() => setShowHelp(true)}
                 className="p-1 text-[#00ffff] hover:text-white transition cursor-pointer"
                 title="Help & Controls"
@@ -793,6 +807,7 @@ export default function App() {
                 <HelpCircle size={13} />
               </button>
               <button
+                type="button"
                 onClick={handleResetGame}
                 className="p-1 text-emerald-400 hover:text-white transition cursor-pointer"
                 title="Reset Game"
@@ -801,6 +816,7 @@ export default function App() {
               </button>
               {hasKickedOff && (
                 <button
+                  type="button"
                   onClick={() => {
                     engineRef.current?.setPaused(true);
                     setShowPauseMenu(true);
@@ -812,14 +828,37 @@ export default function App() {
                   <Pause size={13} />
                 </button>
               )}
+              {!hasKickedOff && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleStartGame();
+                    showAnnouncement(
+                      `${p1TeamState.name.toUpperCase()} VS ${p2TeamState.name.toUpperCase()} - READY FOR KICKOFF! 🏈`,
+                      p1TeamState.primaryColor,
+                      true
+                    );
+                  }}
+                  className="px-1.5 py-0.5 rounded bg-gradient-to-r from-[#c44d2b] to-[#bd5635] text-[0.55rem] font-black uppercase text-white shadow hover:from-[#b03f1f] hover:to-[#a9492d] active:scale-95 transition cursor-pointer"
+                  title="Kick off game now"
+                >
+                  KICKOFF
+                </button>
+              )}
             </div>
           </div>
 
-          {/* P1 YOU Score & Quick Controls */}
+          {/* P1 YOU Score */}
           <div className="flex min-w-0 flex-col items-center gap-1.5 text-center">
-            <span className="rounded-sm px-0.5 font-extrabold text-[0.60rem]" style={getTeamTextStyle(p1TeamState.primaryColor)}>
+            <button
+              type="button"
+              onClick={() => setShowTeamModal(true)}
+              className="rounded-sm px-0.5 font-extrabold text-[0.60rem] hover:underline cursor-pointer transition active:scale-95"
+              style={getTeamTextStyle(p1TeamState.primaryColor)}
+              title="Change Teams"
+            >
               {p1TeamState.name} (YOU)
-            </span>
+            </button>
             <span className="text-white text-base font-black bg-emerald-950/80 border border-emerald-500/50 px-2 py-0.5 rounded leading-none">
               {userScore}
             </span>
@@ -1007,37 +1046,45 @@ export default function App() {
         </div>
       )}
 
-      {/* Canvas Element */}
-      <div className="relative flex-1 flex flex-col items-center justify-center min-h-0 w-full overflow-hidden">
+      {/* Canvas Element - Sits directly at the bottom so joystick is available from the bottom of the screen */}
+      <div className="relative flex-1 flex flex-col items-center justify-end min-h-0 w-full overflow-hidden pb-0">
+        {/* Pre-snap Defender Selector Bar when User is on Defense */}
+        {phaseState === 'PRE_SNAP' && activeOffenseState === 'P2' && !showPauseMenu && !finishedGame && !showProPlaybookCards && !showTeamModal && !showSettings && (
+          <div className="absolute top-2 left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-1 bg-black/85 border border-cyan-400/80 rounded-lg px-2.5 py-1.5 shadow-2xl backdrop-blur-sm max-w-[96%]">
+            <div className="flex items-center gap-1.5 text-[0.62rem] font-bold text-cyan-300 uppercase tracking-wider">
+              <span>🛡️ Controlled Defender:</span>
+              <span className="text-yellow-300 font-extrabold">{DEFENDER_ROLES[selectedDefenderIndex]?.label || 'Defender'}</span>
+              <span className="text-neutral-400 font-normal hidden sm:inline">(or tap player on field)</span>
+            </div>
+            <div className="flex items-center gap-1 flex-wrap justify-center">
+              {DEFENDER_ROLES.map((role, idx) => (
+                <button
+                  key={role.id}
+                  type="button"
+                  onClick={() => {
+                    engineRef.current?.selectDefender?.(idx);
+                    setSelectedDefenderIndex(idx);
+                  }}
+                  className={`px-1.5 py-0.5 rounded text-[0.60rem] font-bold transition-all ${
+                    selectedDefenderIndex === idx
+                      ? 'bg-cyan-400 text-black shadow-md shadow-cyan-400/50 scale-105 border border-white'
+                      : 'bg-neutral-800 text-neutral-300 hover:bg-neutral-700 hover:text-white border border-neutral-600'
+                  }`}
+                  title={`Control ${role.label} with Joystick`}
+                >
+                  {role.shortLabel}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         <canvas
           ref={canvasRef}
           className="bg-[#176620] shadow-[0_8px_30px_rgba(0,0,0,0.9)] rounded-md border-2 border-white touch-none"
         />
 
       </div>
-
-      {/* Footer Controls & Info */}
-      {phaseState === 'RUNNING' && activeOffenseState === 'P2' && !showPauseMenu && !finishedGame && (
-        <button type="button" onClick={() => engineRef.current?.diveTackle()} title="Dive tackle" aria-label="Dive tackle" className="fixed bottom-4 right-4 z-[85] flex h-14 w-14 items-center justify-center rounded-lg border-2 border-cyan-300 bg-neutral-950 text-cyan-200 shadow-xl">
-          <Crosshair size={26} />
-        </button>
-      )}
-
-      <footer className="mt-0.5 text-[0.52rem] text-[#adff2f] text-center z-20 px-2 max-w-[420px] flex items-center justify-between gap-2 shrink-0">
-        <span className="font-bold opacity-90">v2.8.6 • 7v7 Football</span>
-        <span className="text-neutral-300">
-          {tacticalMode === 'PRO'
-            ? (activeOffenseState === 'P1'
-                ? 'Choose a Play Card • Touch Joystick to Snap'
-                : 'Choose a Scheme Card • Touch Joystick to Start')
-            : (activeOffenseState === 'P1'
-                ? 'Draw Routes • Swipe RB Left/Right for Run Play • Touch Joystick to Start'
-                : 'Move Highlighted Defender • Touch Joystick to Start')}
-        </span>
-      </footer>
-      <p className="keyboard-controls hidden sm:block mt-0.5 max-w-[420px] px-2 text-center text-[11px] text-neutral-300 shrink-0">
-        <kbd>Space</kbd> Start / Snap · <kbd>WASD</kbd> / <kbd>Arrow keys</kbd> Start / Move
-      </p>
 
       {/* Game Manual / Help Modal */}
       {showHelp && (
@@ -1063,7 +1110,7 @@ export default function App() {
                     <li>Choose One Game, Season, or the Dynasty preview first, then select your team. One Game also lets you choose the CPU team.</li>
                     <li>Read down and distance at the top of the playbook. Select an offensive play or defensive scheme card before every snap.</li>
                     <li>Intermediate and deep routes stretch coverage. Some plays include a short slot hitch for a checkdown; the RB stays in pass protection.</li>
-                    <li>Touch the lower-left joystick or press Space, WASD, or an arrow key to start. On defense, steer the highlighted free defender while teammates execute the chosen scheme.</li>
+                    <li>Touch the floating joystick area at the bottom of the screen or press Space, WASD, or an arrow key to start. On defense, steer the highlighted free defender while teammates execute the chosen scheme.</li>
                     <li>Punt and Field Goal are in the offensive playbook. Punts require fourth down; field goals use direction and power meters.</li>
                     <li>Elite freeform gameplay is an optional setting under the top-right Settings button before kickoff.</li>
                   </ul>
@@ -1091,7 +1138,7 @@ export default function App() {
                 <span className="text-[#ffcc00] font-bold block mb-1">2. TAP TO THROW & RELATIVE JOYSTICK CONTROLS:</span>
                 <ul className="list-disc list-inside space-y-1 text-neutral-300">
                   <li><b className="text-white">Tap to Throw:</b> Tap any eligible receiver downfield (WR, Center, or RB) to launch a crisp pass with smart lead targeting so they catch the ball in stride!</li>
-                  <li><b className="text-white">Relative Virtual Joystick:</b> Touch anywhere in the lower-left control area—from the top of the joystick marker to the bottom of the field, and from the left edge to mid-screen—to start the play. The stick appears where you touch; drag it to control your player! On keyboard, press Space, WASD, or any Arrow key to start snaps, kickoffs, and punts; WASD / Arrow keys also move your player.</li>
+                  <li><b className="text-white">Relative Virtual Joystick:</b> Touch anywhere in the bottom control area—from the top of the joystick outer ring to the bottom of the screen, all the way left to right—to start the play. The stick appears where you touch; drag it to control your player! On keyboard, press Space, WASD, or any Arrow key to start snaps, kickoffs, and punts; WASD / Arrow keys also move your player.</li>
                   <li><b className="text-white">Quarterback Control:</b> Maneuver the QB in the pocket, step up to avoid blitzers, roll out, or cross the line of scrimmage to scramble!</li>
                   <li><b className="text-white">Ball Carrier Control:</b> Steer the Running Back through holes, cut laterally, or slow down behind lead blockers!</li>
                   <li><b className="text-white">Edge Rusher on Defense:</b> Take control of the edge rusher with the joystick, bend around the tackle, collapse the pocket, and deliver a bone-crushing sack!</li>

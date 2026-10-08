@@ -39,7 +39,9 @@ export function createSimulationClock() {
 }
 
 export function getBallCarrierRunSpeed(isReturner: boolean, isBoosted: boolean): number {
-  if (isReturner) return 1.4 * 1.18 * 0.68;
+  if (isReturner) {
+    return 1.4 * 1.18 * 0.68;
+  }
   return isBoosted ? 2.15 : 1.84;
 }
 

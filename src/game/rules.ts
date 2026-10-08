@@ -153,7 +153,13 @@ export function canTackleQuarterback(tackleImmunity: number): boolean {
 }
 
 export function calculateBrokenTackleChance(input: TackleChanceInput): number {
-  if (input.isReturner) return 0;
+  if (input.isReturner) {
+    let breakChance = 0.14;
+    if (input.isBoosted) breakChance += 0.12;
+    if (input.brokenCount === 1) breakChance *= 0.6;
+    if (input.brokenCount >= 2) breakChance = 0.04;
+    return breakChance;
+  }
   if (input.isQB) {
     // Quarterbacks do not experience broken tackles against charging defenders
     return input.isBlitzer ? 0.01 : 0.04;
@@ -193,6 +199,7 @@ export interface CatchContestParams {
   stamina?: number;
   distanceToCatch?: number;
   roll?: number;
+  isProMode?: boolean;
 }
 
 export interface CatchContestResult {
@@ -212,6 +219,19 @@ export function getCatchCompletionChance(params: CatchContestParams): number {
   const doubleCoveragePenalty = Math.min(2, Math.max(0, (params.defenderCount ?? 1) - 1)) * 0.10;
   const positionPenalty = params.ballSideDefender ? 0.08 : 0;
   const reachPenalty = Math.max(0, (params.distanceToCatch ?? 0) - 12) * 0.008;
+
+  if (params.isProMode) {
+    // In Pro Mode, pass catch rate is boosted significantly for high-octane fun!
+    // Base catch rate starts high (~72%) even in tight coverage, and reaches 98% on open looks.
+    const proBase = 0.72;
+    const proOpenBoost = 0.26 * coverageCurve;
+    const handsMod = params.archetype === 'POSSESSION' || params.archetype === 'TIGHT_END' ? 0.05 : 0;
+    const fatigueMod = Math.max(0, (50 - (params.stamina ?? 100)) / 50) * 0.03;
+    const doubleCovMod = Math.min(2, Math.max(0, (params.defenderCount ?? 1) - 1)) * 0.04;
+    const reachMod = Math.max(0, (params.distanceToCatch ?? 0) - 16) * 0.004;
+    return Math.max(0.65, Math.min(0.98, proBase + proOpenBoost + handsMod - fatigueMod - doubleCovMod - reachMod));
+  }
+
   return Math.max(0.10, Math.min(0.905, 0.30 + 0.605 * coverageCurve + (handsBonus - fatiguePenalty - doubleCoveragePenalty - positionPenalty) * (1 - coverageCurve) - reachPenalty));
 }
 
@@ -231,11 +251,12 @@ export function resolveCatchContestOutcome(params: CatchContestParams): CatchCon
   const contested = Math.min(params.effectiveDefDist, params.effectiveBallDist) < 45;
   const completionChance = getCatchCompletionChance(params);
   if (roll < 1 - completionChance) {
-    const interceptionChance = contested ? (params.ballSideDefender ? 0.08 : 0.04) : 0;
+    const isPro = Boolean(params.isProMode);
+    const interceptionChance = contested ? (params.ballSideDefender ? (isPro ? 0.02 : 0.08) : (isPro ? 0.01 : 0.04)) : 0;
     if (roll < interceptionChance) {
       return { type: 'INTERCEPTED', caught: false, announcement: 'INTERCEPTED AT THE CATCH POINT!', color: '#ff3333', resultType: 'INT' };
     }
-    if (contested && roll >= 0.095) {
+    if (contested && roll >= (isPro ? 0.04 : 0.095)) {
       return { type: 'BROKEN_UP', caught: false, announcement: 'PASS BROKEN UP ON CONTACT!', color: '#ff8888', resultType: 'DEFLECT' };
     }
     return { type: 'DROP', caught: false, announcement: roll >= 0.075 ? 'RECEIVER SLIPPED ON TURF! INCOMPLETE!' : 'DROPPED PASS!', color: '#ff9999', resultType: 'INCOMPLETE' };
@@ -259,6 +280,7 @@ export interface QbAccuracyInput {
   isMoving?: boolean;
   passProtectionRating?: number;
   roll?: number;
+  isProMode?: boolean;
 }
 
 export interface QbAccuracyResult {
@@ -277,7 +299,7 @@ export function evaluateQbThrowAccuracy(input: QbAccuracyInput, attackDirection:
   // - If QB is hit as he throws:
   if (input.isHitAsThrown) {
     const hitRoll = input.roll !== undefined ? input.roll : Math.random();
-    const hitOffTargetChance = input.isCpuThrow ? 0.35 : 0.55;
+    const hitOffTargetChance = input.isProMode ? (input.isCpuThrow ? 0.18 : 0.28) : (input.isCpuThrow ? 0.35 : 0.55);
     if (hitRoll < hitOffTargetChance) {
       return {
         isOffTarget: true,
@@ -290,7 +312,10 @@ export function evaluateQbThrowAccuracy(input: QbAccuracyInput, attackDirection:
   }
 
   // Baseline inaccuracy: clean short/medium passes (~8%), deep balls (~16%), under heavy rusher pressure (~28%)
-  const baseRate = Math.min(0.45, ((input.isUnderPressure ? 0.28 : input.isDeepShot ? 0.16 : 0.08) + (input.isMoving ? 0.07 : 0)) * proMod);
+  let baseRate = Math.min(0.45, ((input.isUnderPressure ? 0.28 : input.isDeepShot ? 0.16 : 0.08) + (input.isMoving ? 0.07 : 0)) * proMod);
+  if (input.isProMode) {
+    baseRate = baseRate * 0.45;
+  }
 
   if (roll >= baseRate) {
     return { isOffTarget: false, offsetX: 0, offsetY: 0 };

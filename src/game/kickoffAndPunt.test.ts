@@ -561,7 +561,7 @@ test('kick coverage pursuers only gain return speed after the returner fields th
   assert.ok(postCatchSpeed > flightSpeed);
 });
 
-test('kick and punt returners use the slower return speed and cannot break tackles', () => {
+test('kick and punt returners are slowed to match the speed of their own team and can break tackles', () => {
   const normalCarrierSpeed = getBallCarrierRunSpeed(false, false);
   const regularWrRouteSpeed = 1.4 * 1.18 * 0.68;
 
@@ -569,13 +569,15 @@ test('kick and punt returners use the slower return speed and cannot break tackl
   assert.equal(getBallCarrierRunSpeed(true, false), regularWrRouteSpeed);
   assert.equal(getBallCarrierRunSpeed(true, true), regularWrRouteSpeed);
   assert.equal(getBallCarrierRunSpeed(false, true), 2.15);
-  assert.equal(calculateBrokenTackleChance({
+  const returnerBreakChance = calculateBrokenTackleChance({
     isRB: false,
     isBoosted: false,
     brokenCount: 0,
     isBlitzer: false,
     isReturner: true
-  }), 0);
+  });
+  assert.ok(returnerBreakChance > 0, 'Returners can break tackles like standard running play ball carriers');
+  assert.equal(returnerBreakChance, 0.14);
 });
 
 test('return blockers only stun once per tackler engagement', () => {
@@ -633,8 +635,8 @@ test('the punt joystick starts the punt and all player speeds scale with GAME_SP
   assert.ok(typeof pointerDown === 'function', 'Canvas has pointerdown listener');
 
   // The punt meter is informational; the shared joystick is the start control.
-  pointerDown({ clientX: 190, clientY: 320, pointerId: 1 });
-  assert.notEqual(engine.phase, 'THROWN', 'Tapping the punt meter outside the joystick area does not start the punt');
+  pointerDown({ clientX: 190, clientY: 280, pointerId: 1 });
+  assert.notEqual(engine.phase, 'THROWN', 'Tapping outside the joystick area does not start the punt');
   pointerDown({ clientX: 90, clientY: 364, pointerId: 2 });
 
   assert.equal(engine.phase, 'THROWN', 'Touching the joystick starts the punt');

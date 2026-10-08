@@ -8,6 +8,8 @@ import {
   ProDefensePlayId
 } from './proMode';
 import { offensivePlaybook, defensivePlaybook, eliteOffensiveKeys, eliteDefensiveKeys, proOffensiveKeys, proDefensiveKeys } from './playbook';
+import { getCatchCompletionChance, resolveCatchContestOutcome } from './rules';
+import { mountFootballGame, type GameEngineHandle } from './engine';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { ProPlaybookCards } from './ProPlaybookCards';
@@ -175,5 +177,90 @@ test('Pro mode allows players to pick every defensive scheme with valid counters
     const def = PRO_DEFENSE_PLAYS[defId as ProDefensePlayId];
     assert.ok(def, `Defense ${defId} must exist in PRO_DEFENSE_PLAYS`);
     assert.ok(def.name && def.scheme && def.description, `Defense ${defId} must have descriptive fields`);
+  }
+});
+
+test('Pro mode significantly boosts pass catch completion rate across all coverage levels', () => {
+  const tightContest = { effectiveDefDist: 20, effectiveBallDist: 20, isTargetSpammed: false, isRbFlatSpammed: false, isRb: false };
+  const standardTightChance = getCatchCompletionChance(tightContest);
+  const proTightChance = getCatchCompletionChance({ ...tightContest, isProMode: true });
+
+  assert.ok(standardTightChance < 0.40, `Standard tight chance was ${standardTightChance}`);
+  assert.ok(proTightChance >= 0.65, `Pro mode tight chance should be >= 0.65, got ${proTightChance}`);
+  assert.ok(proTightChance > standardTightChance + 0.30, 'Pro mode provides massive catch boost in tight coverage');
+
+  const openContest = { effectiveDefDist: 60, effectiveBallDist: 60, isTargetSpammed: false, isRbFlatSpammed: false, isRb: false };
+  const proOpenChance = getCatchCompletionChance({ ...openContest, isProMode: true });
+  assert.ok(proOpenChance >= 0.95, `Pro mode open chance should be >= 0.95, got ${proOpenChance}`);
+
+  // Test resolveCatchContestOutcome in Pro mode
+  const proOutcome = resolveCatchContestOutcome({ ...tightContest, isProMode: true, roll: 0.50 });
+  assert.equal(proOutcome.type, 'COMPLETE');
+  assert.equal(proOutcome.caught, true);
+});
+
+test('User can pick which defender to control before starting the play in Pro mode', () => {
+  const listeners = new Map<string, EventListener>();
+  const drawingContext = {
+    save: () => {}, restore: () => {}, translate: () => {}, scale: () => {},
+    clearRect: () => {}, fillRect: () => {}, strokeRect: () => {},
+    beginPath: () => {}, closePath: () => {}, moveTo: () => {}, lineTo: () => {},
+    stroke: () => {}, fill: () => {}, arc: () => {}, bezierCurveTo: () => {},
+    quadraticCurveTo: () => {}, ellipse: () => {}, clip: () => {}, roundRect: () => {},
+    setLineDash: () => {}, createLinearGradient: () => ({ addColorStop: () => {} }),
+    createRadialGradient: () => ({ addColorStop: () => {} }), fillText: () => {},
+    measureText: () => ({ width: 40 }), rotate: () => {}
+  };
+  const canvas = {
+    width: 340, height: 450, style: {},
+    getContext: () => drawingContext,
+    getBoundingClientRect: () => ({ left: 0, top: 0, width: 340, height: 450 } as DOMRect),
+    addEventListener: (type: string, listener: EventListener) => listeners.set(type, listener),
+    removeEventListener: (type: string) => listeners.delete(type),
+    _listeners: listeners
+  } as unknown as HTMLCanvasElement;
+
+  let engine: GameEngineHandle | null = null;
+  let controlledChangedIndex = -1;
+  const cleanup = mountFootballGame(canvas, {
+    setP2OffPlayState: () => {}, setP2DefPlayState: () => {},
+    setDownDistanceText: () => {}, setActiveOffenseState: () => {},
+    setUserScore: () => {}, setCpuScore: () => {}, setP1DefPlayState: () => {},
+    setMomentumState: () => {}, setGameClockState: () => {}, showAnnouncement: () => {},
+    onEngineReady: value => { engine = value; },
+    onControlledDefenderChange: (index) => { controlledChangedIndex = index; }
+  });
+
+  try {
+    assert.ok(engine);
+    const game = engine as GameEngineHandle;
+    game.setTacticalMode?.('PRO');
+    game.setPossessionForTest?.('P2'); // P1 on defense
+    game.selectDefense('PRO_COVER2_HARD_FLAT');
+
+    const defenders = game.getDefenders?.();
+    assert.ok(defenders && defenders.length >= 7, 'Must have 7 defenders');
+
+    // Default is defender 0 (DL)
+    assert.equal(game.getControlledDefender?.(), defenders[0]);
+
+    // Pick Cornerback #4 (index 3)
+    game.selectDefender?.(3);
+    assert.equal(game.getControlledDefender?.(), defenders[3]);
+    assert.equal(game.getControlledDefenderIndex?.(), 3);
+    assert.equal(controlledChangedIndex, 3);
+
+    // Pick Free Safety #7 (index 6)
+    game.selectDefender?.(6);
+    assert.equal(game.getControlledDefender?.(), defenders[6]);
+    assert.equal(game.getControlledDefenderIndex?.(), 6);
+    assert.equal(controlledChangedIndex, 6);
+
+    // Cycle defender forward
+    const nextIdx = game.cycleControlledDefender?.(1);
+    assert.equal(nextIdx, 0);
+    assert.equal(game.getControlledDefender?.(), defenders[0]);
+  } finally {
+    cleanup?.();
   }
 });

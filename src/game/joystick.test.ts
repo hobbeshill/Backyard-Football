@@ -23,10 +23,11 @@ test('idle joystick marker stays inside the field numbers at the RB formation de
   assert.deepEqual(getOffenseJoystickAnchor(288), anchor, 'Anchor does not depend on RB alignment');
   assert.equal(isOffenseJoystickStartZone(anchor.x, anchor.y, anchor.x, anchor.y), true);
   assert.equal(isOffenseJoystickStartZone(anchor.x + 50, anchor.y + 40, anchor.x, anchor.y), true);
+  assert.equal(isOffenseJoystickStartZone(300, anchor.y, anchor.x, anchor.y), true);
   assert.equal(isOffenseJoystickStartZone(anchor.x, anchor.y - 56, anchor.x, anchor.y), false);
 });
 
-test('joystick touch area fills the lower-left corner through the midpoint and bottom edge', () => {
+test('joystick touch area fills from the top of the outer circle down and all the way left to right', () => {
   for (const scale of [0.5, 1, 2]) {
     const width = 340 * scale;
     const height = 450 * scale;
@@ -35,13 +36,13 @@ test('joystick touch area fills the lower-left corner through the midpoint and b
     const contains = (x: number, y: number) =>
       isOffenseJoystickStartZone(x, y, anchor.x, anchor.y, width, height);
 
-    for (const x of [0, 10 * scale, anchor.x, width / 2]) {
+    for (const x of [0, 10 * scale, anchor.x, width / 2, width * 0.8, width]) {
       for (const y of [top, anchor.y, height - scale, height]) {
         assert.equal(contains(x, y), true, `The touch area includes (${x}, ${y}) at scale ${scale}`);
       }
     }
     assert.equal(contains(-scale, height), false);
-    assert.equal(contains(width / 2 + scale, height), false);
+    assert.equal(contains(width + scale, height), false);
     assert.equal(contains(anchor.x, top - scale), false);
     assert.equal(contains(0, height + scale), false);
   }
@@ -1054,6 +1055,64 @@ test('ball carrier lateral speed is controlled and does not combine with juke by
 
     // Lateral speed should remain calibrated without wild sideways sliding
     assert.ok(true);
+  } finally {
+    cleanup?.();
+  }
+});
+
+test('defender under user control does not move unless the user moves them', () => {
+  const canvas = createMockCanvas();
+  let engine: GameEngineHandle | null = null;
+  const cleanup = mountFootballGame(canvas, {
+    setP2OffPlayState: () => {},
+    setP2DefPlayState: () => {},
+    setDownDistanceText: () => {},
+    setActiveOffenseState: () => {},
+    setUserScore: () => {},
+    setCpuScore: () => {},
+    setP1DefPlayState: () => {},
+    setMomentumState: () => {},
+    setGameClockState: () => {},
+    showAnnouncement: () => {},
+    onEngineReady: value => { engine = value; }
+  });
+
+  try {
+    assert.ok(engine);
+    const game = engine as any;
+    game.setPossessionForTest?.('P2'); // CPU offense, User defense
+    game.resetDrill();
+    assert.equal(game.phase, 'PRE_SNAP');
+
+    const controlledDefender = game.getControlledDefender?.();
+    assert.ok(controlledDefender);
+    const initialX = controlledDefender.x;
+    const initialY = controlledDefender.y;
+
+    const downHandler = (canvas as any)._listeners.get('pointerdown');
+    const moveHandler = (canvas as any)._listeners.get('pointermove');
+    const upHandler = (canvas as any)._listeners.get('pointerup');
+
+    // Start defensive play by tapping the start area
+    downHandler({ clientX: 10, clientY: 440, pointerId: 5 } as PointerEvent);
+    upHandler({ clientX: 10, clientY: 440, pointerId: 5 } as PointerEvent);
+    assert.notEqual(game.phase, 'PRE_SNAP');
+
+    // Defender under user control without active joystick input must not move
+    assert.equal(controlledDefender.x, initialX);
+    assert.equal(controlledDefender.y, initialY);
+    assert.equal(controlledDefender.vx, 0);
+    assert.equal(controlledDefender.vy, 0);
+
+    // Now user moves with the joystick
+    downHandler({ clientX: 90, clientY: 364, pointerId: 6 } as PointerEvent);
+    moveHandler({ clientX: 130, clientY: 364, pointerId: 6 } as PointerEvent);
+
+    assert.equal(game.isJoystickActiveForTest?.(), true);
+    upHandler({ clientX: 130, clientY: 364, pointerId: 6 } as PointerEvent);
+    assert.equal(game.isJoystickActiveForTest?.(), false);
+    assert.equal(controlledDefender.vx, 0);
+    assert.equal(controlledDefender.vy, 0);
   } finally {
     cleanup?.();
   }
