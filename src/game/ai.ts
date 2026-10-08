@@ -51,6 +51,25 @@ export function getSuccessfulPlayCounter(recentPlays: readonly CpuOffensiveTende
   return null;
 }
 
+export function getCpuCounterReason(
+  recentPlays: readonly CpuOffensiveTendencyPlay[],
+  defenseKey: string,
+  isProMode: boolean
+): string | null {
+  if (!isProMode) {
+    return getSuccessfulPlayCounter(recentPlays) === defenseKey ? 'repeated successful plays' : null;
+  }
+
+  const recent = recentPlays.slice(-4);
+  const count = (plays: string[]) => recent.filter(play => plays.includes(play.play)).length;
+  if (count(['PRO_SCREEN']) >= 2 && defenseKey === 'PRO_BLITZ_ZERO') return 'repeated screens';
+  if (count(['PRO_JET_SWEEP', 'PRO_DRAW']) >= 2 && ['PRO_RUN_STOP_BOX', 'PRO_COVER1_MAN'].includes(defenseKey)) return 'repeated runs';
+  if (count(['PRO_VERTS', 'PRO_DOUBLE_MOVES']) >= 2 && ['PRO_COVER4_QUARTERS', 'PRO_COVER3_DEEP'].includes(defenseKey)) return 'repeated deep passes';
+  if (count(['PRO_QUICK_SLANTS']) >= 2 && defenseKey === 'PRO_COVER1_MAN') return 'repeated slants';
+  if (count(['PRO_MESH']) >= 2 && defenseKey === 'PRO_COVER3_DEEP') return 'repeated crossing routes';
+  return null;
+}
+
 export function shouldCpuGoForItOnFourthDown(situation: CpuFourthDownSituation): boolean {
   const isGoalLineOpportunity = situation.distanceToEndzoneYards <= 15 && situation.yardsToGo <= 3;
   if (isGoalLineOpportunity) return true;
@@ -74,6 +93,10 @@ export interface ProDefensiveCallSituation {
   down: number;
   yardsToGo: number;
   previousCall: string;
+}
+
+export function getCoverageMistakeChance(mistakeRating: number): number {
+  return Math.max(0.04, Math.min(0.30, 0.18 * mistakeRating));
 }
 
 export function chooseProDefensiveCall(

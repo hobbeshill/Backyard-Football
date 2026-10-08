@@ -51,6 +51,40 @@ export function getDesignedRunLateralBias(playType: string, currentX: number, si
   return Math.max(-1.15, Math.min(1.15, (targetX - currentX) * 0.12));
 }
 
+export interface RunLaneOption {
+  side: 'LEFT' | 'MIDDLE' | 'RIGHT';
+  targetX: number;
+  clearance: number;
+}
+
+export function getRunLaneOptions(
+  runner: Pick<Entity, 'x' | 'y' | 'radius'>,
+  teammates: Entity[],
+  defenders: Entity[],
+  attackDirection: number,
+  fieldWidth = 340,
+  fieldDepth = 100
+): RunLaneOption[] {
+  const obstacles = [...teammates, ...defenders].filter(entity => entity !== runner);
+  return ([-56, 0, 56] as const).map((offset, index) => {
+    const targetX = Math.max(35, Math.min(fieldWidth - 35, runner.x + offset));
+    let clearance = Infinity;
+    for (const progress of [0.2, 0.4, 0.6, 0.8, 1]) {
+      const sampleX = runner.x + (targetX - runner.x) * progress;
+      const sampleY = runner.y + fieldDepth * progress * attackDirection;
+      for (const obstacle of obstacles) {
+        const edgeDistance = Math.hypot(sampleX - obstacle.x, sampleY - obstacle.y) - (runner.radius || 10) - (obstacle.radius || 10);
+        clearance = Math.min(clearance, edgeDistance);
+      }
+    }
+    return {
+      side: (['LEFT', 'MIDDLE', 'RIGHT'] as const)[index],
+      targetX,
+      clearance
+    };
+  });
+}
+
 // Direction-only input: analog sticks and d-pads both produce a unit heading (or none).
 export function getDirectionalInput(x: number, y: number, deadzone = 0.05): { x: number; y: number } {
   const magnitude = Math.hypot(x, y);
@@ -66,7 +100,7 @@ export function getUserRunnerVelocity(
   attackDirection: number
 ): { vx: number; vy: number } {
   const direction = getDirectionalInput(inputX, inputY);
-  if (direction.x === 0 && direction.y === 0) return { vx: 0, vy: maxSpeed * attackDirection };
+  if (direction.x === 0 && direction.y === 0) return { vx: 0, vy: 0 };
   const speed = maxSpeed * getRunDirectionSpeedFactor(direction.y, attackDirection);
   return { vx: direction.x * speed, vy: direction.y * speed };
 }
@@ -183,7 +217,9 @@ export function resolveCollisions(
   includeReceivers: boolean,
   receiverEntities: Entity[],
   defenders: Entity[],
-  ballCarrier: Entity | null = null
+  ballCarrier: Entity | null = null,
+  fieldWidth = 340,
+  userControlledEntities: Entity[] = []
 ): void {
   for (let i = 0; i < allEntities.length; i++) {
     for (let j = i + 1; j < allEntities.length; j++) {
@@ -207,11 +243,54 @@ export function resolveCollisions(
       const dy = second.y - first.y;
       const distance = Math.hypot(dx, dy);
       const minDistance = (first.radius || 10) + (second.radius || 10);
+      const carrierIsFirst = first === ballCarrier;
+      const carrierIsSecond = second === ballCarrier;
+      const carrierBlockContact = (carrierIsFirst && !isSecondDefender) || (carrierIsSecond && !isFirstDefender);
+      const firstIsUserControlled = userControlledEntities.includes(first);
+      const secondIsUserControlled = userControlledEntities.includes(second);
 
-      if (distance < minDistance && distance > 0) {
+      if (distance < minDistance && (distance > 0 || carrierBlockContact || firstIsUserControlled || secondIsUserControlled)) {
         const overlap = minDistance - distance;
-        const nx = dx / distance;
-        const ny = dy / distance;
+        const nx = distance > 0 ? dx / distance : 0;
+        const ny = distance > 0 ? dy / distance : 1;
+
+        if (carrierBlockContact && ballCarrier) {
+          const blocker = carrierIsFirst ? second : first;
+          const blockerDirection = carrierIsFirst ? 1 : -1;
+          if (userControlledEntities.includes(ballCarrier)) {
+            blocker.x += nx * overlap * blockerDirection;
+            blocker.y += ny * overlap * blockerDirection;
+            ballCarrier.contactSlowTimer = Math.max(ballCarrier.contactSlowTimer || 0, 4);
+            continue;
+          }
+          const leftX = Math.max(ballCarrier.radius || 10, ballCarrier.x - minDistance);
+          const rightX = Math.min(fieldWidth - (ballCarrier.radius || 10), ballCarrier.x + minDistance);
+          const clearance = (candidateX: number) => allEntities.reduce((nearest, entity) => {
+            if (entity === ballCarrier || entity === blocker) return nearest;
+            return Math.min(nearest, Math.hypot(candidateX - entity.x, ballCarrier.y - entity.y) - (entity.radius || 10));
+          }, Infinity);
+          const side = clearance(leftX) > clearance(rightX) ? -1 : 1;
+          const carrierShare = 0.25;
+          const blockerShare = 1 - carrierShare;
+
+          ballCarrier.x += side * Math.min(4, overlap * 0.75);
+          ballCarrier.x -= nx * overlap * carrierShare;
+          ballCarrier.y -= ny * overlap * carrierShare;
+          blocker.x += nx * overlap * blockerShare;
+          blocker.y += ny * overlap * blockerShare;
+          ballCarrier.contactSlowTimer = Math.max(ballCarrier.contactSlowTimer || 0, 4);
+          continue;
+        }
+
+        if (firstIsUserControlled || secondIsUserControlled) {
+          if (firstIsUserControlled && secondIsUserControlled) continue;
+          const yieldingPlayer = firstIsUserControlled ? second : first;
+          const yieldDirection = firstIsUserControlled ? 1 : -1;
+          yieldingPlayer.x += nx * overlap * yieldDirection;
+          yieldingPlayer.y += ny * overlap * yieldDirection;
+          continue;
+        }
+
         first.x -= nx * overlap * 0.5;
         first.y -= ny * overlap * 0.5;
         second.x += nx * overlap * 0.5;

@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { chooseProDefensiveCall, getSuccessfulPlayCounter, isCpuPressureRecognized, scoreRunBlockTarget, shouldCpuReleasePass, shouldCpuScramble } from './ai';
+import { chooseProDefensiveCall, getCoverageMistakeChance, getCpuCounterReason, getSuccessfulPlayCounter, isCpuPressureRecognized, scoreRunBlockTarget, shouldCpuReleasePass, shouldCpuScramble } from './ai';
 import { alignDefenderAcrossFromReceiver, alignDefenderAcrossFromRunningBack, alignDefenderToZone, alignDefenders, chooseCpuDefensiveAssignments, constrainDefendersToFieldSide, getBlitzAlignmentY, getBracketCoverageTarget, getDefensiveLineAlignmentY, matchCpuDefendersToReceivers, separateDefenderAlignments } from './defense';
 import { getCarrierFumbleChance } from './fumbles';
-import { calculateYardsToGo, canDefenderDeflectPass, canTackleQuarterback, findTappedPassReceiver, getCatchCompletionChance, getDefenderPassReachHeight, getDriveStartY, getSnapBallPosition, getPassArcHeight, getPassArcMaxHeight, getPassFlightFrames, getPassLeadTarget, getRoutePassLeadTarget, isSafety, resolveCatchContestOutcome, resolvePlayResult } from './rules';
-import { canEngagePassBlock, clampPlayerToFieldY, GAME_SPEED_SCALE, getBallCarrierRunSpeed, getFatigueSpeedMultiplier, getPassBlockBaseHoldFrames, getPassBlockHoldFrames, getRunDirectionSpeedFactor, getRunPursuitMovement, getUserDefenderSpeed, isRusherActivelyBlocked, moveToward, shouldHoldPassBlock, updatePlayerStamina, updateReceiverTargetStamina, updateRunningBackStamina, updateRouteMovement, USER_CONTROL_SPEED_MULTIPLIER } from './movement';
+import { calculateYardsToGo, canApplyProMatchupAdjustment, canDefenderDeflectPass, canTackleQuarterback, findTappedPassReceiver, getCatchCompletionChance, getDefenderPassReachHeight, getDriveStartY, getSnapBallPosition, getPassArcHeight, getPassArcMaxHeight, getPassFlightFrames, getPassLeadTarget, getRoutePassLeadTarget, isSafety, resolveCatchContestOutcome, resolvePlayResult } from './rules';
+import { canEngagePassBlock, clampPlayerToFieldY, GAME_SPEED_SCALE, getBallCarrierRunSpeed, getFatigueSpeedMultiplier, getPassBlockBaseHoldFrames, getPassBlockHoldFrames, getRunDirectionSpeedFactor, getRunPursuitMovement, getUserDefenderSpeed, isRusherActivelyBlocked, moveToward, resolveCollisions, shouldHoldPassBlock, updatePlayerStamina, updateReceiverTargetStamina, updateRunningBackStamina, updateRouteMovement, USER_CONTROL_SPEED_MULTIPLIER } from './movement';
 import type { Entity } from './types';
 
 test('coverage reduces catches smoothly and touching players are not wide open', () => {
@@ -13,6 +13,13 @@ test('coverage reduces catches smoothly and touching players are not wide open',
   assert.ok(Math.abs(chance(19.99) - chance(20.01)) < 0.001);
   assert.ok(chance(35) > chance(20));
   assert.equal(chance(60), 0.905);
+});
+
+test('team coverage ratings scale defensive busts symmetrically', () => {
+  assert.equal(getCoverageMistakeChance(0.5), 0.09);
+  assert.equal(getCoverageMistakeChance(1), 0.18);
+  assert.ok(getCoverageMistakeChance(1.5) > getCoverageMistakeChance(0.5));
+  assert.equal(getCoverageMistakeChance(2), 0.30);
 });
 
 test('double coverage, ball-side positioning, receiver hands and fatigue affect contested catches', () => {
@@ -81,6 +88,40 @@ test('user-controlled players get a modest speed edge while max pursuit remains 
   assert.ok(maxPursuitSpeed > boostedCarrierSpeed, 'A fully accelerated standard defender should still be able to catch the fastest controlled carrier');
 });
 
+test('ball carriers sidestep exact-overlap blockers toward the clearer lane and slow in traffic', () => {
+  const runner: Entity = { x: 170, y: 500, radius: 10, team: 'P1' };
+  const blockerAhead: Entity = { x: 170, y: 500, radius: 10, team: 'P1' };
+  const blockerLeft: Entity = { x: 150, y: 500, radius: 10, team: 'P1' };
+
+  resolveCollisions([runner, blockerAhead, blockerLeft], true, [blockerAhead, blockerLeft], [], runner);
+
+  assert.ok(runner.x > 170, 'The runner should choose the open right-side lane');
+  assert.equal(runner.contactSlowTimer, 4, 'Contact should apply a brief traffic slowdown');
+});
+
+test('user-controlled ball carriers keep their chosen lane while blockers yield', () => {
+  const runner: Entity = { x: 170, y: 500, radius: 10, team: 'P1' };
+  const blocker: Entity = { x: 170, y: 500, radius: 10, team: 'P1' };
+
+  resolveCollisions([runner, blocker], true, [blocker], [], runner, 340, [runner]);
+
+  assert.equal(runner.x, 170);
+  assert.equal(runner.y, 500);
+  assert.ok(blocker.y > 500, 'The teammate should yield instead of steering the runner');
+  assert.equal(runner.contactSlowTimer, 4);
+});
+
+test('user-controlled defenders are not repositioned by teammate collisions', () => {
+  const defender: Entity = { x: 170, y: 500, radius: 10, team: 'P1' };
+  const teammate: Entity = { x: 170, y: 500, radius: 10, team: 'P1' };
+
+  resolveCollisions([defender, teammate], true, [], [defender], null, 340, [defender]);
+
+  assert.equal(defender.x, 170);
+  assert.equal(defender.y, 500);
+  assert.ok(teammate.y > 500, 'The teammate should yield instead of steering the controlled defender');
+});
+
 test('fatigue follows workload and endurance, with bounded recovery and speed penalties', () => {
   assert.equal(updatePlayerStamina(100, 500), 70);
   assert.ok(updatePlayerStamina(100, 500, 0.9) < updatePlayerStamina(100, 500, 1.15));
@@ -121,6 +162,18 @@ test('CPU counters repeated successful run, deep-pass, short-pass, and RB-target
   assert.equal(getSuccessfulPlayCounter([
     successful('POWER', false), { play: 'ISO', isPass: false, isSuccessful: false }
   ]), null);
+});
+
+test('successful recent plays identify a temporary defensive counter and ignore losing streaks', () => {
+  const repeatedRuns = [
+    { play: 'POWER', isPass: false, isSuccessful: true },
+    { play: 'POWER', isPass: false, isSuccessful: true }
+  ];
+  const failedRuns = repeatedRuns.map(play => ({ ...play, isSuccessful: false }));
+
+  assert.equal(getCpuCounterReason(repeatedRuns, 'ZONE34', false), 'repeated successful plays');
+  assert.equal(getCpuCounterReason(failedRuns, 'ZONE34', false), null);
+  assert.equal(getCpuCounterReason(repeatedRuns, 'COVER2', false), null);
 });
 
 test('three WR targets exhaust stamina and two untargeted plays restore it', () => {
@@ -250,6 +303,13 @@ test('tackles and sacks in either own end zone are safeties, but incomplete pass
   assert.equal(isSafety(1099, -1, 1200, 100, 'TACKLE'), false);
   assert.equal(isSafety(101, 1, 1200, 100, 'TACKLE'), false);
   assert.equal(isSafety(1150, -1, 1200, 100, 'INCOMPLETE'), false);
+});
+
+test('Pro matchup adjustments cannot overwrite a resolved tackle, incompletion, or touchdown', () => {
+  for (const resultType of ['TACKLE', 'SACK', 'INCOMPLETE', 'DEFLECT', 'BATTED_DOWN', 'BROKEN_UP', 'OUT_OF_BOUNDS', 'INT', 'TD']) {
+    assert.equal(canApplyProMatchupAdjustment(resultType), false, resultType);
+  }
+  assert.equal(canApplyProMatchupAdjustment('COMPLETE'), true);
 });
 
 test('short passes clear defensive linemen on a safe arc', () => {
@@ -1166,10 +1226,26 @@ test('defenders labeled to blitz experience significantly less broken tackles an
     isBlitzer: true
   });
 
-  assert.equal(regularChance, 0.30);
+  assert.equal(regularChance, 0.18);
   assert.equal(calculateBrokenTackleChance({ isRB: false, isBoosted: false, brokenCount: 0, isBlitzer: false }), 0.14);
-  assert.equal(blitzerChance, 0.05);
+  assert.equal(blitzerChance, 0.04);
   assert.ok(blitzerChance < regularChance, 'Blitzer should experience far fewer broken tackles');
+
+  const lowPowerChance = calculateBrokenTackleChance({
+    isRB: true,
+    isBoosted: false,
+    brokenCount: 0,
+    isBlitzer: false,
+    runPowerRating: 0.5
+  });
+  const highPowerChance = calculateBrokenTackleChance({
+    isRB: true,
+    isBoosted: false,
+    brokenCount: 0,
+    isBlitzer: false,
+    runPowerRating: 1.7
+  });
+  assert.ok(lowPowerChance < regularChance && highPowerChance > regularChance);
 
   // Power-boosted runner vs blitzer
   const boostedBlitzerChance = calculateBrokenTackleChance({
@@ -1184,8 +1260,8 @@ test('defenders labeled to blitz experience significantly less broken tackles an
     brokenCount: 0,
     isBlitzer: false
   });
-  assert.equal(boostedBlitzerChance, 0.12);
-  assert.equal(boostedRegularChance, 0.42);
+  assert.equal(boostedBlitzerChance, 0.10);
+  assert.equal(boostedRegularChance, 0.25);
   assert.ok(boostedBlitzerChance < boostedRegularChance, 'Boosted runner should still break far fewer tackles against blitzers');
 });
 
@@ -2210,6 +2286,29 @@ test('Real life football mistakes: sideline boundary out of bounds and QB throw 
   }, -1);
   assert.equal(humanHitThrow.mistakeType, 'HIT_AS_THROWN');
   assert.equal(cpuHitThrow.mistakeType, undefined);
+});
+
+test('Pro QB accuracy mistakes respond to protection ratings', async () => {
+  const { evaluateQbThrowAccuracy } = await import('./rules');
+  const protectedThrow = evaluateQbThrowAccuracy({
+    throwDist: 100,
+    isUnderPressure: false,
+    isDeepShot: false,
+    isProMode: true,
+    passProtectionRating: 1.5,
+    roll: 0.04
+  }, -1);
+  const vulnerableThrow = evaluateQbThrowAccuracy({
+    throwDist: 100,
+    isUnderPressure: false,
+    isDeepShot: false,
+    isProMode: true,
+    passProtectionRating: 0.5,
+    roll: 0.04
+  }, -1);
+
+  assert.equal(protectedThrow.isOffTarget, false);
+  assert.equal(vulnerableThrow.isOffTarget, true);
 });
 
 test('CPU aim uncertainty increases with throw distance and pressure', async () => {

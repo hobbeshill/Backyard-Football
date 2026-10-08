@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { FIELD_NUMBERS_INNER_EDGE_X, getCanvasRenderScale, getCameraYForAction, getCameraYForLineOfScrimmage, getOffenseJoystickAnchor, getPlayerForwardDirection, isOffenseJoystickStartZone, mountFootballGame, OFFENSE_JOYSTICK_INNER_RING_RADIUS, OFFENSE_JOYSTICK_RADIUS, type GameEngineHandle } from './engine';
-import { createSimulationClock, getDesignedRunLateralBias, getDirectionalInput, getUserRunnerVelocity } from './movement';
+import { createSimulationClock, getDesignedRunLateralBias, getDirectionalInput, getRunLaneOptions, getUserRunnerVelocity } from './movement';
 
 test('camera raises the offensive line of scrimmage while retaining defensive framing', () => {
   const lineOfScrimmageY = 500;
@@ -55,7 +55,7 @@ test('user control is direction-only with no carried momentum', () => {
   assert.ok(right.vx > 0 && Math.abs(right.vy) < 0.000001, 'Pushing right moves straight right with no forward drift');
   const left = getUserRunnerVelocity(-1, 0, 2, -1);
   assert.equal(left.vx, -right.vx, 'Reversing direction is instant');
-  assert.deepEqual(getUserRunnerVelocity(0, 0, 2, -1), { vx: 0, vy: -2 }, 'No input: run straight upfield with zero lateral drift');
+  assert.deepEqual(getUserRunnerVelocity(0, 0, 2, -1), { vx: 0, vy: 0 }, 'No input keeps the user-controlled runner still');
 });
 
 test('camera frames live action near the vertical center', () => {
@@ -147,6 +147,22 @@ test('Sweep lane bias steers outside on either side while ISO keeps its inside p
   assert.equal(getDesignedRunLateralBias('SWEEP', 120, 'left'), -1.15);
   assert.equal(getDesignedRunLateralBias('SWEEP', 255, 'right'), 0);
   assert.equal(getDesignedRunLateralBias('ISO', 220, 'right'), 0);
+});
+
+test('run lane preview scores an open lane above a lane occupied by defenders and blockers', () => {
+  const runner = { x: 170, y: 500, radius: 10 };
+  const lanes = getRunLaneOptions(
+    runner,
+    [{ x: 170, y: 440, radius: 10 }],
+    [{ x: 226, y: 435, radius: 10 }],
+    -1
+  );
+  const left = lanes.find(lane => lane.side === 'LEFT')!;
+  const middle = lanes.find(lane => lane.side === 'MIDDLE')!;
+  const right = lanes.find(lane => lane.side === 'RIGHT')!;
+
+  assert.ok(left.clearance > middle.clearance);
+  assert.ok(left.clearance > right.clearance);
 });
 
 test('receiver fatigue persists across play calls and possessions, and resets for a new game', () => {

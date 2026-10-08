@@ -23,6 +23,20 @@ export interface PlayResult {
   isTouchdown: boolean;
 }
 
+export function canApplyProMatchupAdjustment(resultType: string): boolean {
+  return ![
+    'TACKLE',
+    'SACK',
+    'INCOMPLETE',
+    'DEFLECT',
+    'BATTED_DOWN',
+    'BROKEN_UP',
+    'OUT_OF_BOUNDS',
+    'INT',
+    'TD'
+  ].includes(resultType);
+}
+
 export function getDriveStartY(attackDirection: number, fieldHeight: number, endZoneHeight: number): number {
   const twentyYards = (fieldHeight - 2 * endZoneHeight) * 0.2;
   return attackDirection === -1
@@ -146,6 +160,7 @@ export interface TackleChanceInput {
   isBlitzer: boolean;
   isQB?: boolean;
   isReturner?: boolean;
+  runPowerRating?: number;
 }
 
 export function canTackleQuarterback(tackleImmunity: number): boolean {
@@ -165,17 +180,21 @@ export function calculateBrokenTackleChance(input: TackleChanceInput): number {
     return input.isBlitzer ? 0.01 : 0.04;
   }
 
+  const runPowerMultiplier = input.isRB
+    ? Math.max(0.85, Math.min(1.15, 1 + ((input.runPowerRating ?? 1) - 1) * 0.15))
+    : 1;
+
   if (input.isBlitzer) {
     // Defenders labeled to blitz have high tackling success and experience less broken tackles
-    const base = input.isBoosted ? 0.12 : 0.05;
-    return input.brokenCount >= 1 ? base * 0.4 : base;
+    const base = input.isBoosted ? 0.10 : 0.04;
+    return (input.brokenCount >= 1 ? base * 0.4 : base) * runPowerMultiplier;
   }
 
-  let breakChance = input.isRB ? 0.30 : 0.14;
-  if (input.isBoosted) breakChance += 0.12;
+  let breakChance = input.isRB ? 0.18 : 0.14;
+  if (input.isBoosted) breakChance += input.isRB ? 0.07 : 0.12;
   if (input.brokenCount === 1) breakChance *= 0.6;
   if (input.brokenCount >= 2) breakChance = 0.04;
-  return breakChance;
+  return breakChance * runPowerMultiplier;
 }
 
 export function getThrowOffDistance(power: number, maxDistance: number): number {
@@ -221,15 +240,13 @@ export function getCatchCompletionChance(params: CatchContestParams): number {
   const reachPenalty = Math.max(0, (params.distanceToCatch ?? 0) - 12) * 0.008;
 
   if (params.isProMode) {
-    // In Pro Mode, pass catch rate is boosted significantly for high-octane fun!
-    // Base catch rate starts high (~72%) even in tight coverage, and reaches 98% on open looks.
-    const proBase = 0.72;
-    const proOpenBoost = 0.26 * coverageCurve;
+    const proBase = 0.62;
+    const proOpenBoost = 0.30 * coverageCurve;
     const handsMod = params.archetype === 'POSSESSION' || params.archetype === 'TIGHT_END' ? 0.05 : 0;
     const fatigueMod = Math.max(0, (50 - (params.stamina ?? 100)) / 50) * 0.03;
     const doubleCovMod = Math.min(2, Math.max(0, (params.defenderCount ?? 1) - 1)) * 0.04;
     const reachMod = Math.max(0, (params.distanceToCatch ?? 0) - 16) * 0.004;
-    return Math.max(0.65, Math.min(0.98, proBase + proOpenBoost + handsMod - fatigueMod - doubleCovMod - reachMod));
+    return Math.max(0.52, Math.min(0.94, proBase + proOpenBoost + handsMod - fatigueMod - doubleCovMod - reachMod));
   }
 
   return Math.max(0.10, Math.min(0.905, 0.30 + 0.605 * coverageCurve + (handsBonus - fatiguePenalty - doubleCoveragePenalty - positionPenalty) * (1 - coverageCurve) - reachPenalty));
@@ -314,7 +331,7 @@ export function evaluateQbThrowAccuracy(input: QbAccuracyInput, attackDirection:
   // Baseline inaccuracy: clean short/medium passes (~8%), deep balls (~16%), under heavy rusher pressure (~28%)
   let baseRate = Math.min(0.45, ((input.isUnderPressure ? 0.28 : input.isDeepShot ? 0.16 : 0.08) + (input.isMoving ? 0.07 : 0)) * proMod);
   if (input.isProMode) {
-    baseRate = baseRate * 0.45;
+    baseRate = baseRate * 0.70;
   }
 
   if (roll >= baseRate) {

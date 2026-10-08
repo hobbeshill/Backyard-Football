@@ -9,6 +9,7 @@ import {
 } from './proMode';
 import { offensivePlaybook, defensivePlaybook, eliteOffensiveKeys, eliteDefensiveKeys, proOffensiveKeys, proDefensiveKeys } from './playbook';
 import { getCatchCompletionChance, resolveCatchContestOutcome } from './rules';
+import { getCpuCounterReason } from './ai';
 import { mountFootballGame, type GameEngineHandle } from './engine';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -100,6 +101,15 @@ test('Pro and Elite keys are properly separated in playbook', () => {
   assert.equal(proDefensiveKeys.length, 7);
 });
 
+test('Pro CPU counter cues match repeated tendencies and the selected defense', () => {
+  const repeatedScreens = [
+    { play: 'PRO_SCREEN', isPass: true },
+    { play: 'PRO_SCREEN', isPass: true }
+  ];
+  assert.equal(getCpuCounterReason(repeatedScreens, 'PRO_BLITZ_ZERO', true), 'repeated screens');
+  assert.equal(getCpuCounterReason(repeatedScreens, 'PRO_TAMPA2', true), null);
+});
+
 test('Pro mode allows players to pick every offensive play with valid route assignments', () => {
   for (const playId of proOffensiveKeys) {
     const play = offensivePlaybook[playId];
@@ -186,17 +196,20 @@ test('Pro mode significantly boosts pass catch completion rate across all covera
   const proTightChance = getCatchCompletionChance({ ...tightContest, isProMode: true });
 
   assert.ok(standardTightChance < 0.40, `Standard tight chance was ${standardTightChance}`);
-  assert.ok(proTightChance >= 0.65, `Pro mode tight chance should be >= 0.65, got ${proTightChance}`);
-  assert.ok(proTightChance > standardTightChance + 0.30, 'Pro mode provides massive catch boost in tight coverage');
+  assert.ok(proTightChance >= 0.60, `Pro mode tight chance should be >= 0.60, got ${proTightChance}`);
+  assert.ok(proTightChance > standardTightChance + 0.20, 'Pro mode provides a meaningful catch boost in tight coverage');
 
   const openContest = { effectiveDefDist: 60, effectiveBallDist: 60, isTargetSpammed: false, isRbFlatSpammed: false, isRb: false };
   const proOpenChance = getCatchCompletionChance({ ...openContest, isProMode: true });
-  assert.ok(proOpenChance >= 0.95, `Pro mode open chance should be >= 0.95, got ${proOpenChance}`);
+  assert.ok(proOpenChance >= 0.90 && proOpenChance <= 0.94, `Pro mode open chance should be high but not automatic, got ${proOpenChance}`);
 
   // Test resolveCatchContestOutcome in Pro mode
   const proOutcome = resolveCatchContestOutcome({ ...tightContest, isProMode: true, roll: 0.50 });
   assert.equal(proOutcome.type, 'COMPLETE');
   assert.equal(proOutcome.caught, true);
+  const proDrop = resolveCatchContestOutcome({ ...tightContest, isProMode: true, roll: 0.20 });
+  assert.notEqual(proDrop.type, 'COMPLETE');
+  assert.equal(proDrop.caught, false);
 });
 
 test('User can pick which defender to control before starting the play in Pro mode', () => {

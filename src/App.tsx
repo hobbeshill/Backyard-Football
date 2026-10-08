@@ -27,16 +27,6 @@ function getTeamTextStyle(color: string) {
 
 const CONTROLS_TUTORIAL_KEY = 'backyard-football-pro-tutorial-complete-v2';
 
-const DEFENDER_ROLES = [
-  { id: 'DL', shortLabel: 'DL #1', label: 'Pass Rusher / DL' },
-  { id: 'LB1', shortLabel: 'LB #2', label: 'Left Linebacker' },
-  { id: 'LB2', shortLabel: 'LB #3', label: 'Right Linebacker' },
-  { id: 'CB1', shortLabel: 'CB #4', label: 'Lockdown Corner' },
-  { id: 'CB2', shortLabel: 'CB #5', label: 'Boundary Corner' },
-  { id: 'MLB', shortLabel: 'MLB #6', label: 'Middle Linebacker' },
-  { id: 'FS', shortLabel: 'FS #7', label: 'Free Safety' }
-];
-
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   
@@ -74,7 +64,6 @@ export default function App() {
   const [is4thDown, setIs4thDown] = useState(false);
   const [fgMeterState, setFgMeterState] = useState<{ stage: 'AIM' | 'POWER' | 'KICKING'; aim: number; power: number; distanceYards: number } | null>(null);
   const [tacticalMode, setTacticalMode] = useState<TacticalMode>('PRO');
-  const [selectedDefenderIndex, setSelectedDefenderIndex] = useState(0);
   const [showProPlaybookCards, setShowProPlaybookCards] = useState(false);
   const proPlaybookCallSelectedRef = useRef(false);
   const [phaseState, setPhaseState] = useState('PRE_SNAP');
@@ -371,7 +360,6 @@ export default function App() {
       setIs4thDownState: (val) => setIs4thDown(val),
       setKickMeterPowerState: (power) => setKickMeterPower(power),
       setFieldGoalMeterState: (state) => setFgMeterState(state),
-      onControlledDefenderChange: (index) => setSelectedDefenderIndex(index),
       setP1OffPlayState
     });
   }, []);
@@ -1048,37 +1036,6 @@ export default function App() {
 
       {/* Canvas Element - Sits directly at the bottom so joystick is available from the bottom of the screen */}
       <div className="relative flex-1 flex flex-col items-center justify-end min-h-0 w-full overflow-hidden pb-0">
-        {/* Pre-snap Defender Selector Bar when User is on Defense */}
-        {phaseState === 'PRE_SNAP' && activeOffenseState === 'P2' && !showPauseMenu && !finishedGame && !showProPlaybookCards && !showTeamModal && !showSettings && (
-          <div className="absolute top-2 left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-1 bg-black/85 border border-cyan-400/80 rounded-lg px-2.5 py-1.5 shadow-2xl backdrop-blur-sm max-w-[96%]">
-            <div className="flex items-center gap-1.5 text-[0.62rem] font-bold text-cyan-300 uppercase tracking-wider">
-              <span>🛡️ Controlled Defender:</span>
-              <span className="text-yellow-300 font-extrabold">{DEFENDER_ROLES[selectedDefenderIndex]?.label || 'Defender'}</span>
-              <span className="text-neutral-400 font-normal hidden sm:inline">(or tap player on field)</span>
-            </div>
-            <div className="flex items-center gap-1 flex-wrap justify-center">
-              {DEFENDER_ROLES.map((role, idx) => (
-                <button
-                  key={role.id}
-                  type="button"
-                  onClick={() => {
-                    engineRef.current?.selectDefender?.(idx);
-                    setSelectedDefenderIndex(idx);
-                  }}
-                  className={`px-1.5 py-0.5 rounded text-[0.60rem] font-bold transition-all ${
-                    selectedDefenderIndex === idx
-                      ? 'bg-cyan-400 text-black shadow-md shadow-cyan-400/50 scale-105 border border-white'
-                      : 'bg-neutral-800 text-neutral-300 hover:bg-neutral-700 hover:text-white border border-neutral-600'
-                  }`}
-                  title={`Control ${role.label} with Joystick`}
-                >
-                  {role.shortLabel}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
         <canvas
           ref={canvasRef}
           className="bg-[#176620] shadow-[0_8px_30px_rgba(0,0,0,0.9)] rounded-md border-2 border-white touch-none"

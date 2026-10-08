@@ -222,11 +222,11 @@ export const offensivePlaybook: Record<string, PlayOption> = {
     type: 'PASS',
     alignment: 'TRIPS',
     left: 'BLOCK',
-    right: 'HITCH',
+    right: 'SLANT-L',
     center: 'BLOCK',
     slot: 'BLOCK',
     rbRoute: 'BLOCK',
-    desc: 'Quick perimeter swing pass behind a wall of blockers to catch aggressive linebackers/rushers off guard',
+    desc: 'Quick screen behind a wall of blockers, with the outside receiver cutting across the middle on an inside slant',
     risk: 'SAFE',
     routeType: 'SHORT',
     expectedGain: [3, 8]

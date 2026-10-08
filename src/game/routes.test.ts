@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { getRouteWaypoints, updateRouteMovement } from './movement';
-import { allRoutes } from './playbook';
+import { allRoutes, offensivePlaybook } from './playbook';
 import type { Entity } from './types';
 
 test('routes stay in bounds and settle at their endpoints in either direction', () => {
@@ -38,6 +38,21 @@ test('route depths include intermediate targets, long shots and short checkdowns
   for (const route of ['FLAG-L', 'FLAG-R', 'POST-L', 'POST-R', 'GO', 'WHEEL']) {
     assert.ok(depth(route) >= 30, `${route} should reach at least 30 yards`);
   }
+});
+
+test('screen pass receiver slants across the formation toward the middle', () => {
+  const receiver: Entity = {
+    x: 260,
+    y: 500,
+    startX: 260,
+    startY: 500,
+    radius: 10,
+    routeType: offensivePlaybook.PRO_SCREEN.right
+  };
+  const waypoints = getRouteWaypoints(receiver, -1);
+
+  assert.equal(receiver.routeType, 'SLANT-L');
+  assert.deepEqual(waypoints, [{ x: 260, y: 450 }, { x: 170, y: 380 }]);
 });
 
 test('route movement does not take over caught receivers or pre-snap players', () => {
