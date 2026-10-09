@@ -568,9 +568,10 @@ function createAlignedDefense(playKey: string, formation: 'SPREAD' | 'STACK' | '
   return { defenders, eligibleReceivers: [...receivers, centerReceiver] };
 }
 
-test('the four defensive schemes align the requested rush and coverage groups', async () => {
+test('defensive schemes include man-free and deep thirds alongside the original zone fronts', async () => {
   const { defensiveKeys, defensivePlaybook } = await import('./playbook');
-  assert.deepEqual(defensiveKeys, ['COVER2', 'ZONE34', 'ZONE232', 'ZONE151']);
+  assert.deepEqual(defensiveKeys.filter(key => !key.startsWith('TEAM_')), ['MAN_FREE', 'DEEP_THIRDS', 'COVER2', 'ZONE34', 'ZONE232', 'ZONE151']);
+  assert.equal(defensiveKeys.length, 38);
   assert.deepEqual(Object.keys(defensivePlaybook), defensiveKeys);
 
   const expected = [
@@ -590,7 +591,7 @@ test('the four defensive schemes align the requested rush and coverage groups', 
 
 test('all defensive shells stay behind the LOS and inside both end lines', () => {
   for (const attackDirection of [-1, 1]) {
-    for (const playKey of ['COVER2', 'ZONE34', 'ZONE232', 'ZONE151']) {
+    for (const playKey of ['MAN_FREE', 'DEEP_THIRDS', 'COVER2', 'ZONE34', 'ZONE232', 'ZONE151']) {
       const defenders: Entity[] = Array.from({ length: 7 }, () => ({ x: 170, y: 500, radius: 10 }));
       const receivers: Entity[] = [
         { x: 50, y: 500, radius: 10 },

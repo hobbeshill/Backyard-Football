@@ -11,6 +11,8 @@ import { getRivalryForMatchup, type RivalryGame } from './game/rivalries';
 import type { TacticalMode } from './game/types';
 import { PRO_OFFENSE_PLAYS, PRO_DEFENSE_PLAYS, type ProOffensePlayId, type ProDefensePlayId } from './game/proMode';
 import { ProPlaybookCards } from './game/ProPlaybookCards';
+import { PLAYER_TRAIT_COLORS } from './game/roster';
+import { getTeamPlaybook, getTeamOffensePlays, getTeamDefensePlays } from './game/teamPlaybooks';
 
 function getTeamTextStyle(color: string) {
   const hex = color.replace('#', '');
@@ -65,6 +67,7 @@ export default function App() {
   const [fgMeterState, setFgMeterState] = useState<{ stage: 'AIM' | 'POWER' | 'KICKING'; aim: number; power: number; distanceYards: number } | null>(null);
   const [tacticalMode, setTacticalMode] = useState<TacticalMode>('PRO');
   const [showProPlaybookCards, setShowProPlaybookCards] = useState(false);
+  const [showElitePlaybook, setShowElitePlaybook] = useState(false);
   const proPlaybookCallSelectedRef = useRef(false);
   const [phaseState, setPhaseState] = useState('PRE_SNAP');
   const [kickMeterPower, setKickMeterPower] = useState(0.55);
@@ -275,7 +278,17 @@ export default function App() {
         cx.setLineDash([]);
       };
 
-      if (playKey === 'COVER2') {
+      const landmarks = defensivePlaybook[playKey]?.landmarks;
+      if (landmarks) {
+        landmarks.forEach(landmark => {
+          const x = landmark.x * canvas.width / 340;
+          const y = canvas.height / 2 - landmark.depth * 0.05;
+          drawDefender(x, y, landmark.assignment === 'BLITZ' ? '#ff3333' : '#ffcccc');
+          if (landmark.assignment === 'ZONE') {
+            drawZoneLine(x, y, x, canvas.height / 2 - landmark.zoneDepth * 0.05);
+          }
+        });
+      } else if (playKey === 'COVER2') {
         drawDefender(50, canvas.height / 2 - 14, '#ff3333');
         drawDefender(18, canvas.height / 2 + 4, '#ff6666');
         drawDefender(82, canvas.height / 2 + 4, '#ff6666');
@@ -309,6 +322,14 @@ export default function App() {
         drawDefender(66, canvas.height / 2 + 4, '#ff6666');
         drawDefender(82, canvas.height / 2 + 4, '#ff6666');
         drawDefender(50, canvas.height / 2 + 19, '#ffcccc');
+      } else if (playKey === 'MAN_FREE') {
+        drawDefender(50, canvas.height / 2 - 14, '#ff3333');
+        [18, 34, 50, 66, 82].forEach(x => drawDefender(x, canvas.height / 2 + 4));
+        drawDefender(50, canvas.height / 2 + 19, '#ffcccc');
+      } else if (playKey === 'DEEP_THIRDS') {
+        drawDefender(50, canvas.height / 2 - 14, '#ff3333');
+        [25, 50, 75].forEach(x => drawDefender(x, canvas.height / 2 + 4));
+        [18, 50, 82].forEach(x => drawDefender(x, canvas.height / 2 + 19, '#ffcccc'));
       } else {
         drawDefender(50, canvas.height / 2 - 14, '#ff3333');
         drawDefender(18, canvas.height / 2 + 4, '#ff6666');
@@ -332,6 +353,7 @@ export default function App() {
       setDownDistanceText,
       setActiveOffenseState,
       setPhaseState,
+      setTacticalModeState: setTacticalMode,
       setUserScore,
       setCpuScore,
       setP1DefPlayState,
@@ -363,10 +385,6 @@ export default function App() {
       setP1OffPlayState
     });
   }, []);
-
-  useEffect(() => {
-    engineRef.current?.setTacticalMode?.(tacticalMode);
-  }, [tacticalMode]);
 
   useEffect(() => {
     if (showPauseMenu) engineRef.current?.setPaused(true);
@@ -428,7 +446,6 @@ export default function App() {
 
   // Handlers for user changing offensive/defensive plays (user only controls their own side)
   const handleSelectOffensePlay = (key: string) => {
-    setP1OffPlayState(key);
     if (activeOffenseState === 'P1' && engineRef.current?.phase === 'PRE_SNAP' &&
       !engineRef.current.isKickoffActive() && (key !== 'PUNT' || is4thDown)) {
       engineRef.current.selectOffense(key);
@@ -436,7 +453,6 @@ export default function App() {
   };
 
   const handleSelectDefensePlay = (key: string) => {
-    setP1DefPlayState(key);
     if (activeOffenseState === 'P2') {
       if (engineRef.current) {
         engineRef.current.selectDefense(key);
@@ -448,33 +464,6 @@ export default function App() {
     if (hasKickedOff) return;
     setTacticalMode(mode);
     engineRef.current?.setTacticalMode?.(mode);
-    if (mode === 'PRO') {
-      if (!p1OffPlayState.startsWith('PRO_') && p1OffPlayState !== 'FIELD_GOAL' && p1OffPlayState !== 'PUNT') {
-        setP1OffPlayState('PRO_QUICK_SLANTS');
-        if (activeOffenseState === 'P1') {
-          engineRef.current?.selectOffense?.('PRO_QUICK_SLANTS');
-        }
-      }
-      if (!p1DefPlayState.startsWith('PRO_')) {
-        setP1DefPlayState('PRO_COVER2_HARD_FLAT');
-        if (activeOffenseState === 'P2') {
-          engineRef.current?.selectDefense?.('PRO_COVER2_HARD_FLAT');
-        }
-      }
-    } else {
-      if (p1OffPlayState.startsWith('PRO_')) {
-        setP1OffPlayState('SHORT_PASS');
-        if (activeOffenseState === 'P1') {
-          engineRef.current?.selectOffense?.('SHORT_PASS');
-        }
-      }
-      if (p1DefPlayState.startsWith('PRO_')) {
-        setP1DefPlayState('COVER2');
-        if (activeOffenseState === 'P2') {
-          engineRef.current?.selectDefense?.('COVER2');
-        }
-      }
-    }
   };
 
   const handleResetGame = () => {
@@ -682,6 +671,7 @@ export default function App() {
   const isUserPreSnapPhase = hasKickedOff && phaseState === 'PRE_SNAP' && !isKickoffActive;
   const isTacticalModeLocked = hasKickedOff;
   const showPuntAction = tacticalMode !== 'PRO' && isUserPreSnapPhase && activeOffenseState === 'P1' && is4thDown;
+  const userTeamPlaybook = getTeamPlaybook(p1TeamState.id);
 
   useEffect(() => {
     if (phaseState !== 'PRE_SNAP' || tacticalMode !== 'PRO') {
@@ -802,6 +792,17 @@ export default function App() {
               >
                 <RefreshCw size={13} />
               </button>
+              {isUserPreSnapPhase && (
+                <button
+                  type="button"
+                  onClick={() => tacticalMode === 'PRO' ? setShowProPlaybookCards(true) : setShowElitePlaybook(true)}
+                  className="p-1 text-amber-300 hover:text-white transition cursor-pointer"
+                  title="Team playbook"
+                  aria-label="Team playbook"
+                >
+                  <BookOpen size={13} />
+                </button>
+              )}
               {hasKickedOff && (
                 <button
                   type="button"
@@ -1106,7 +1107,10 @@ export default function App() {
               <div className="bg-black/60 p-2.5 rounded border border-neutral-800">
                 <span className="text-[#00ffaa] font-bold block mb-1">3. BALL CARRIER MOVES & BROKEN TACKLES:</span>
                 <ul className="list-disc list-inside space-y-1 text-neutral-300">
-                  <li><b className="text-white">Broken Tackles:</b> Running backs shed contact more often than receivers. A broken tackle briefly slows momentum before a modest burst.</li>
+                  <li><b className="text-white">Broken Tackles:</b> Runner power, defender tackling, and fatigue determine contact outcomes. A broken tackle briefly slows momentum; it does not grant a free sprint boost. Powerful runners can gain up to two yards falling forward against weaker tacklers.</li>
+                  <li><b className="text-white">Player Identity:</b> The field stays free of player badges. Tap a receiver or defender before the snap to scout their ratings, or inspect the roster during team selection.</li>
+                  <li><b className="text-white">Team Playbooks:</b> Each team has restricted calls built for its roster, including two exclusive offensive plays and two exclusive defensive schemes with their own routes, blocking, and coverage landmarks. Open Team playbook before the snap; Elite swipes cycle available team calls. CPU teams use the same packages. Punt and Field Goal remain available to every team. Elite route and assignment adjustments still work within a selected call.</li>
+                  <li><b className="text-white">Real Tradeoffs:</b> Speedsters accelerate quickly but struggle with contact and blocking. Power backs are slower but can fall forward against weaker tacklers. Strong coverage wins more tight-window contests; open throws stay reliable. Ratings are out of 99.</li>
                   <li><b className="text-white">Pursuit:</b> Defenders accelerate to a bounded top speed and take angles to cut off the runner.</li>
                   <li><b className="text-white">Fumbles & Live Scrambles:</b> Hard hits can pop the football loose! Both offense and defense dive for the tumbling ball—defense recovery causes a turnover!</li>
                   <li><b className="text-white">Clean Pocket Protection:</b> Offensive linemen hold blocks for 5 full seconds before breakdown unless an extra blitzer brings immediate pressure!</li>
@@ -1433,7 +1437,7 @@ export default function App() {
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby="team-confirmation-title"
-                className="w-full max-w-md rounded-lg border border-[#d5ded7] bg-[#f2f5f2] p-5 text-left text-[#1b3026] shadow-2xl sm:p-6"
+                className="max-h-[85vh] w-full max-w-md overflow-y-auto rounded-lg border border-[#d5ded7] bg-[#f2f5f2] p-5 text-left text-[#1b3026] shadow-2xl sm:p-6"
               >
                 <h2 id="team-confirmation-title" className="text-xl font-extrabold">{pendingTeam.name}</h2>
                 <div className="mt-5">
@@ -1441,7 +1445,37 @@ export default function App() {
                   <p className="mt-1 text-sm leading-5 text-[#405047]">{pendingTeam.strengths}</p>
                   <h3 className="mt-4 text-xs font-bold uppercase text-[#a34d32]">Weaknesses</h3>
                   <p className="mt-1 text-sm leading-5 text-[#405047]">{pendingTeam.weaknesses}</p>
+                  <h3 className="mt-4 text-xs font-bold uppercase text-[#246344]">Offensive playbook</h3>
+                  <p className="mt-1 text-sm text-[#405047]">{getTeamPlaybook(pendingTeam.id).offenseIdentity}</p>
+                  <p className="mt-1 text-xs text-[#405047]">{getTeamOffensePlays(pendingTeam.id, tacticalMode).map(key => offensivePlaybook[key].name).join(' / ')}</p>
+                  <h3 className="mt-4 text-xs font-bold uppercase text-[#a34d32]">Defensive playbook</h3>
+                  <p className="mt-1 text-sm text-[#405047]">{getTeamPlaybook(pendingTeam.id).defenseIdentity}</p>
+                  <p className="mt-1 text-xs text-[#405047]">{getTeamDefensePlays(pendingTeam.id, tacticalMode).map(key => tacticalMode === 'PRO' ? PRO_DEFENSE_PLAYS[key as ProDefensePlayId].name : defensivePlaybook[key].name).join(' / ')}</p>
                 </div>
+                <details className="mt-4 rounded-md border border-[#cbd6cd] bg-white p-3">
+                  <summary className="cursor-pointer text-sm font-bold">Scout roster - player ratings / 99</summary>
+                  <p className="mt-2 text-xs text-[#405047]">Tap players before the snap to identify them. Speed and power are separate: choose space for fast players and contact for strong players.</p>
+                  <div className="mt-3 space-y-3">
+                    {Object.entries(pendingTeam.roster).map(([slot, player]) => (
+                      <div key={slot} className="rounded border border-[#d5ded7] p-2">
+                        <div className="flex items-center justify-between gap-2 text-xs font-bold">
+                          <span>#{player.number} {player.label}</span>
+                          <span className="rounded bg-[#17241c] px-2 py-1" style={{ color: PLAYER_TRAIT_COLORS[player.trait] }}>{player.trait}</span>
+                        </div>
+                        <dl className="mt-2 grid grid-cols-4 gap-x-2 gap-y-1 text-[10px] text-[#405047]">
+                          {([
+                            ['Speed', player.ratings.speed], ['Power', player.ratings.power],
+                            ['Hands', player.ratings.hands], ['Cover', player.ratings.coverage],
+                            ['Tackle', player.ratings.tackling], ['Block', player.ratings.blocking],
+                            ['Rush', player.ratings.rush], ['Stamina', player.ratings.endurance]
+                          ] as const).map(([label, rating]) => (
+                            <div key={label}><dt>{label}</dt><dd className="text-sm font-bold text-[#1b3026]">{rating}</dd></div>
+                          ))}
+                        </dl>
+                      </div>
+                    ))}
+                  </div>
+                </details>
                 <div className="mt-6 flex flex-wrap justify-end gap-2">
                   <button
                     type="button"
@@ -1798,6 +1832,11 @@ export default function App() {
 
       {showProPlaybookCards && (
         <ProPlaybookCards
+          teamName={p1TeamState.name}
+          offenseIdentity={userTeamPlaybook.offenseIdentity}
+          defenseIdentity={userTeamPlaybook.defenseIdentity}
+          offensePlayIds={userTeamPlaybook.proOffense}
+          defensePlayIds={userTeamPlaybook.proDefense}
           activeOffensePlay={p1OffPlayState}
           activeDefensePlay={p1DefPlayState}
           initialTab={activeOffenseState === 'P2' ? 'DEFENSE' : 'OFFENSE'}
@@ -1819,6 +1858,35 @@ export default function App() {
           }}
           onClose={() => setShowProPlaybookCards(false)}
         />
+      )}
+      {showElitePlaybook && isUserPreSnapPhase && tacticalMode === 'ELITE' && (
+        <div className="fixed inset-0 z-[150] flex items-center justify-center bg-black/85 p-4">
+          <section role="dialog" aria-modal="true" aria-labelledby="elite-playbook-title" className="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-lg border border-neutral-700 bg-[#0d131a] p-4">
+            <div className="flex items-center justify-between gap-3">
+              <h2 id="elite-playbook-title" className="font-bold">{p1TeamState.nickname} team playbook</h2>
+              <button type="button" onClick={() => setShowElitePlaybook(false)} aria-label="Close team playbook"><X size={20} /></button>
+            </div>
+            <p className="mt-2 text-sm text-amber-300">{downDistanceText}</p>
+            <p className="mt-2 text-sm text-neutral-300">{activeOffenseState === 'P1' ? userTeamPlaybook.offenseIdentity : userTeamPlaybook.defenseIdentity}</p>
+            <div className="mt-4 space-y-2">
+              {(activeOffenseState === 'P1'
+                ? [...userTeamPlaybook.eliteOffense, 'FIELD_GOAL', ...(is4thDown ? ['PUNT'] : [])]
+                : userTeamPlaybook.eliteDefense).map(key => {
+                const play = activeOffenseState === 'P1' ? offensivePlaybook[key] : defensivePlaybook[key];
+                return (
+                  <button key={key} type="button" onClick={() => {
+                    if (activeOffenseState === 'P1') handleSelectOffensePlay(key);
+                    else handleSelectDefensePlay(key);
+                    setShowElitePlaybook(false);
+                  }} className="w-full rounded border border-neutral-600 bg-[#121c27] p-3 text-left hover:border-amber-300">
+                    <span className="block text-sm font-bold">{play.name}</span>
+                    <span className="mt-1 block text-xs text-neutral-400">{play.desc}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+        </div>
       )}
 
     </div>

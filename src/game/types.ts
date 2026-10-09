@@ -1,3 +1,5 @@
+import type { DefenseLandmark } from './signaturePlays';
+
 export type PlayRisk = 'SAFE' | 'BALANCED' | 'EXPLOSIVE';
 export type RouteType = 'SHORT' | 'MEDIUM' | 'VERTICAL';
 export type DefensiveAssignment = 'BLITZ' | 'MAN' | 'ZONE' | 'QB_SPY' | 'RB_SPY' | 'USER';
@@ -25,6 +27,7 @@ export interface DefOption {
   desc: string;
   weakness?: string;
   vulnerableRouteType?: RouteType;
+  landmarks?: DefenseLandmark[];
 }
 
 export interface Entity {
@@ -41,6 +44,7 @@ export interface Entity {
   rosterKey?: string;
   targetedThisPlay?: boolean;
   archetype?: string;
+  player?: PlayerProfile;
   radius: number;
   color?: string;
   boostUsed?: boolean;
@@ -136,3 +140,4 @@ export interface Ball {
   receivingTeam?: 'P1' | 'P2';
   kickPower?: number;
 }
+import type { PlayerProfile } from './roster';

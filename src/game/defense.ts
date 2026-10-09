@@ -1,4 +1,5 @@
 import type { DefensiveAssignment, Entity } from './types';
+import { allDefensivePlaybook } from './playbook';
 
 export interface CpuDefenseSituation {
   down: number;
@@ -185,6 +186,8 @@ export function alignDefenders(
   centerReceiver: Entity | null
 ): void {
   if (defenders.length < 7) return;
+  if (playKey === 'MAN_FREE') playKey = 'PRO_COVER1_MAN';
+  if (playKey === 'DEEP_THIRDS') playKey = 'PRO_COVER3_DEEP';
   const defOffset = 24 * attackDirection;
 
   defenders.forEach(defender => {
@@ -197,6 +200,33 @@ export function alignDefenders(
     defender.type = 'DB';
     defender.color = '#ff6666';
   });
+
+  const landmarks = allDefensivePlaybook[playKey]?.landmarks;
+  if (landmarks) {
+    const threats = [...receivers, centerReceiver].filter((receiver): receiver is Entity =>
+      Boolean(receiver && !receiver.isBlocker && receiver.routeType !== 'BLOCK'));
+    let manIndex = 0;
+    landmarks.forEach((landmark, index) => {
+      const defender = defenders[index];
+      defender.x = defender.startX = landmark.x;
+      defender.y = defender.startY = lineOfScrimmageY + landmark.depth * attackDirection;
+      defender.zoneX = landmark.x;
+      defender.zoneY = lineOfScrimmageY + landmark.zoneDepth * attackDirection;
+      defender.type = landmark.type;
+      defender.passRusher = landmark.assignment === 'BLITZ';
+      defender.defenseAssignment = landmark.assignment;
+      defender.vx = defender.vy = 0;
+      if (landmark.assignment === 'MAN') {
+        defender.assignedReceiver = threats[manIndex++];
+        if (defender.assignedReceiver) {
+          alignDefenderAcrossFromReceiver(defender, defender.assignedReceiver, lineOfScrimmageY, attackDirection);
+        } else {
+          defender.defenseAssignment = 'ZONE';
+        }
+      }
+    });
+    return;
+  }
 
   defenders[0].startX = 170;
   defenders[0].startY = lineOfScrimmageY + defOffset;

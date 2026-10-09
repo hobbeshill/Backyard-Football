@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { FIELD_NUMBERS_INNER_EDGE_X, getCanvasRenderScale, getCameraYForAction, getCameraYForLineOfScrimmage, getOffenseJoystickAnchor, getPlayerForwardDirection, isOffenseJoystickStartZone, mountFootballGame, OFFENSE_JOYSTICK_INNER_RING_RADIUS, OFFENSE_JOYSTICK_RADIUS, type GameEngineHandle } from './engine';
 import { createSimulationClock, getDesignedRunLateralBias, getDirectionalInput, getRunLaneOptions, getUserRunnerVelocity } from './movement';
+import { TEAMS } from './teams';
+import { getPlayerSpeedMultiplier } from './roster';
 
 test('camera raises the offensive line of scrimmage while retaining defensive framing', () => {
   const lineOfScrimmageY = 500;
@@ -98,8 +100,9 @@ test('simulation discards paused time and caps catch-up after a stalled frame', 
   assert.equal(clock(20000, false), 5);
 });
 
-function createMockCanvas(): HTMLCanvasElement {
+function createMockCanvas(): HTMLCanvasElement & { _listeners: Map<string, EventListener>; _text: string[] } {
   const listeners = new Map<string, EventListener>();
+  const text: string[] = [];
   const drawingContext = {
     save: () => {},
     restore: () => {},
@@ -123,7 +126,7 @@ function createMockCanvas(): HTMLCanvasElement {
     setLineDash: () => {},
     createLinearGradient: () => ({ addColorStop: () => {} }),
     createRadialGradient: () => ({ addColorStop: () => {} }),
-    fillText: () => {},
+    fillText: (value: string) => { text.push(value); },
     measureText: () => ({ width: 40 }),
     rotate: () => {}
   };
@@ -136,11 +139,159 @@ function createMockCanvas(): HTMLCanvasElement {
     getBoundingClientRect: () => ({ left: 0, top: 0, width: 340, height: 450 } as DOMRect),
     addEventListener: (type: string, listener: EventListener) => listeners.set(type, listener),
     removeEventListener: (type: string) => listeners.delete(type),
-    _listeners: listeners
-  } as unknown as HTMLCanvasElement & { _listeners: Map<string, EventListener> };
+    _listeners: listeners,
+    _text: text
+  } as unknown as HTMLCanvasElement & { _listeners: Map<string, EventListener>; _text: string[] };
 
   return canvas;
 }
+
+test('engine uses team roster profiles across possessions, team switches and return formations', () => {
+  const handle: { game?: GameEngineHandle } = {};
+  const cleanup = mountFootballGame(createMockCanvas(), {
+    setP2OffPlayState: () => {}, setP2DefPlayState: () => {},
+    setDownDistanceText: () => {}, setActiveOffenseState: () => {},
+    setUserScore: () => {}, setCpuScore: () => {}, setP1DefPlayState: () => {},
+    setMomentumState: () => {}, setGameClockState: () => {}, showAnnouncement: () => {},
+    onEngineReady: game => { handle.game = game ?? undefined; }
+  });
+  try {
+    const game = handle.game;
+    assert.ok(game);
+    game.selectP1Team('FLORIDA');
+    game.setPossessionForTest?.('P1');
+    game.resetDrill();
+    assert.equal(game.p1Team, TEAMS.FLORIDA);
+    assert.equal(game.getReceivers()[0].player, TEAMS.FLORIDA.roster['wr-0']);
+    assert.equal(game.getReceivers()[0].speedMultiplier, getPlayerSpeedMultiplier(95));
+    assert.equal(game.getDefenders?.()[5].player, TEAMS.GEORGIA.roster['def-5']);
+    game.selectP2Team('ARKANSAS');
+    game.setPossessionForTest?.('P2');
+    game.resetDrill();
+    assert.equal(game.p2Team, TEAMS.ARKANSAS);
+    assert.equal(game.getReceivers()[0].player, TEAMS.ARKANSAS.roster['wr-0']);
+    game.setPossessionForTest?.('P1');
+    game.resetDrill();
+    game.set4thDownForTest?.();
+    game.callPunt();
+    assert.equal(game.getDefenders?.().find(player => player.isReturner)?.player, TEAMS.ARKANSAS.roster['wr-0']);
+    game.resetGame();
+    assert.equal(game.getDefenders?.().find(player => player.isReturner)?.player, TEAMS.FLORIDA.roster['wr-0']);
+  } finally {
+    cleanup?.();
+  }
+});
+
+test('field is free of player badges while Pro pre-snap scouting preserves controls', () => {
+  const originalRequest = globalThis.requestAnimationFrame;
+  const originalCancel = globalThis.cancelAnimationFrame;
+  let nextFrame: FrameRequestCallback = () => {};
+  globalThis.requestAnimationFrame = callback => { nextFrame = callback; return 1; };
+  globalThis.cancelAnimationFrame = () => {};
+  const handle: { game?: GameEngineHandle } = {};
+  const announcements: string[] = [];
+  const canvas = createMockCanvas();
+  const cleanup = mountFootballGame(canvas, {
+    setP2OffPlayState: () => {}, setP2DefPlayState: () => {},
+    setDownDistanceText: () => {}, setActiveOffenseState: () => {},
+    setUserScore: () => {}, setCpuScore: () => {}, setP1DefPlayState: () => {},
+    setMomentumState: () => {}, setGameClockState: () => {},
+    showAnnouncement: text => { announcements.push(text); },
+    onEngineReady: game => { handle.game = game ?? undefined; }
+  });
+  try {
+    const game = handle.game;
+    assert.ok(game);
+    game.selectP1Team('FLORIDA');
+    game.setTacticalMode?.('PRO');
+    game.setPossessionForTest?.('P1');
+    game.resetDrill();
+    game.selectOffense('PRO_QUICK_SLANTS');
+    nextFrame(0);
+    assert.ok(!canvas._text.some(text => /^#\d+ (SPD|HANDS|HIT|COV|BLK|PWR|RUSH|QB)$/.test(text)));
+    assert.ok(!canvas._text.includes('TAP 🏈'));
+    assert.ok(!canvas._text.some(text => /\(YOU\)|NO ASSIGNMENT|^RB SPY$|^QB SPY$/.test(text)));
+    const receiverPosition = game.getReceiverScreenPositionForTest?.(0);
+    assert.ok(receiverPosition);
+    canvas._listeners.get('pointerdown')?.({
+      clientX: receiverPosition.x, clientY: receiverPosition.y, pointerId: 1,
+      preventDefault: () => {}
+    } as PointerEvent);
+    assert.equal(game.phase, 'PRE_SNAP');
+    assert.match(announcements.at(-1) ?? '', /#11 Deep threat.*SPD 95 PWR 38 HANDS 61/);
+    game.startPlay?.();
+    assert.equal(game.phase, 'QB_DROP');
+    canvas._text.length = 0;
+    nextFrame(1000 / 60);
+    assert.ok(!canvas._text.includes('TAP 🏈'));
+  } finally {
+    cleanup?.();
+    globalThis.requestAnimationFrame = originalRequest;
+    globalThis.cancelAnimationFrame = originalCancel;
+  }
+});
+
+test('seeded live CPU plays include defensive stops instead of automatic touchdown exchanges', () => {
+  const originalRequest = globalThis.requestAnimationFrame;
+  const originalCancel = globalThis.cancelAnimationFrame;
+  const originalRandom = Math.random;
+  let nextFrame: FrameRequestCallback = () => {};
+  globalThis.requestAnimationFrame = callback => { nextFrame = callback; return 1; };
+  globalThis.cancelAnimationFrame = () => {};
+  let finished = 0;
+  let touchdowns = 0;
+  let productivePlays = 0;
+  try {
+    for (const mode of ['ELITE', 'PRO'] as const) {
+      for (const teamId of ['ARKANSAS', 'FLORIDA', 'LSU']) {
+        for (let sample = 1; sample <= 4; sample++) {
+          let seed = sample * 7919;
+          Math.random = () => {
+            seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+            return seed / 4294967296;
+          };
+          const handle: { game?: GameEngineHandle } = {};
+          const announcements: string[] = [];
+          const cleanup = mountFootballGame(createMockCanvas(), {
+            setP2OffPlayState: () => {}, setP2DefPlayState: () => {},
+            setDownDistanceText: () => {}, setActiveOffenseState: () => {},
+            setUserScore: () => {}, setCpuScore: () => {}, setP1DefPlayState: () => {},
+            setMomentumState: () => {}, setGameClockState: () => {},
+            showAnnouncement: text => { announcements.push(text); },
+            onEngineReady: game => { handle.game = game ?? undefined; }
+          });
+          try {
+            const game = handle.game;
+            assert.ok(game);
+            game.selectP1Team('GEORGIA');
+            game.selectP2Team(teamId);
+            game.setTacticalMode?.(mode);
+            game.setPossessionForTest?.('P2');
+            game.resetDrill();
+            game.selectDefense(mode === 'PRO' ? 'PRO_COVER3_DEEP' : 'COVER2');
+            game.startDefensePlay?.();
+            nextFrame(0);
+            for (let frame = 1; frame <= 1500 && game.phase !== 'DEAD' && game.p2Score === 0; frame++) {
+              nextFrame(frame * 1000 / 60);
+            }
+            if (game.phase === 'DEAD' || game.p2Score > 0) finished++;
+            if (game.p2Score > 0) touchdowns++;
+            if (announcements.some(text => /FIRST DOWN|Gain of [5-9]|Gain of \d{2}/i.test(text))) productivePlays++;
+          } finally {
+            cleanup?.();
+          }
+        }
+      }
+    }
+    assert.ok(finished >= 22, `${finished}/24 plays finished within 25 seconds`);
+    assert.ok(touchdowns <= 6, `${touchdowns}/24 plays scored from the CPU's own 15`);
+    assert.ok(productivePlays > 0, 'Defense must not erase all productive offense');
+  } finally {
+    Math.random = originalRandom;
+    globalThis.requestAnimationFrame = originalRequest;
+    globalThis.cancelAnimationFrame = originalCancel;
+  }
+});
 
 test('Sweep lane bias steers outside on either side while ISO keeps its inside path', () => {
   assert.equal(getDesignedRunLateralBias('SWEEP', 220, 'right'), 1.15);

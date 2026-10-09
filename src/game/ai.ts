@@ -1,5 +1,35 @@
 import type { DefensiveAssignment, Entity } from './types';
-import { outsideRoutes, middleRoutes, runningBackRoutes } from './playbook';
+import { outsideRoutes, middleRoutes, runningBackRoutes, offensivePlaybook, allDefensivePlaybook } from './playbook';
+import type { TeamProfile } from './teams';
+
+export function chooseTeamOffensivePlay(
+  plays: readonly string[],
+  team: TeamProfile,
+  random: () => number = Math.random
+): string {
+  if (plays.length === 0) throw new Error('Cannot choose an offensive play from an empty playbook');
+  const weighted = plays.map(play => {
+    const definition = offensivePlaybook[play];
+    const isRun = ['SWEEP', 'ISO', 'POWER'].includes(definition.type);
+    const isOutsideRun = definition.type === 'SWEEP';
+    const isDeep = definition.routeType === 'VERTICAL';
+    let weight = isRun
+      ? team.archetype === 'GROUND_POUND' ? 3.6 : team.archetype === 'AIR_RAID' ? 0.8 : 1.8
+      : team.archetype === 'GROUND_POUND' ? 0.6 : team.archetype === 'AIR_RAID' ? 1.5 : 1;
+    if (isRun) {
+      const rating = isOutsideRun ? team.roster.rb.ratings.speed : team.roster.rb.ratings.power;
+      weight *= rating / 70;
+    }
+    if (isDeep) weight *= team.roster['wr-0'].ratings.speed / 80;
+    return { play, weight };
+  });
+  let selection = random() * weighted.reduce((sum, entry) => sum + entry.weight, 0);
+  for (const entry of weighted) {
+    selection -= entry.weight;
+    if (selection < 0) return entry.play;
+  }
+  return weighted[weighted.length - 1].play;
+}
 
 export interface CpuOffensiveAudibleResult {
   audibleMessage?: string;
@@ -93,6 +123,7 @@ export interface ProDefensiveCallSituation {
   down: number;
   yardsToGo: number;
   previousCall: string;
+  teamArchetype?: TeamProfile['archetype'];
 }
 
 export function getCoverageMistakeChance(mistakeRating: number): number {
@@ -104,12 +135,16 @@ export function chooseProDefensiveCall(
   random: () => number = Math.random
 ): string {
   const recentPlays = situation.recentPlays.slice(-4);
-  const recentDeepCount = recentPlays.filter(play => play.play === 'PRO_VERTS' || play.play === 'PRO_DOUBLE_MOVES').length;
-  const recentRunCount = recentPlays.filter(play => play.play === 'PRO_JET_SWEEP' || play.play === 'PRO_DRAW').length;
-  const recentSlantsCount = recentPlays.filter(play => play.play === 'PRO_QUICK_SLANTS').length;
-  const recentMeshCount = recentPlays.filter(play => play.play === 'PRO_MESH').length;
-  const recentScreenCount = recentPlays.filter(play => play.play === 'PRO_SCREEN').length;
-  const previousCallWasHeavy = situation.previousCall === 'PRO_BLITZ_ZERO' || situation.previousCall === 'PRO_RUN_STOP_BOX';
+  const recentDefinitions = recentPlays.map(play => offensivePlaybook[play.play]);
+  const recentDeepCount = recentDefinitions.filter(play => play?.type === 'PASS' && play.routeType === 'VERTICAL').length;
+  const recentRunCount = recentDefinitions.filter(play => play && ['ISO', 'POWER', 'SWEEP'].includes(play.type)).length;
+  const recentSlantsCount = recentDefinitions.filter(play => play?.type === 'PASS' &&
+    [play.left, play.right, play.slot].some(route => route?.startsWith('SLANT'))).length;
+  const recentMeshCount = recentDefinitions.filter(play => play?.type === 'PASS' &&
+    [play.left, play.right, play.center, play.slot].filter(route => route?.startsWith('CROSS')).length >= 2).length;
+  const recentScreenCount = recentDefinitions.filter(play => play?.type === 'PASS' && (play.left === 'BLOCK' || play.right === 'BLOCK')).length;
+  const previousRushers = allDefensivePlaybook[situation.previousCall]?.landmarks?.filter(landmark => landmark.assignment === 'BLITZ').length ?? 0;
+  const previousCallWasHeavy = situation.previousCall === 'PRO_BLITZ_ZERO' || situation.previousCall === 'PRO_RUN_STOP_BOX' || previousRushers >= 3;
   const isCrucialShortDown = (situation.down === 3 || situation.down === 4) && situation.yardsToGo <= 3;
   const isLongDown = (situation.down === 3 || situation.down === 4) && situation.yardsToGo > 7;
 
@@ -132,6 +167,11 @@ export function chooseProDefensiveCall(
     'PRO_COVER4_QUARTERS',
     'PRO_TAMPA2'
   ];
+  if (situation.teamArchetype === 'BLITZ_HAWKS') {
+    balancedCalls.push('PRO_BLITZ_ZERO', 'PRO_BLITZ_ZERO', 'PRO_BLITZ_ZERO');
+  } else if (situation.teamArchetype === 'GROUND_POUND') {
+    balancedCalls.push('PRO_RUN_STOP_BOX', 'PRO_RUN_STOP_BOX');
+  }
   return balancedCalls[Math.floor(random() * balancedCalls.length)];
 }
 

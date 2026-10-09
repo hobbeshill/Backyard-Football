@@ -91,6 +91,7 @@ export function RealPlayTutorial({ onFinish }: { onFinish: () => void }) {
           activeDefensePlay={defense}
           downDistanceText={downDistance}
           offensePlayIds={['PRO_QUICK_SLANTS', 'PRO_MESH', 'PRO_VERTS', 'PRO_DOUBLE_MOVES', 'PRO_SCREEN']}
+          defensePlayIds={['PRO_COVER2_HARD_FLAT', 'PRO_COVER1_MAN', 'PRO_COVER3_DEEP', 'PRO_COVER4_QUARTERS', 'PRO_BLITZ_ZERO', 'PRO_RUN_STOP_BOX', 'PRO_TAMPA2']}
           specialTeamsOnly={step === 7}
           canPunt={step === 7}
           fieldGoalDistance={engineRef.current?.getFieldGoalDistance?.()}

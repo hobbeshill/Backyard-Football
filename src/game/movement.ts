@@ -137,6 +137,25 @@ export function getRunPursuitMovement(baseSpeed: number, pursuitFrames: number, 
   };
 }
 
+export function getPursuitTarget(defender: Entity, runner: Entity, attackDirection: number): { x: number; y: number } {
+  const distance = Math.hypot(runner.x - defender.x, runner.y - defender.y);
+  const leadFrames = Math.min(36, distance / 5);
+  const vx = runner.vx ?? 0;
+  const vy = runner.vy ?? attackDirection * 1.2;
+  // A trailing defender chases the runner; a defender ahead cuts off the actual heading.
+  const isAhead = (defender.y - runner.y) * attackDirection > 0;
+  return {
+    x: runner.x + vx * (isAhead ? leadFrames : leadFrames * 0.35),
+    y: runner.y + vy * (isAhead ? leadFrames : 0)
+  };
+}
+
+export function getRunBlockEffect(blocker: Entity, defender: Entity): number {
+  const blocking = blocker.player?.ratings.blocking ?? 65;
+  const resistance = defender.player?.ratings.power ?? 65;
+  return Math.max(0.12, Math.min(0.85, 0.48 + (blocking - resistance) * 0.012));
+}
+
 export function canEngagePassBlock(blocker: Entity, rusher: Entity): boolean {
   return Math.hypot(rusher.x - blocker.x, rusher.y - blocker.y) <= blocker.radius + rusher.radius + 6;
 }
@@ -204,7 +223,8 @@ export function moveToward(
   const targetVx = Math.cos(angle) * adjustedSpeed;
   const targetVy = Math.sin(angle) * adjustedSpeed;
 
-  const adjustedAcceleration = accel * getFatigueSpeedMultiplier(entity.stamina);
+  const accelerationRating = entity.player ? 0.65 + entity.player.ratings.speed / 100 * 0.6 : 1;
+  const adjustedAcceleration = accel * accelerationRating * getFatigueSpeedMultiplier(entity.stamina);
   entity.vx += (targetVx - entity.vx) * adjustedAcceleration;
   entity.vy += (targetVy - entity.vy) * adjustedAcceleration;
   entity.x += entity.vx;

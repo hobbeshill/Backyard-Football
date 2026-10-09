@@ -456,10 +456,11 @@ test('PUNT calls are ignored before 4th down', () => {
   assert.ok(engineInstance);
   const engine = engineInstance as GameEngineHandle;
   engine.setPossessionForTest?.('P1');
+  const previousPlay = p1OffPlay;
   engine.selectOffense('PUNT');
   engine.callPunt();
   engine.punt(0.95);
-  assert.equal(p1OffPlay, '');
+  assert.equal(p1OffPlay, previousPlay);
   assert.equal(engine.phase, 'PRE_SNAP');
   assert.ok(!announcement.includes('SPECIAL TEAMS PUNT UNIT'));
 
@@ -709,7 +710,7 @@ test('swiping left or right on the RB calls a running play while tapping toggles
     assert.equal(engine.p1OffPlay, 'SHORT_PASS', 'Tapping RB again keeps pass play');
     assert.ok(announcement.includes('PASS ROUTE'), 'Announcement indicates pass route');
 
-    // 3. Swipe left on RB: calls a Designed Run Play ('ISO')!
+    // Alabama's available inside run is Power, not ISO.
     simulatedTime += 500;
     pointerDown({ clientX: 220, clientY: 300, pointerId: 1 });
     if (typeof pointerMove === 'function') {
@@ -718,10 +719,10 @@ test('swiping left or right on the RB calls a running play while tapping toggles
     simulatedTime += 100;
     pointerUp({ clientX: 180, clientY: 300, pointerId: 1 });
 
-    assert.equal(engine.p1OffPlay, 'ISO', 'Swiping left on RB calls running play ISO');
+    assert.equal(engine.p1OffPlay, 'POWER', 'Swiping left uses the team run package');
     assert.ok(announcement.includes('RUN PLAY'), 'Announcement indicates running play');
 
-    // 4. Swipe right on RB: calls a Designed Run Play ('ISO') to the right!
+    // Swipe right retains the same available team run.
     simulatedTime += 500;
     pointerDown({ clientX: 120, clientY: 300, pointerId: 1 });
     if (typeof pointerMove === 'function') {
@@ -730,7 +731,7 @@ test('swiping left or right on the RB calls a running play while tapping toggles
     simulatedTime += 100;
     pointerUp({ clientX: 170, clientY: 300, pointerId: 1 });
 
-    assert.equal(engine.p1OffPlay, 'ISO', 'Swiping right on RB calls running play ISO');
+    assert.equal(engine.p1OffPlay, 'POWER', 'Swiping right uses the team run package');
     assert.ok(announcement.includes('RUN PLAY'), 'Announcement indicates running play');
   } finally {
     Date.now = originalNow;

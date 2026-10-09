@@ -15,14 +15,14 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { ProPlaybookCards } from './ProPlaybookCards';
 
-test('Pro Mode 7-on-7 Playbooks contain exactly 7 offensive and 7 defensive plays', () => {
+test('Pro playbooks retain the seven base calls and add 32 team-exclusive calls per side', () => {
   const offKeys = Object.keys(PRO_OFFENSE_PLAYS) as ProOffensePlayId[];
   const defKeys = Object.keys(PRO_DEFENSE_PLAYS) as ProDefensePlayId[];
 
-  assert.equal(offKeys.length, 7, 'Offensive playbook must have 7 plays');
-  assert.equal(defKeys.length, 7, 'Defensive playbook must have 7 plays');
+  assert.equal(offKeys.length, 39);
+  assert.equal(defKeys.length, 39);
 
-  assert.deepEqual(offKeys, [
+  assert.deepEqual(offKeys.filter(key => !key.startsWith('PRO_TEAM_')), [
     'PRO_QUICK_SLANTS',
     'PRO_MESH',
     'PRO_VERTS',
@@ -32,7 +32,7 @@ test('Pro Mode 7-on-7 Playbooks contain exactly 7 offensive and 7 defensive play
     'PRO_DRAW'
   ]);
 
-  assert.deepEqual(defKeys, [
+  assert.deepEqual(defKeys.filter(key => !key.startsWith('PRO_TEAM_')), [
     'PRO_COVER2_HARD_FLAT',
     'PRO_COVER1_MAN',
     'PRO_COVER3_DEEP',
@@ -95,10 +95,10 @@ test('Passing Defense vs Passing Offense Rule: Non-counter pass defense containm
 });
 
 test('Pro and Elite keys are properly separated in playbook', () => {
-  assert.equal(eliteOffensiveKeys.length, 9);
-  assert.equal(eliteDefensiveKeys.length, 4);
-  assert.equal(proOffensiveKeys.length, 7);
-  assert.equal(proDefensiveKeys.length, 7);
+  assert.equal(eliteOffensiveKeys.length, 41);
+  assert.equal(eliteDefensiveKeys.length, 38);
+  assert.equal(proOffensiveKeys.length, 39);
+  assert.equal(proDefensiveKeys.length, 39);
 });
 
 test('Pro CPU counter cues match repeated tendencies and the selected defense', () => {

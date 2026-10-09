@@ -10,6 +10,9 @@ import {
 } from './proMode';
 import { X, Shield, Zap, ChevronRight, Info } from 'lucide-react';
 import { getRouteWaypoints } from './movement';
+import { offensivePlaybook } from './playbook';
+import { alignDefenders } from './defense';
+import type { Entity } from './types';
 
 interface ProPlaybookCardsProps {
   onClose: () => void;
@@ -24,6 +27,10 @@ interface ProPlaybookCardsProps {
   fieldGoalDistance?: number;
   onSelectSpecialTeams?: (playId: 'PUNT' | 'FIELD_GOAL') => void;
   offensePlayIds?: readonly ProOffensePlayId[];
+  defensePlayIds?: readonly ProDefensePlayId[];
+  teamName?: string;
+  offenseIdentity?: string;
+  defenseIdentity?: string;
   specialTeamsOnly?: boolean;
 }
 
@@ -40,6 +47,10 @@ export const ProPlaybookCards: React.FC<ProPlaybookCardsProps> = ({
   fieldGoalDistance,
   onSelectSpecialTeams,
   offensePlayIds,
+  defensePlayIds,
+  teamName,
+  offenseIdentity,
+  defenseIdentity,
   specialTeamsOnly = false
 }) => {
   const [activeTab, setActiveTab] = useState<'OFFENSE' | 'DEFENSE' | 'MATRIX'>(initialTab);
@@ -51,9 +62,9 @@ export const ProPlaybookCards: React.FC<ProPlaybookCardsProps> = ({
   );
 
   const offensePlayList = specialTeamsOnly ? [] : Object.values(PRO_OFFENSE_PLAYS).filter(play => !offensePlayIds || offensePlayIds.includes(play.id));
-  const defensePlayList = Object.values(PRO_DEFENSE_PLAYS);
-  const currentOffense = PRO_OFFENSE_PLAYS[selectedOffenseId] || PRO_OFFENSE_PLAYS.PRO_QUICK_SLANTS;
-  const currentDefense = PRO_DEFENSE_PLAYS[selectedDefenseId] || defensePlayList[0];
+  const defensePlayList = Object.values(PRO_DEFENSE_PLAYS).filter(play => !defensePlayIds || defensePlayIds.includes(play.id));
+  const currentOffense = offensePlayList.find(play => play.id === selectedOffenseId) || offensePlayList[0];
+  const currentDefense = defensePlayList.find(play => play.id === selectedDefenseId) || defensePlayList[0];
   const specialTeamsCards = onSelectSpecialTeams && (
     <div className="col-span-full grid grid-cols-2 gap-2 border-t border-neutral-700 pt-3">
       {(['PUNT', 'FIELD_GOAL'] as const).map(playId => (
@@ -89,6 +100,8 @@ export const ProPlaybookCards: React.FC<ProPlaybookCardsProps> = ({
           <div className="shrink-0 border-b border-neutral-800 px-4 py-3 text-center">
             {downDistanceText && <p className="mb-1 text-base font-black text-amber-300">{downDistanceText}</p>}
             <h2 className="text-sm font-black uppercase text-white">{title}</h2>
+            {teamName && <p className="mt-1 text-xs font-bold text-amber-300">{teamName} playbook</p>}
+            {(isDefense ? defenseIdentity : offenseIdentity) && <p className="mt-1 text-xs text-neutral-400">{isDefense ? defenseIdentity : offenseIdentity}</p>}
           </div>
           <div className="grid min-h-0 flex-1 grid-cols-2 gap-2 overflow-y-auto p-2 sm:grid-cols-3 sm:gap-3 sm:p-3 lg:grid-cols-4">
             {isDefense ? defensePlayList.map((play) => (
@@ -178,7 +191,7 @@ export const ProPlaybookCards: React.FC<ProPlaybookCardsProps> = ({
                 : 'border-transparent text-neutral-400 hover:text-neutral-200'
             }`}
           >
-            <span>Offensive Playbook (7)</span>
+            <span>Offensive Playbook ({offensePlayList.length})</span>
           </button>
           <button
             onClick={() => setActiveTab('DEFENSE')}
@@ -189,7 +202,7 @@ export const ProPlaybookCards: React.FC<ProPlaybookCardsProps> = ({
             }`}
           >
             <Shield size={14} />
-            <span>Defensive Schemes (7)</span>
+            <span>Defensive Schemes ({defensePlayList.length})</span>
           </button>
           <button
             onClick={() => setActiveTab('MATRIX')}
@@ -206,7 +219,7 @@ export const ProPlaybookCards: React.FC<ProPlaybookCardsProps> = ({
         {/* Main Content Area */}
         <div className="flex-1 overflow-y-auto p-4 sm:p-6">
           {activeTab === 'OFFENSE' && specialTeamsCards}
-          {activeTab === 'OFFENSE' && (
+          {activeTab === 'OFFENSE' && currentOffense && (
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
               {/* Play Selector List */}
               <div className="lg:col-span-5 flex flex-col gap-2">
@@ -344,7 +357,7 @@ export const ProPlaybookCards: React.FC<ProPlaybookCardsProps> = ({
             </div>
           )}
 
-          {activeTab === 'DEFENSE' && (
+          {activeTab === 'DEFENSE' && currentDefense && (
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
               {/* Defense Selector List */}
               <div className="lg:col-span-5 flex flex-col gap-2">
@@ -578,11 +591,14 @@ export const ProPlaybookCards: React.FC<ProPlaybookCardsProps> = ({
  * High quality SVG route diagram for 7-on-7 offense
  */
 const OffenseRouteDiagram: React.FC<{ play: ProOffensePlay }> = ({ play }) => {
-  if (!play.isRun) {
+  if (!play.isRun || play.id.startsWith('PRO_TEAM_')) {
     const positions = play.alignment === 'TRIPS'
       ? [50, 290, 250, 215]
       : play.alignment === 'STACK' ? [80, 275, 215, 105] : [45, 295, 225, 115];
     const routes = [play.leftRoute, play.rightRoute, play.centerRoute, play.slotRoute];
+    const rbX = play.alignment === 'TRIPS' ? 90 : 220;
+    const runType = offensivePlaybook[play.id].type;
+    const runX = runType === 'SWEEP' ? (rbX < 170 ? 40 : 300) : runType === 'POWER' ? 205 : 170;
     return (
       <svg viewBox="0 0 340 430" className="h-full w-full select-none" aria-label={`${play.name} routes`}>
         <defs>
@@ -610,9 +626,11 @@ const OffenseRouteDiagram: React.FC<{ play: ProOffensePlay }> = ({ play }) => {
         })}
         <circle cx="170" cy="395" r="7" fill="#eab308" stroke="#fff" />
         <text x="170" y="415" fill="#fbbf24" fontSize="10" textAnchor="middle">QB</text>
-        <circle cx={play.alignment === 'TRIPS' ? 90 : 220} cy="405" r="6" fill="#3b82f6" stroke="#fff" />
-        <path d={`M ${play.alignment === 'TRIPS' ? 90 : 220} 399 v -16 m -9 0 h 18`} stroke="#34d399" strokeWidth="3" />
-        <text x={play.alignment === 'TRIPS' ? 90 : 220} y="425" fill="#93c5fd" fontSize="10" textAnchor="middle">RB BLOCK</text>
+        <circle cx={rbX} cy="405" r="6" fill="#3b82f6" stroke="#fff" />
+        {play.isRun
+          ? <path d={`M ${rbX} 399 Q ${runX} 380 ${runX} 335 L ${runX} 170`} fill="none" stroke="#fbbf24" strokeWidth="4" markerEnd={`url(#routeArrow-${play.id})`} />
+          : <path d={`M ${rbX} 399 v -16 m -9 0 h 18`} stroke="#34d399" strokeWidth="3" />}
+        <text x={rbX} y="425" fill="#93c5fd" fontSize="10" textAnchor="middle">{play.isRun ? 'RB RUN' : 'RB BLOCK'}</text>
       </svg>
     );
   }
@@ -704,8 +722,14 @@ const OffenseRouteDiagram: React.FC<{ play: ProOffensePlay }> = ({ play }) => {
  * High quality SVG defensive scheme diagram
  */
 const DefenseSchemeDiagram: React.FC<{ defense: ProDefensePlay }> = ({ defense }) => {
+  const signatureDefenders: Entity[] = defense.landmarks
+    ? Array.from({ length: 7 }, () => ({ x: 170, y: 500, radius: 10 })) : [];
+  if (defense.landmarks) {
+    const receivers: Entity[] = [45, 115, 295].map(x => ({ x, y: 500, radius: 10, routeType: 'GO' }));
+    alignDefenders(signatureDefenders, defense.id, -1, 500, receivers, { x: 225, y: 500, radius: 10, routeType: 'HITCH' });
+  }
   return (
-    <svg viewBox="0 0 340 200" className="w-full h-44 sm:h-52 select-none">
+    <svg viewBox="0 0 340 200" className="w-full h-44 sm:h-52 select-none" aria-label={`${defense.name} scheme`}>
       <defs>
         <pattern id="defYardLines" width="340" height="40" patternUnits="userSpaceOnUse">
           <line x1="0" y1="39" x2="340" y2="39" stroke="rgba(255,255,255,0.08)" strokeWidth="1" />
@@ -733,6 +757,20 @@ const DefenseSchemeDiagram: React.FC<{ defense: ProDefensePlay }> = ({ defense }
       <circle cx="290" cy="130" r="4" fill="rgba(255,255,255,0.25)" />
 
       {/* Defense Specific Alignment & Zones */}
+      {signatureDefenders.map((defender, index) => {
+        const y = 130 + (defender.y - 500) * 0.3;
+        const zoneY = 130 + ((defender.zoneY ?? defender.y) - 500) * 0.3;
+        return (
+          <g key={index}>
+            <circle cx={defender.x} cy={y} r="5" fill={defender.passRusher ? '#ef4444' : '#38bdf8'} stroke="#fff" />
+            {defender.passRusher
+              ? <path d={`M ${defender.x} ${y} L 170 155`} stroke="#ef4444" strokeWidth="2" markerEnd="url(#arrowRed)" />
+              : defender.assignedReceiver
+                ? <path d={`M ${defender.x} ${y} L ${defender.assignedReceiver.x} 130`} stroke="#38bdf8" strokeWidth="1.5" strokeDasharray="3 2" />
+                : <ellipse cx={defender.zoneX} cy={zoneY} rx="32" ry="14" fill="#38bdf81a" stroke="#38bdf8" strokeDasharray="3 2" />}
+          </g>
+        );
+      })}
       {defense.id === 'PRO_COVER2_HARD_FLAT' && (
         <g>
           {/* Two Deep Halves */}

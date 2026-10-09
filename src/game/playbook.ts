@@ -1,4 +1,5 @@
 import type { DefOption, PlayOption } from './types';
+import { SIGNATURE_PLAYS, signatureOffenseIds, signatureDefenseIds } from './signaturePlays';
 
 export const offensivePlaybook: Record<string, PlayOption> = {
   SHORT_PASS: {
@@ -262,6 +263,18 @@ export const offensivePlaybook: Record<string, PlayOption> = {
 };
 
 export const defensivePlaybook: Record<string, DefOption> = {
+  MAN_FREE: {
+    name: 'MAN-FREE DEFENSE',
+    desc: 'Man coverage with one deep safety; trusts quick corners and attacks short routes',
+    weakness: 'crossing rubs and double moves',
+    vulnerableRouteType: 'VERTICAL'
+  },
+  DEEP_THIRDS: {
+    name: 'DEEP THIRDS DEFENSE',
+    desc: 'Three deep zones keep vertical threats in front; concedes underneath space',
+    weakness: 'underneath crossers and flat routes',
+    vulnerableRouteType: 'SHORT'
+  },
   COVER2: {
     name: '1-4-2 DEFENSE (COVER 2)',
     desc: 'One rusher, two middle linebackers, two flat corners, and two deep safeties',
@@ -333,14 +346,9 @@ export const proDefensivePlaybook: Record<string, DefOption> = {
   }
 };
 
-export const allDefensivePlaybook: Record<string, DefOption> = {
-  ...defensivePlaybook,
-  ...proDefensivePlaybook
-};
-
 export const eliteOffensiveKeys = ['SHORT_PASS', 'CONTROL_PASS', 'DEEP_SHOT', 'ISO', 'SWEEP', 'POWER', 'MESH', 'SMASH', 'POST_WHEEL'];
 export const proOffensiveKeys = ['PRO_QUICK_SLANTS', 'PRO_MESH', 'PRO_VERTS', 'PRO_DOUBLE_MOVES', 'PRO_SCREEN', 'PRO_JET_SWEEP', 'PRO_DRAW'];
-export const eliteDefensiveKeys = ['COVER2', 'ZONE34', 'ZONE232', 'ZONE151'];
+export const eliteDefensiveKeys = ['COVER2', 'ZONE34', 'ZONE232', 'ZONE151', 'MAN_FREE', 'DEEP_THIRDS'];
 export const proDefensiveKeys = [
   'PRO_COVER2_HARD_FLAT',
   'PRO_COVER1_MAN',
@@ -350,6 +358,26 @@ export const proDefensiveKeys = [
   'PRO_RUN_STOP_BOX',
   'PRO_TAMPA2'
 ];
+
+for (const [teamId, signature] of Object.entries(SIGNATURE_PLAYS)) {
+  signatureOffenseIds(teamId).forEach((id, index) => {
+    offensivePlaybook[id] = signature.offense[index];
+    offensivePlaybook[`PRO_${id}`] = signature.offense[index];
+    eliteOffensiveKeys.push(id);
+    proOffensiveKeys.push(`PRO_${id}`);
+  });
+  signatureDefenseIds(teamId).forEach((id, index) => {
+    defensivePlaybook[id] = signature.defense[index];
+    proDefensivePlaybook[`PRO_${id}`] = signature.defense[index];
+    eliteDefensiveKeys.push(id);
+    proDefensiveKeys.push(`PRO_${id}`);
+  });
+}
+
+export const allDefensivePlaybook: Record<string, DefOption> = {
+  ...defensivePlaybook,
+  ...proDefensivePlaybook
+};
 
 export const defensiveKeys = Object.keys(defensivePlaybook);
 export const offensiveKeys = Object.keys(offensivePlaybook);

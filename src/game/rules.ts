@@ -161,19 +161,29 @@ export interface TackleChanceInput {
   isQB?: boolean;
   isReturner?: boolean;
   runPowerRating?: number;
+  carrierPower?: number;
+  defenderTackling?: number;
+  stamina?: number;
 }
 
 export function canTackleQuarterback(tackleImmunity: number): boolean {
   return tackleImmunity <= 0;
 }
 
+export function getContactGainYards(power = 65, tackling = 65, stamina = 100): number {
+  return Math.min(2, Math.max(0, (power - tackling - 8) / 20)) * Math.max(0, Math.min(1, stamina / 100));
+}
+
 export function calculateBrokenTackleChance(input: TackleChanceInput): number {
+  const matchupMultiplier = Math.max(0.35, Math.min(1.9,
+    1 + ((input.carrierPower ?? 65) - (input.defenderTackling ?? 65)) * 0.025
+  )) * (0.7 + Math.min(100, Math.max(0, input.stamina ?? 100)) * 0.003);
   if (input.isReturner) {
     let breakChance = 0.14;
     if (input.isBoosted) breakChance += 0.12;
     if (input.brokenCount === 1) breakChance *= 0.6;
     if (input.brokenCount >= 2) breakChance = 0.04;
-    return breakChance;
+    return breakChance * matchupMultiplier;
   }
   if (input.isQB) {
     // Quarterbacks do not experience broken tackles against charging defenders
@@ -181,20 +191,19 @@ export function calculateBrokenTackleChance(input: TackleChanceInput): number {
   }
 
   const runPowerMultiplier = input.isRB
-    ? Math.max(0.85, Math.min(1.15, 1 + ((input.runPowerRating ?? 1) - 1) * 0.15))
+    ? Math.max(0.65, Math.min(1.45, 1 + ((input.runPowerRating ?? 1) - 1) * 0.6))
     : 1;
-
   if (input.isBlitzer) {
     // Defenders labeled to blitz have high tackling success and experience less broken tackles
     const base = input.isBoosted ? 0.10 : 0.04;
-    return (input.brokenCount >= 1 ? base * 0.4 : base) * runPowerMultiplier;
+    return (input.brokenCount >= 1 ? base * 0.4 : base) * runPowerMultiplier * matchupMultiplier;
   }
 
   let breakChance = input.isRB ? 0.18 : 0.14;
   if (input.isBoosted) breakChance += input.isRB ? 0.07 : 0.12;
   if (input.brokenCount === 1) breakChance *= 0.6;
   if (input.brokenCount >= 2) breakChance = 0.04;
-  return breakChance * runPowerMultiplier;
+  return Math.min(0.45, breakChance * runPowerMultiplier * matchupMultiplier);
 }
 
 export function getThrowOffDistance(power: number, maxDistance: number): number {
@@ -219,6 +228,8 @@ export interface CatchContestParams {
   distanceToCatch?: number;
   roll?: number;
   isProMode?: boolean;
+  handsRating?: number;
+  coverageRating?: number;
 }
 
 export interface CatchContestResult {
@@ -238,6 +249,7 @@ export function getCatchCompletionChance(params: CatchContestParams): number {
   const doubleCoveragePenalty = Math.min(2, Math.max(0, (params.defenderCount ?? 1) - 1)) * 0.10;
   const positionPenalty = params.ballSideDefender ? 0.08 : 0;
   const reachPenalty = Math.max(0, (params.distanceToCatch ?? 0) - 12) * 0.008;
+  const playerMatchup = ((params.handsRating ?? 70) - (params.coverageRating ?? 70)) * 0.003 * (1 - coverageCurve);
 
   if (params.isProMode) {
     const proBase = 0.62;
@@ -246,10 +258,10 @@ export function getCatchCompletionChance(params: CatchContestParams): number {
     const fatigueMod = Math.max(0, (50 - (params.stamina ?? 100)) / 50) * 0.03;
     const doubleCovMod = Math.min(2, Math.max(0, (params.defenderCount ?? 1) - 1)) * 0.04;
     const reachMod = Math.max(0, (params.distanceToCatch ?? 0) - 16) * 0.004;
-    return Math.max(0.52, Math.min(0.94, proBase + proOpenBoost + handsMod - fatigueMod - doubleCovMod - reachMod));
+    return Math.max(0.28, Math.min(0.94, proBase + proOpenBoost + handsMod + playerMatchup - fatigueMod - doubleCovMod - reachMod - (params.ballSideDefender ? 0.08 : 0)));
   }
 
-  return Math.max(0.10, Math.min(0.905, 0.30 + 0.605 * coverageCurve + (handsBonus - fatiguePenalty - doubleCoveragePenalty - positionPenalty) * (1 - coverageCurve) - reachPenalty));
+  return Math.max(0.10, Math.min(0.905, 0.30 + 0.605 * coverageCurve + playerMatchup + (handsBonus - fatiguePenalty - doubleCoveragePenalty - positionPenalty) * (1 - coverageCurve) - reachPenalty));
 }
 
 export function resolveCatchContestOutcome(params: CatchContestParams): CatchContestResult {
@@ -530,5 +542,3 @@ export function calculateFieldGoalFlight(
     missReason
   };
 }
-
-

@@ -1,3 +1,5 @@
+import { SIGNATURE_PLAYS, signatureOffenseIds, signatureDefenseIds, type SignatureProOffenseId, type SignatureProDefenseId, type DefenseLandmark } from './signaturePlays';
+
 export type TacticalMode = 'ELITE' | 'PRO';
 
 export type ProOffensePlayId =
@@ -7,7 +9,8 @@ export type ProOffensePlayId =
   | 'PRO_DOUBLE_MOVES'
   | 'PRO_SCREEN'
   | 'PRO_JET_SWEEP'
-  | 'PRO_DRAW';
+  | 'PRO_DRAW'
+  | SignatureProOffenseId;
 
 export type ProDefensePlayId =
   | 'PRO_COVER2_HARD_FLAT'
@@ -16,7 +19,8 @@ export type ProDefensePlayId =
   | 'PRO_COVER4_QUARTERS'
   | 'PRO_BLITZ_ZERO'
   | 'PRO_RUN_STOP_BOX'
-  | 'PRO_TAMPA2';
+  | 'PRO_TAMPA2'
+  | SignatureProDefenseId;
 
 export type MatchupEffectiveness = 'SHUTDOWN' | 'EFFECTIVE' | 'MODERATE' | 'BIG_GAIN';
 
@@ -49,6 +53,7 @@ export interface ProDefensePlay {
   exactCounterAgainst: ProOffensePlayId[];
   vulnerableAgainst: string;
   strengths: string;
+  landmarks?: DefenseLandmark[];
 }
 
 export const PRO_OFFENSE_PLAYS: Record<ProOffensePlayId, ProOffensePlay> = {
@@ -315,6 +320,56 @@ export const PRO_DEFENSE_PLAYS: Record<ProDefensePlayId, ProDefensePlay> = {
     strengths: 'Reliable containment across both pass and run plays.'
   }
 };
+
+const signatureCounters = new Map<ProDefensePlayId, ProDefensePlayId>();
+for (const [teamId, signature] of Object.entries(SIGNATURE_PLAYS)) {
+  const offenseIds = signatureOffenseIds(teamId);
+  signatureDefenseIds(teamId).forEach((eliteId, index) => {
+    const id: ProDefensePlayId = `PRO_${eliteId}`;
+    const definition = signature.defense[index];
+    const base = PRO_DEFENSE_PLAYS[definition.counter];
+    signatureCounters.set(id, definition.counter);
+    PRO_DEFENSE_PLAYS[id] = {
+      ...base, id, name: definition.name, description: definition.desc,
+      strengths: definition.desc, vulnerableAgainst: definition.weakness,
+      exactCounterAgainst: [...base.exactCounterAgainst], landmarks: definition.landmarks
+    };
+  });
+  offenseIds.forEach((eliteId, index) => {
+    const id: ProOffensePlayId = `PRO_${eliteId}`;
+    const play = signature.offense[index];
+    const isRun = play.type !== 'PASS';
+    const isDeepPass = play.routeType === 'VERTICAL';
+    const counterDefenseId: ProDefensePlayId = isRun ? 'PRO_RUN_STOP_BOX'
+      : isDeepPass ? 'PRO_COVER4_QUARTERS' : play.left === 'BLOCK' ? 'PRO_BLITZ_ZERO' : 'PRO_COVER1_MAN';
+    PRO_OFFENSE_PLAYS[id] = {
+      id, name: play.name, category: isRun ? 'Run' : isDeepPass ? 'Deep Pass' : 'Short/Medium Pass',
+      isRun, isDeepPass, description: play.desc, counterDefenseId,
+      counterDefenseName: PRO_DEFENSE_PLAYS[counterDefenseId].name,
+      alignment: play.alignment, leftRoute: play.left, rightRoute: play.right,
+      centerRoute: play.center, slotRoute: play.slot, rbRoute: play.rbRoute,
+      routesSummary: `${play.desc} Routes: ${play.left}, ${play.right}, ${play.center}, ${play.slot}.`,
+      matchups: {
+        PRO_COVER2_HARD_FLAT: 'EFFECTIVE', PRO_COVER1_MAN: 'EFFECTIVE', PRO_COVER3_DEEP: 'EFFECTIVE',
+        PRO_COVER4_QUARTERS: 'EFFECTIVE', PRO_BLITZ_ZERO: 'MODERATE',
+        PRO_RUN_STOP_BOX: 'MODERATE', PRO_TAMPA2: 'EFFECTIVE'
+      }
+    };
+  });
+}
+
+for (const offense of Object.values(PRO_OFFENSE_PLAYS)) {
+  for (const defense of Object.values(PRO_DEFENSE_PLAYS)) {
+    if (offense.id.startsWith('PRO_TEAM_') &&
+      (defense.id === offense.counterDefenseId || signatureCounters.get(defense.id) === offense.counterDefenseId)) {
+      defense.exactCounterAgainst.push(offense.id);
+    }
+    if (!offense.id.startsWith('PRO_TEAM_') && !defense.id.startsWith('PRO_TEAM_')) continue;
+    offense.matchups[defense.id] = defense.exactCounterAgainst.includes(offense.id) ? 'SHUTDOWN'
+      : offense.isDeepPass && defense.isRunDefense ? 'BIG_GAIN'
+      : !offense.isRun && defense.isPassingDefense ? 'EFFECTIVE' : 'MODERATE';
+  }
+}
 
 export interface ProMatchupResult {
   effectiveness: MatchupEffectiveness;

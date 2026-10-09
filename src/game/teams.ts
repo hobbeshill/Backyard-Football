@@ -1,3 +1,5 @@
+import { createTeamRoster, type TeamRoster } from './roster';
+
 export interface TeamProfile {
   id: string;
   name: string;
@@ -11,13 +13,14 @@ export interface TeamProfile {
   description: string;
   strengths: string;
   weaknesses: string;
+  roster: TeamRoster;
   ratings: {
-    wrSpeed: number;         // Modulates WR sprint speed
-    passProtection: number;  // Modulates OL block hold time
-    runPower: number;        // Modulates RB broken tackle chance
-    dbClosingSpeed: number;  // Modulates DB closing & pursuit speed
-    passRush: number;        // Modulates pass rush pressure speed
-    mistakeChance: number;   // Defensive coverage bust tendency
+    wrSpeed: number;         // Shapes receiver roster speed
+    passProtection: number;  // Shapes individual blocking ratings
+    runPower: number;        // Shapes RB power, not speed
+    dbClosingSpeed: number;  // Shapes defensive roster speed
+    passRush: number;        // Shapes individual rush ratings
+    mistakeChance: number;   // Coverage discipline and bust tendency
     kicking?: number;        // Special teams leg power & kicking accuracy
   };
 }
@@ -55,6 +58,7 @@ function createTeamProfile(
     description,
     strengths,
     weaknesses,
+    roster: createTeamRoster(id, archetype, amplifiedRatings),
     ratings: amplifiedRatings
   };
 }
