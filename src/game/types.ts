@@ -68,6 +68,7 @@ export interface Entity {
   flash?: number;
   caught?: boolean;
   hasBall?: boolean;
+  isQuarterback?: boolean;
   isOutside?: boolean;
   isCenter?: boolean;
   isRB?: boolean;

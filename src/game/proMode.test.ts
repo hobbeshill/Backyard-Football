@@ -273,6 +273,69 @@ test('User can pick which defender to control before starting the play in Pro mo
     const nextIdx = game.cycleControlledDefender?.(1);
     assert.equal(nextIdx, 0);
     assert.equal(game.getControlledDefender?.(), defenders[0]);
+
+    game.selectDefender?.(3);
+    game.startDefensePlay?.();
+    assert.notEqual(game.phase, 'PRE_SNAP', 'Starting the play should lock the selected defender');
+    game.selectDefender?.(6);
+    assert.equal(game.cycleControlledDefender?.(1), 3);
+    assert.equal(game.getControlledDefenderIndex?.(), 3);
+    assert.equal(game.getControlledDefender?.(), defenders[3]);
+    assert.equal(controlledChangedIndex, 3);
+  } finally {
+    cleanup?.();
+  }
+});
+
+test('Pro hot route on a run call converts it into a passing play', () => {
+  const listeners = new Map<string, EventListener>();
+  const drawingContext = {
+    save: () => {}, restore: () => {}, translate: () => {}, scale: () => {},
+    clearRect: () => {}, fillRect: () => {}, strokeRect: () => {},
+    beginPath: () => {}, closePath: () => {}, moveTo: () => {}, lineTo: () => {},
+    stroke: () => {}, fill: () => {}, arc: () => {}, bezierCurveTo: () => {},
+    quadraticCurveTo: () => {}, ellipse: () => {}, clip: () => {}, roundRect: () => {},
+    setLineDash: () => {}, createLinearGradient: () => ({ addColorStop: () => {} }),
+    createRadialGradient: () => ({ addColorStop: () => {} }), fillText: () => {},
+    measureText: () => ({ width: 40 }), rotate: () => {}
+  };
+  const canvas = {
+    width: 340, height: 450, style: {},
+    getContext: () => drawingContext,
+    getBoundingClientRect: () => ({ left: 0, top: 0, width: 340, height: 450 } as DOMRect),
+    addEventListener: (type: string, listener: EventListener) => listeners.set(type, listener),
+    removeEventListener: (type: string) => listeners.delete(type),
+    _listeners: listeners
+  } as unknown as HTMLCanvasElement;
+
+  let engine: GameEngineHandle | null = null;
+  const cleanup = mountFootballGame(canvas, {
+    setP2OffPlayState: () => {}, setP2DefPlayState: () => {},
+    setDownDistanceText: () => {}, setActiveOffenseState: () => {},
+    setUserScore: () => {}, setCpuScore: () => {}, setP1DefPlayState: () => {},
+    setMomentumState: () => {}, setGameClockState: () => {}, showAnnouncement: () => {},
+    onEngineReady: value => { engine = value; }
+  });
+
+  try {
+    assert.ok(engine);
+    const game = engine as GameEngineHandle;
+    game.setTacticalMode?.('PRO');
+    game.setPossessionForTest?.('P1');
+    game.selectOffense('PRO_DRAW');
+
+    const receiver = game.getReceiverScreenPositionForTest?.(0);
+    assert.ok(receiver, 'The outside receiver should be available for route drawing');
+    listeners.get('pointerdown')?.({ clientX: receiver.x, clientY: receiver.y, pointerId: 1 } as PointerEvent);
+    listeners.get('pointermove')?.({ clientX: receiver.x + 55, clientY: receiver.y, pointerId: 1 } as PointerEvent);
+    listeners.get('pointerup')?.({ clientX: receiver.x + 55, clientY: receiver.y, pointerId: 1 } as PointerEvent);
+
+    assert.notEqual(game.p1OffPlay, 'PRO_DRAW');
+    assert.equal(offensivePlaybook[game.p1OffPlay].type, 'PASS');
+    assert.equal(game.getReceivers()[0].routeType, 'CROSS-R');
+
+    game.startPlay?.();
+    assert.equal(game.phase, 'QB_DROP', 'Converted run call should begin as a passing play');
   } finally {
     cleanup?.();
   }

@@ -290,6 +290,7 @@ export function resolveCollisions(
       const first = allEntities[i];
       const second = allEntities[j];
       if (!first || !second) continue;
+      if ((first === ballCarrier && second.isQuarterback) || (second === ballCarrier && first.isQuarterback)) continue;
 
       if (!includeReceivers) {
         const isFirstReceiver = receiverEntities.includes(first);

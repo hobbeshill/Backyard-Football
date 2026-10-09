@@ -99,6 +99,17 @@ test('ball carriers sidestep exact-overlap blockers toward the clearer lane and 
   assert.equal(runner.contactSlowTimer, 4, 'Contact should apply a brief traffic slowdown');
 });
 
+test('a quarterback does not obstruct the ball carrier during a handoff or run', () => {
+  const runner: Entity = { x: 170, y: 500, radius: 10, team: 'P2' };
+  const quarterback: Entity = { x: 170, y: 500, radius: 12, team: 'P2', isQuarterback: true };
+
+  resolveCollisions([runner, quarterback], true, [], [], runner);
+
+  assert.deepEqual([runner.x, runner.y], [170, 500]);
+  assert.deepEqual([quarterback.x, quarterback.y], [170, 500]);
+  assert.equal(runner.contactSlowTimer, undefined);
+});
+
 test('user-controlled ball carriers keep their chosen lane while blockers yield', () => {
   const runner: Entity = { x: 170, y: 500, radius: 10, team: 'P1' };
   const blocker: Entity = { x: 170, y: 500, radius: 10, team: 'P1' };
@@ -1589,6 +1600,7 @@ test('offensive double-taps only reposition the RB on offset and scaled canvases
   context.mock.method(Date, 'now', () => timestamp);
   const createHandlers = new Function('cyclePreSnapFormation', 'canvasLeft', 'canvasTop', 'scale', 'tacticalMode', 'flipP1ProPlay', `
     let phase = 'PRE_SNAP', activeOffense = 'P1', activeDefense = 'P2';
+    const onlineRole = null;
     const isPaused = false, options = {}, tutorialStep = 0;
     const completeTutorialAction = () => {};
     const receiverHitPadding = 20, touchHitPadding = 18;
