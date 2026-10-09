@@ -109,9 +109,10 @@ export function getRunDirectionSpeedFactor(inputY: number, attackDirection: numb
   return Math.max(0.70, Math.min(1.05, 0.90 + (inputY * attackDirection) * 0.25));
 }
 
-export function getUserDefenderSpeed(speedMultiplier = 1, stamina = 100): number {
-  return 2.05 * 0.68 * GAME_SPEED_SCALE * USER_CONTROL_SPEED_MULTIPLIER *
-    speedMultiplier * getFatigueSpeedMultiplier(stamina);
+export function getUserDefenderSpeed(speedMultiplier = 1, stamina = 100, isTurbo = false, isOnFire = false): number {
+  const blitzBoost = isOnFire ? 1.55 : (isTurbo ? 1.40 : 1.0);
+  return 2.15 * 0.72 * GAME_SPEED_SCALE * USER_CONTROL_SPEED_MULTIPLIER *
+    speedMultiplier * blitzBoost * (isOnFire ? 1.0 : getFatigueSpeedMultiplier(stamina));
 }
 
 export function shouldApplyRunBlockStun(blocker: Entity, target: Entity): boolean {
@@ -157,7 +158,7 @@ export function getRunBlockEffect(blocker: Entity, defender: Entity): number {
 }
 
 export function canEngagePassBlock(blocker: Entity, rusher: Entity): boolean {
-  return Math.hypot(rusher.x - blocker.x, rusher.y - blocker.y) <= blocker.radius + rusher.radius + 6;
+  return Math.hypot(rusher.x - blocker.x, rusher.y - blocker.y) <= (blocker.radius ?? 10) + (rusher.radius ?? 10) + 6;
 }
 
 export function getPassBlockHoldFrames(baseHoldFrames: number, passProtection: number, passRush: number): number {
@@ -171,12 +172,18 @@ export function getPassBlockBaseHoldFrames(): number {
 export function shouldHoldPassBlock(blocker: Entity, rusher: Entity, holdFrames: number): boolean {
   if (!canEngagePassBlock(blocker, rusher)) {
     if ((rusher.blockEngagedTimer || 0) <= holdFrames) rusher.blockEngagedTimer = 0;
+    rusher.isEngagedWithBlocker = false;
     return false;
   }
-  if (rusher.isEngagedWithBlocker) return true;
 
   rusher.blockEngagedTimer = (rusher.blockEngagedTimer || 0) + 1;
-  if (rusher.blockEngagedTimer > holdFrames) return false;
+  const adjustedHoldFrames = rusher.isOnFire
+    ? Math.round(holdFrames * 0.4)
+    : (rusher.isTurboActive ? Math.round(holdFrames * 0.65) : holdFrames);
+  if (rusher.blockEngagedTimer > adjustedHoldFrames) {
+    rusher.isEngagedWithBlocker = false;
+    return false;
+  }
   rusher.isEngagedWithBlocker = true;
   rusher.vx = 0;
   rusher.vy = 0;
@@ -185,6 +192,43 @@ export function shouldHoldPassBlock(blocker: Entity, rusher: Entity, holdFrames:
 
 export function isRusherActivelyBlocked(rusher: Entity, blockers: Entity[]): boolean {
   return Boolean(rusher.isEngagedWithBlocker && blockers.some(blocker => canEngagePassBlock(blocker, rusher)));
+}
+
+export function checkOffensiveLineWall(
+  rusher: Entity,
+  linemen: Entity[],
+  lineOfScrimmageY: number,
+  attackDirection: number
+): boolean {
+  if (rusher.x < 118 || rusher.x > 222) return false;
+  const losMargin = 18;
+  const isAtOrCrossingLos = attackDirection === -1
+    ? (rusher.y >= lineOfScrimmageY - losMargin && rusher.y <= lineOfScrimmageY + 45)
+    : (rusher.y <= lineOfScrimmageY + losMargin && rusher.y >= lineOfScrimmageY - 45);
+
+  if (!isAtOrCrossingLos) return false;
+
+  const nearestLineman = linemen.reduce<{ l: Entity; dist: number } | null>((best, l) => {
+    const dist = Math.hypot(rusher.x - l.x, rusher.y - l.y);
+    return (!best || dist < best.dist) ? { l, dist } : best;
+  }, null)?.l;
+
+  if (nearestLineman) {
+    const contactDist = (nearestLineman.radius || 12) + (rusher.radius || 10);
+    rusher.isEngagedWithBlocker = true;
+    rusher.blockingDefender = nearestLineman;
+    nearestLineman.blockingDefender = rusher;
+    rusher.vx = 0;
+    rusher.vy = 0;
+
+    if (attackDirection === -1) {
+      rusher.y = Math.min(rusher.y, nearestLineman.y - contactDist + 2);
+    } else {
+      rusher.y = Math.max(rusher.y, nearestLineman.y + contactDist - 2);
+    }
+    return true;
+  }
+  return false;
 }
 
 export function clampPlayerToFieldY(player: Entity, fieldHeight: number): void {

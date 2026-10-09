@@ -1,8 +1,8 @@
 import type { Entity } from './types';
 
 export type PlayerTrait = 'SPD' | 'PWR' | 'HANDS' | 'COV' | 'HIT' | 'BLK' | 'RUSH' | 'QB';
-export type RosterSlot = 'qb' | 'wr-0' | 'wr-1' | 'wr-2' | 'center' | 'rb' | 'line-0' |
-  'def-0' | 'def-1' | 'def-2' | 'def-3' | 'def-4' | 'def-5' | 'def-6';
+export type RosterSlot = 'qb' | 'wr-0' | 'wr-1' | 'wr-2' | 'center' | 'rb' | 'line-0' | 'line-1' |
+  'def-0' | 'def-1' | 'def-2' | 'def-3' | 'def-4' | 'def-5' | 'def-6' | 'def-7';
 
 export interface PlayerRatings {
   speed: number;
@@ -75,6 +75,8 @@ export function createTeamRoster(
       { speed: powerTeam ? 58 : speedTeam ? 87 : 74, power: 72 + power, hands: speedTeam ? 82 : 62, blocking: 63 + blocking, endurance: powerTeam ? 88 : 73 }),
     'line-0': player(67, 'Pocket anchor', 'BLK', 'LINEMAN',
       { speed: 38, power: 85, blocking: 77 + blocking, hands: 30 }),
+    'line-1': player(73, 'Right tackle', 'BLK', 'LINEMAN',
+      { speed: 38, power: 84, blocking: 76 + blocking, hands: 30 }),
     'def-0': player(90, 'Edge rusher', 'RUSH', 'RUSHER',
       { speed: blitzTeam ? 77 : 62, power: 79, tackling: 78, rush: 77 + rush, coverage: 32 }),
     'def-1': player(52, 'Run stopper', 'HIT', 'LINEBACKER',
@@ -88,7 +90,9 @@ export function createTeamRoster(
     'def-5': player(54, 'Middle enforcer', 'HIT', 'LINEBACKER',
       { speed: 58 + defensiveSpeed, power: 90, tackling: 88, coverage: 50 + coverage, rush: 65 }),
     'def-6': player(3, 'Ball-hawk safety', 'COV', 'SAFETY',
-      { speed: 84 + defensiveSpeed, power: 60, tackling: 73, coverage: 81 + coverage, hands: 83 })
+      { speed: 84 + defensiveSpeed, power: 60, tackling: 73, coverage: 81 + coverage, hands: 83 }),
+    'def-7': player(27, 'Strong safety', 'HIT', 'SAFETY',
+      { speed: 78 + defensiveSpeed, power: 74, tackling: 81, coverage: 75 + coverage, hands: 70 })
   };
 
   // Signature players distinguish teams even within the same scheme.

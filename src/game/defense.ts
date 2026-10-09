@@ -208,6 +208,7 @@ export function alignDefenders(
     let manIndex = 0;
     landmarks.forEach((landmark, index) => {
       const defender = defenders[index];
+      if (!defender) return;
       defender.x = defender.startX = landmark.x;
       defender.y = defender.startY = lineOfScrimmageY + landmark.depth * attackDirection;
       defender.zoneX = landmark.x;
@@ -225,6 +226,17 @@ export function alignDefenders(
         }
       }
     });
+    if (defenders.length >= 8 && landmarks.length < 8) {
+      const d8 = defenders[7];
+      d8.startX = d8.x = 170;
+      d8.startY = d8.y = lineOfScrimmageY + (120 * attackDirection);
+      d8.zoneX = 170;
+      d8.zoneY = lineOfScrimmageY + (150 * attackDirection);
+      d8.type = 'SS';
+      d8.defenseAssignment = 'ZONE';
+      d8.passRusher = false;
+      d8.vx = d8.vy = 0;
+    }
     return;
   }
 
@@ -242,6 +254,7 @@ export function alignDefenders(
     type: string,
     passRusher = false
   ) => {
+    if (index >= defenders.length) return;
     const defender = defenders[index];
     defender.startX = x;
     defender.startY = lineOfScrimmageY + (depth * attackDirection);
@@ -251,13 +264,21 @@ export function alignDefenders(
     defender.passRusher = passRusher;
   };
 
+  const isEightMan = defenders.length >= 8;
+
   if (playKey === 'COVER2' || playKey === 'PRO_COVER2_HARD_FLAT') {
     placeDefender(1, 55, 32, 60, 'CB');
     placeDefender(2, 285, 32, 60, 'CB');
     placeDefender(3, 125, 70, 112, 'LB');
     placeDefender(4, 215, 70, 112, 'LB');
-    placeDefender(5, 105, 185, playKey === 'COVER2' ? 245 : 300, 'FS');
-    placeDefender(6, 235, 185, playKey === 'COVER2' ? 245 : 300, 'SS');
+    if (isEightMan) {
+      placeDefender(5, 170, 75, 120, 'MLB');
+      placeDefender(6, 105, 185, playKey === 'COVER2' ? 245 : 300, 'FS');
+      placeDefender(7, 235, 185, playKey === 'COVER2' ? 245 : 300, 'SS');
+    } else {
+      placeDefender(5, 105, 185, playKey === 'COVER2' ? 245 : 300, 'FS');
+      placeDefender(6, 235, 185, playKey === 'COVER2' ? 245 : 300, 'SS');
+    }
   } else if (playKey === 'PRO_COVER1_MAN') {
     placeDefender(0, 170, 24, 24, 'DL', true);
     placeDefender(1, 55, 38, 45, 'CB');
@@ -266,6 +287,9 @@ export function alignDefenders(
     placeDefender(4, 210, 48, 55, 'LB');
     placeDefender(5, 170, 60, 70, 'SS');
     placeDefender(6, 170, 200, 240, 'FS');
+    if (isEightMan) {
+      placeDefender(7, 135, 24, 24, 'DL', true);
+    }
   } else if (playKey === 'PRO_COVER3_DEEP') {
     placeDefender(0, 170, 24, 24, 'DL', true);
     placeDefender(1, 55, 200, 320, 'CB');
@@ -274,6 +298,9 @@ export function alignDefenders(
     placeDefender(4, 255, 80, 125, 'LB');
     placeDefender(5, 170, 65, 100, 'LB');
     placeDefender(6, 170, 220, 340, 'FS');
+    if (isEightMan) {
+      placeDefender(7, 205, 24, 24, 'DL', true);
+    }
   } else if (playKey === 'ZONE34') {
     placeDefender(0, 105, 24, 24, 'DL', true);
     placeDefender(1, 170, 24, 24, 'DL', true);
@@ -282,6 +309,9 @@ export function alignDefenders(
     placeDefender(4, 265, 105, 155, 'CB');
     placeDefender(5, 135, 175, 235, 'FS');
     placeDefender(6, 205, 175, 235, 'SS');
+    if (isEightMan) {
+      placeDefender(7, 170, 75, 115, 'MLB');
+    }
   } else if (playKey === 'PRO_COVER4_QUARTERS') {
     placeDefender(0, 170, 24, 24, 'DL', true);
     placeDefender(1, 50, 190, 320, 'CB');
@@ -290,6 +320,9 @@ export function alignDefenders(
     placeDefender(4, 220, 60, 95, 'LB');
     placeDefender(5, 115, 210, 340, 'FS');
     placeDefender(6, 225, 210, 340, 'SS');
+    if (isEightMan) {
+      placeDefender(7, 170, 80, 120, 'MLB');
+    }
   } else if (playKey === 'PRO_BLITZ_ZERO') {
     placeDefender(0, 140, 22, 22, 'DL', true);
     placeDefender(1, 55, 32, 35, 'CB');
@@ -298,6 +331,9 @@ export function alignDefenders(
     placeDefender(4, 200, 22, 22, 'LB', true);
     placeDefender(5, 110, 45, 50, 'SS');
     placeDefender(6, 230, 45, 50, 'FS');
+    if (isEightMan) {
+      placeDefender(7, 170, 45, 50, 'MLB');
+    }
   } else if (playKey === 'PRO_RUN_STOP_BOX') {
     placeDefender(0, 135, 20, 20, 'DL', true);
     placeDefender(1, 65, 24, 24, 'DL');
@@ -306,6 +342,9 @@ export function alignDefenders(
     placeDefender(4, 170, 22, 22, 'LB');
     placeDefender(5, 235, 22, 22, 'LB');
     placeDefender(6, 170, 130, 160, 'FS');
+    if (isEightMan) {
+      placeDefender(7, 205, 20, 20, 'DL', true);
+    }
   } else if (playKey === 'PRO_TAMPA2') {
     placeDefender(0, 170, 24, 24, 'DL', true);
     placeDefender(1, 55, 45, 75, 'CB');
@@ -314,6 +353,9 @@ export function alignDefenders(
     placeDefender(4, 210, 65, 105, 'LB');
     placeDefender(5, 100, 185, 320, 'FS');
     placeDefender(6, 240, 185, 320, 'SS');
+    if (isEightMan) {
+      placeDefender(7, 130, 65, 105, 'LB');
+    }
   } else if (playKey === 'ZONE232') {
     placeDefender(0, 130, 24, 24, 'DL', true);
     placeDefender(1, 210, 24, 24, 'DL', true);
@@ -322,13 +364,20 @@ export function alignDefenders(
     placeDefender(4, 285, 80, 125, 'LB');
     placeDefender(5, 105, 185, 245, 'FS');
     placeDefender(6, 235, 185, 245, 'SS');
+    if (isEightMan) {
+      placeDefender(7, 170, 30, 45, 'DL');
+    }
   } else if (playKey === 'ZONE151') {
+    placeDefender(0, 170, 24, 24, 'DL', true);
     placeDefender(1, 50, 75, 125, 'CB');
     placeDefender(2, 290, 75, 125, 'CB');
     placeDefender(3, 105, 80, 130, 'LB');
     placeDefender(4, 170, 80, 130, 'LB');
     placeDefender(5, 235, 80, 130, 'LB');
     placeDefender(6, 170, 220, 250, 'FS');
+    if (isEightMan) {
+      placeDefender(7, 135, 50, 75, 'LB');
+    }
   }
 
   // Shift the shell to the offense's actual alignment before the snap.

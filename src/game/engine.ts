@@ -5,7 +5,7 @@ import { getRouteWaypoints } from './movement';
 import { alignDefenderAcrossFromReceiver, alignDefenderAcrossFromRunningBack, alignDefenderToZone, alignDefenders, chooseCpuDefensiveAssignments, constrainDefendersToFieldSide, getBlitzAlignmentY, getBracketCoverageTarget, getDefensiveLineAlignmentY, matchCpuDefendersToReceivers, separateDefenderAlignments } from './defense';
 import { chooseProDefensiveCall, chooseTeamOffensivePlay, evaluateCpuOffensiveAudibles, evaluateCpuBallCarrierMoves, getCoverageMistakeChance, getSuccessfulPlayCounter, isCpuPressureRecognized, shouldCpuGoForItOnFourthDown, shouldCpuReleasePass, shouldCpuScramble, scoreRunBlockTarget } from './ai';
 import { createFumbleBall, getCarrierFumbleChance } from './fumbles';
-import { canEngagePassBlock, clampPlayerToFieldY, createSimulationClock, distToSegment, GAME_SPEED_SCALE, getBallCarrierRunSpeed, getFatigueSpeedMultiplier, getPassBlockBaseHoldFrames, getPassBlockHoldFrames, getDirectionalInput, getReturnPursuitSpeed, getReturnTeamBlockers, getRunLaneOptions, getUserRunnerVelocity, getRunPursuitMovement, getUserDefenderSpeed, isRusherActivelyBlocked, moveToward, resolveCollisions, shouldApplyRunBlockStun, shouldHoldPassBlock, updatePlayerStamina, updateReceiverTargetStamina, updateRunningBackStamina, updateRouteMovement, USER_CONTROL_SPEED_MULTIPLIER } from './movement';
+import { canEngagePassBlock, checkOffensiveLineWall, clampPlayerToFieldY, createSimulationClock, distToSegment, GAME_SPEED_SCALE, getBallCarrierRunSpeed, getFatigueSpeedMultiplier, getPassBlockBaseHoldFrames, getPassBlockHoldFrames, getDirectionalInput, getReturnPursuitSpeed, getReturnTeamBlockers, getRunLaneOptions, getUserRunnerVelocity, getRunPursuitMovement, getUserDefenderSpeed, isRusherActivelyBlocked, moveToward, resolveCollisions, shouldApplyRunBlockStun, shouldHoldPassBlock, updatePlayerStamina, updateReceiverTargetStamina, updateRunningBackStamina, updateRouteMovement, USER_CONTROL_SPEED_MULTIPLIER } from './movement';
 import { resolvePlayResult, isSafety, calculateBrokenTackleChance, calculateYardsToGo, getDriveStartY, getSnapBallPosition, getPassArcHeight, getFieldGoalBallHeight, getPassArcMaxHeight, getPassFlightFrames, findTappedPassReceiver, shouldReleaseUserPass, getPassLeadTarget, getRoutePassLeadTarget, canDefenderDeflectPass, canTackleQuarterback, resolveCatchContestOutcome, evaluateQbThrowAccuracy, getCpuThrowAimVariance, calculateKickoffFlight, calculatePuntFlight, getTouchbackYardLineY, getInterceptionTouchbackY, getKickoffLineY, getDefenderPassReachHeight, isPlayerOutOfBounds, calculateFieldGoalFlight, getFieldGoalDistanceYards, canApplyProMatchupAdjustment, GOALPOST_CENTER_X, GOALPOST_LEFT_UPRIGHT_X, GOALPOST_RIGHT_UPRIGHT_X, GOALPOST_CROSSBAR_HEIGHT_Z } from './rules';
 import { sounds } from './sound';
 import { evaluateDirtSwipeGesture, drawDirtSwipeGesture } from './chalkMenu';
@@ -66,6 +66,11 @@ export interface GameEngineHandle {
   startDefensePlay?: () => void;
   repositionDefender?: (index: number, x: number, y: number) => void;
   diveTackle: () => void;
+  switchDefenderToNearest?: () => number;
+  activateTurbo?: (active: boolean) => void;
+  attemptSwatOrInterception?: (mode?: 'SWAT' | 'INT') => void;
+  getTurboMeter?: () => number;
+  isDefenderOnFire?: () => boolean;
   getReceivers: () => Entity[];
   isJoystickActiveForTest?: () => boolean;
   getQuarterbackScreenPositionForTest?: () => { x: number; y: number };
@@ -174,6 +179,8 @@ export interface GameEngineCallbacks {
   setKickMeterPowerState?: (power: number) => void;
   setFieldGoalMeterState?: (state: { stage: 'AIM' | 'POWER' | 'KICKING'; aim: number; power: number; distanceYards: number } | null) => void;
   onControlledDefenderChange?: (index: number, defender: Entity) => void;
+  onTurboChange?: (turboMeter: number, isTurboActive: boolean) => void;
+  onDefenderOnFireChange?: (isOnFire: boolean) => void;
 }
 
 export interface GameBoxScore {
@@ -383,6 +390,9 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
   let tacticalMode: TacticalMode = 'ELITE';
   let userControlledDefenderIndex = 0;
+  let userTurboMeter = 100;
+  let userTurboActive = false;
+  let defenderFlameParticles: Array<{ x: number; y: number; vx: number; vy: number; life: number; maxLife: number; color: string; size: number }> = [];
   let p1OffPlay = 'SHORT_PASS';
   let p1PlayFlipped = false;
   let p1OffFormation: 'SPREAD' | 'STACK' | 'TRIPS' = 'SPREAD';
@@ -1271,12 +1281,14 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   function getCpuOffensivePlayCall(): string {
     const choose = (plays: readonly string[]) => {
       const available = offensePlays(p2Team);
-      const signatures = available.filter(key => key.includes('TEAM_') && plays.some(candidate => {
-        const wanted = offensivePlaybook[candidate];
-        const play = offensivePlaybook[key];
-        return (wanted.type === play.type || (wanted.type !== 'PASS' && play.type !== 'PASS')) &&
-          wanted.routeType === play.routeType;
-      }));
+      const signatures = available.filter(key => key.includes('TEAM_') && (
+        plays.some(candidate => {
+          const wanted = offensivePlaybook[candidate];
+          const play = offensivePlaybook[key];
+          return (wanted.type === play.type || (wanted.type !== 'PASS' && play.type !== 'PASS')) &&
+            wanted.routeType === play.routeType;
+        }) || Math.random() < 0.25
+      ));
       const candidates = [...new Set([...plays.filter(key => available.includes(key)), ...signatures])];
       const passOnly = plays.every(key => offensivePlaybook[key].type === 'PASS');
       const fallback = passOnly ? available.filter(key => offensivePlaybook[key].type === 'PASS') : available;
@@ -1743,6 +1755,13 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     const reachedFirstDown = (attackDirection === -1 && lineOfScrimmageY <= firstDownMarkerY) || (attackDirection === 1 && lineOfScrimmageY >= firstDownMarkerY);
 
     if (reachedFirstDown) {
+      defenders.forEach(d => {
+        if (d.isOnFire) {
+          d.isOnFire = false;
+          d.defensiveBigPlays = 0;
+          callbacks.onDefenderOnFireChange?.(false);
+        }
+      });
       const offTeamName = (activeOffense === 'P1' ? p1Team : p2Team).name.toUpperCase();
       showAnnouncement("FIRST DOWN! 🎯", "#00ffaa", true, {
         category: 'FIRST_DOWN',
@@ -2491,6 +2510,10 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     ballPressureDefenders = [];
     fumbleBall = null;
     brokenTackleEffect = null;
+    userTurboMeter = 100;
+    userTurboActive = false;
+    defenderFlameParticles = [];
+    callbacks.onTurboChange?.(100, false);
     isAiming = false;
     gestureEntity = null;
     isDirtGestureActive = false;
@@ -2575,28 +2598,28 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       qb.isPunter = true;
 
       linemen = [
-        { startX: 170, startY: lineOfScrimmageY, x: 170, y: lineOfScrimmageY, radius: 10, blockTimer: 0, color: offTeam.primaryColor, speedMultiplier: 0.95 }
+        { startX: 170, startY: lineOfScrimmageY, x: 170, y: lineOfScrimmageY, radius: 12, blockTimer: 0, color: offTeam.primaryColor, speedMultiplier: 0.95 },
+        { startX: 140, startY: lineOfScrimmageY, x: 140, y: lineOfScrimmageY, radius: 12, blockTimer: 0, color: offTeam.primaryColor, speedMultiplier: 0.95 },
+        { startX: 200, startY: lineOfScrimmageY, x: 200, y: lineOfScrimmageY, radius: 12, blockTimer: 0, color: offTeam.primaryColor, speedMultiplier: 0.95 }
       ];
 
       receivers = [
         { startX: 40, startY: lineOfScrimmageY, x: 40, y: lineOfScrimmageY, vx: 0, vy: 0, radius: 10, routeType: 'GO', color: offTeam.primaryColor, archetype: 'SPEEDSTER', speedMultiplier: 1.20, isBlocker: false },
-        { startX: 135, startY: lineOfScrimmageY - (25 * attackDirection), x: 135, y: lineOfScrimmageY - (25 * attackDirection), vx: 0, vy: 0, radius: 10, routeType: 'BLOCK', color: offTeam.primaryColor, archetype: 'BLOCKER', speedMultiplier: 0.95, isBlocker: true },
         { startX: 300, startY: lineOfScrimmageY, x: 300, y: lineOfScrimmageY, vx: 0, vy: 0, radius: 10, routeType: 'GO', color: offTeam.primaryColor, archetype: 'SPEEDSTER', speedMultiplier: 1.20, isBlocker: false }
       ];
 
-      centerReceiver = { startX: 205, startY: lineOfScrimmageY - (25 * attackDirection), x: 205, y: lineOfScrimmageY - (25 * attackDirection), vx: 0, vy: 0, radius: 10, routeType: 'BLOCK', color: offTeam.primaryColor, archetype: 'BLOCKER', speedMultiplier: 0.95, isBlocker: true };
-      rb = { startX: 170, startY: lineOfScrimmageY - (28 * attackDirection), x: 170, y: lineOfScrimmageY - (28 * attackDirection), vx: 0, vy: 0, radius: 10, routeType: 'BLOCK', color: offTeam.primaryColor, archetype: 'BLOCKER', speedMultiplier: 0.95, isBlocker: true };
+      centerReceiver = { startX: 130, startY: lineOfScrimmageY - (25 * attackDirection), x: 130, y: lineOfScrimmageY - (25 * attackDirection), vx: 0, vy: 0, radius: 10, routeType: 'BLOCK', color: offTeam.primaryColor, archetype: 'BLOCKER', speedMultiplier: 0.95, isBlocker: true };
+      rb = { startX: 210, startY: lineOfScrimmageY - (25 * attackDirection), x: 210, y: lineOfScrimmageY - (25 * attackDirection), vx: 0, vy: 0, radius: 10, routeType: 'BLOCK', color: offTeam.primaryColor, archetype: 'BLOCKER', speedMultiplier: 0.95, isBlocker: true };
 
       const returnerDeepY = Math.max(endZoneHeight + 60, Math.min(fieldHeight - endZoneHeight - 60, lineOfScrimmageY + (420 * attackDirection)));
       const puntBlockLineY = returnerDeepY - (55 * attackDirection);
       const puntBlockerXs = [45, 95, 145, 195, 245, 295];
       defenders = [
-        { startX: puntBlockerXs[0], startY: puntBlockLineY, x: puntBlockerXs[0], y: puntBlockLineY, radius: 10, type: 'CB', isBlocker: true, color: defTeam.primaryColor, archetype: 'BLOCKER', speedMultiplier: 1.05 },
-        { startX: puntBlockerXs[1], startY: puntBlockLineY, x: puntBlockerXs[1], y: puntBlockLineY, radius: 10, type: 'LB', isBlocker: true, color: defTeam.primaryColor, archetype: 'BLOCKER', speedMultiplier: 1.05 },
-        { startX: puntBlockerXs[2], startY: puntBlockLineY, x: puntBlockerXs[2], y: puntBlockLineY, radius: 10, type: 'DL', isBlocker: true, color: defTeam.primaryColor, archetype: 'BLOCKER', speedMultiplier: 1.05 },
-        { startX: puntBlockerXs[3], startY: puntBlockLineY, x: puntBlockerXs[3], y: puntBlockLineY, radius: 10, type: 'LB', isBlocker: true, color: defTeam.primaryColor, archetype: 'BLOCKER', speedMultiplier: 1.05 },
-        { startX: puntBlockerXs[4], startY: puntBlockLineY, x: puntBlockerXs[4], y: puntBlockLineY, radius: 10, type: 'MLB', isBlocker: true, color: defTeam.primaryColor, archetype: 'BLOCKER', speedMultiplier: 1.05 },
-        { startX: puntBlockerXs[5], startY: puntBlockLineY, x: puntBlockerXs[5], y: puntBlockLineY, radius: 10, type: 'CB', isBlocker: true, color: defTeam.primaryColor, archetype: 'BLOCKER', speedMultiplier: 1.05 },
+        ...puntBlockerXs.map((x, idx) => ({
+          startX: x, startY: puntBlockLineY, x, y: puntBlockLineY, radius: 10,
+          type: idx % 2 === 0 ? 'CB' : 'LB', isBlocker: true, color: defTeam.primaryColor,
+          archetype: 'BLOCKER', speedMultiplier: 1.05
+        })),
         { startX: 170, startY: returnerDeepY, x: 170, y: returnerDeepY, radius: 10, type: 'RET', isReturner: true, color: defTeam.accentColor || defTeam.primaryColor, archetype: 'RETURNER', speedMultiplier: 1.0 }
       ];
 
@@ -2644,23 +2667,22 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         team: activeOffense
       };
 
-      // Offensive Line Protection Wedge
+      // Offensive Line Protection Wedge (3 OL)
       linemen = [
-        { startX: 170, startY: lineOfScrimmageY, x: 170, y: lineOfScrimmageY, radius: 10, blockTimer: 0, color: offTeam.primaryColor, speedMultiplier: 0.95 },
-        { startX: 145, startY: lineOfScrimmageY, x: 145, y: lineOfScrimmageY, radius: 10, blockTimer: 0, color: offTeam.primaryColor, speedMultiplier: 0.95 },
-        { startX: 195, startY: lineOfScrimmageY, x: 195, y: lineOfScrimmageY, radius: 10, blockTimer: 0, color: offTeam.primaryColor, speedMultiplier: 0.95 }
+        { startX: 170, startY: lineOfScrimmageY, x: 170, y: lineOfScrimmageY, radius: 12, blockTimer: 0, color: offTeam.primaryColor, speedMultiplier: 0.95 },
+        { startX: 140, startY: lineOfScrimmageY, x: 140, y: lineOfScrimmageY, radius: 12, blockTimer: 0, color: offTeam.primaryColor, speedMultiplier: 0.95 },
+        { startX: 200, startY: lineOfScrimmageY, x: 200, y: lineOfScrimmageY, radius: 12, blockTimer: 0, color: offTeam.primaryColor, speedMultiplier: 0.95 }
       ];
 
       // Wing Protectors
       receivers = [
-        { startX: 120, startY: lineOfScrimmageY - (10 * attackDirection), x: 120, y: lineOfScrimmageY - (10 * attackDirection), vx: 0, vy: 0, radius: 10, routeType: 'BLOCK', color: offTeam.primaryColor, archetype: 'BLOCKER', speedMultiplier: 0.95, isBlocker: true },
-        { startX: 220, startY: lineOfScrimmageY - (10 * attackDirection), x: 220, y: lineOfScrimmageY - (10 * attackDirection), vx: 0, vy: 0, radius: 10, routeType: 'BLOCK', color: offTeam.primaryColor, archetype: 'BLOCKER', speedMultiplier: 0.95, isBlocker: true },
-        { startX: 95, startY: lineOfScrimmageY - (15 * attackDirection), x: 95, y: lineOfScrimmageY - (15 * attackDirection), vx: 0, vy: 0, radius: 10, routeType: 'BLOCK', color: offTeam.primaryColor, archetype: 'BLOCKER', speedMultiplier: 0.95, isBlocker: true }
+        { startX: 110, startY: lineOfScrimmageY - (10 * attackDirection), x: 110, y: lineOfScrimmageY - (10 * attackDirection), vx: 0, vy: 0, radius: 10, routeType: 'BLOCK', color: offTeam.primaryColor, archetype: 'BLOCKER', speedMultiplier: 0.95, isBlocker: true },
+        { startX: 230, startY: lineOfScrimmageY - (10 * attackDirection), x: 230, y: lineOfScrimmageY - (10 * attackDirection), vx: 0, vy: 0, radius: 10, routeType: 'BLOCK', color: offTeam.primaryColor, archetype: 'BLOCKER', speedMultiplier: 0.95, isBlocker: true }
       ];
-      centerReceiver = { startX: 245, startY: lineOfScrimmageY - (15 * attackDirection), x: 245, y: lineOfScrimmageY - (15 * attackDirection), vx: 0, vy: 0, radius: 10, routeType: 'BLOCK', color: offTeam.primaryColor, archetype: 'BLOCKER', speedMultiplier: 0.95, isBlocker: true };
+      centerReceiver = { startX: 85, startY: lineOfScrimmageY - (15 * attackDirection), x: 85, y: lineOfScrimmageY - (15 * attackDirection), vx: 0, vy: 0, radius: 10, routeType: 'BLOCK', color: offTeam.primaryColor, archetype: 'BLOCKER', speedMultiplier: 0.95, isBlocker: true };
 
-      // Defense: Field Goal Block Rush Unit across line of scrimmage
-      const fgRushXs = [110, 135, 155, 170, 185, 205, 230];
+      // Defense: Field Goal Block Rush Unit (8 rushers across line of scrimmage)
+      const fgRushXs = [95, 115, 138, 155, 170, 185, 202, 225];
       const fgRushY = lineOfScrimmageY + (15 * attackDirection);
       defenders = fgRushXs.map((x, idx) => ({
         startX: x,
@@ -2718,11 +2740,9 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
     const leftRoute = isP1PlayFlipped ? mirrorPlayRoute(activePlay.right || 'GO') : activePlay.left || 'GO';
     const rightRoute = isP1PlayFlipped ? mirrorPlayRoute(activePlay.left || 'GO') : activePlay.right || 'GO';
-    const centerRoute = isP1PlayFlipped
-      ? mirrorPlayRoute(activePlay.center || 'SLANT-R')
-      : activePlay.center || 'SLANT-R';
-    const baseSlotRoute = activePlay.slot ?? (activePlay.type === 'PASS' ? (alignment === 'TRIPS' ? 'CROSS-L' : 'SLANT-L') : 'BLOCK');
+    const baseSlotRoute = activePlay.slot ?? activePlay.center ?? (activePlay.type === 'PASS' ? (alignment === 'TRIPS' ? 'CROSS-L' : 'SLANT-L') : 'BLOCK');
     const slotRoute = isP1PlayFlipped ? mirrorPlayRoute(baseSlotRoute) : baseSlotRoute;
+    const centerRoute = slotRoute;
 
     const offTeam = activeOffense === 'P1' ? p1Team : p2Team;
     const defTeam = activeDefense === 'P1' ? p1Team : p2Team;
@@ -2738,13 +2758,6 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         isBlocker: leftRoute === 'BLOCK'
       },
       {
-        startX: alignmentPositions.slot, startY: lineOfScrimmageY, x: alignmentPositions.slot, y: lineOfScrimmageY, vx: 0, vy: 0, radius: 10,
-        routeType: slotRoute, routeIndex: Math.max(0, middleRoutes.indexOf(slotRoute)), timer: 0, flash: 0, caught: false, isOutside: false,
-        color: offTeam.primaryColor,
-        archetype: 'SLOT',
-        isBlocker: slotRoute === 'BLOCK'
-      },
-      {
         startX: alignmentPositions.right, startY: lineOfScrimmageY, x: alignmentPositions.right, y: lineOfScrimmageY, vx: 0, vy: 0, radius: 10,
         routeType: rightRoute, routeIndex: Math.max(0, outsideRoutes.indexOf(rightRoute)), timer: 0, flash: 0, caught: false, isOutside: true,
         color: offTeam.primaryColor,
@@ -2754,8 +2767,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     ];
 
     centerReceiver = {
-      startX: alignmentPositions.center, startY: lineOfScrimmageY, x: alignmentPositions.center, y: lineOfScrimmageY, vx: 0, vy: 0, radius: 10,
-      routeType: centerRoute, routeIndex: Math.max(0, middleRoutes.indexOf(centerRoute)), timer: 0, flash: 0, caught: false, isOutside: false,
+      startX: alignmentPositions.slot || alignmentPositions.center, startY: lineOfScrimmageY, x: alignmentPositions.slot || alignmentPositions.center, y: lineOfScrimmageY, vx: 0, vy: 0, radius: 10,
+      routeType: centerRoute, routeIndex: Math.max(0, (middleRoutes as readonly string[]).includes(centerRoute) ? middleRoutes.indexOf(centerRoute as any) : outsideRoutes.indexOf(centerRoute as any)), timer: 0, flash: 0, caught: false, isOutside: false,
       color: offTeam.primaryColor, isCenter: true,
       archetype: 'TIGHT_END',
       isBlocker: centerRoute === 'BLOCK'
@@ -2776,17 +2789,20 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     };
 
     linemen = [
-      { startX: 170, startY: lineOfScrimmageY, x: 170, y: lineOfScrimmageY, radius: 10, blockTimer: 0, color: offTeam.primaryColor }
+      { startX: 170, startY: lineOfScrimmageY, x: 170, y: lineOfScrimmageY, radius: 12, blockTimer: 0, color: offTeam.primaryColor, speedMultiplier: 0.95 },
+      { startX: 140, startY: lineOfScrimmageY, x: 140, y: lineOfScrimmageY, radius: 12, blockTimer: 0, color: offTeam.primaryColor, speedMultiplier: 0.95 },
+      { startX: 200, startY: lineOfScrimmageY, x: 200, y: lineOfScrimmageY, radius: 12, blockTimer: 0, color: offTeam.primaryColor, speedMultiplier: 0.95 }
     ];
 
     defenders = [
       { startX: 170, startY: lineOfScrimmageY + (10 * attackDirection), x: 170, y: lineOfScrimmageY + (10 * attackDirection), radius: 10, type: 'DL', passRusher: true, color: defTeam.secondaryColor || '#ff3333' },
-      { startX: 130, startY: lineOfScrimmageY + (60 * attackDirection), x: 130, y: lineOfScrimmageY + (60 * attackDirection), radius: 10, type: 'LB', zoneX: 130, zoneY: lineOfScrimmageY + (80 * attackDirection), color: defTeam.primaryColor },
-      { startX: 210, startY: lineOfScrimmageY + (60 * attackDirection), x: 210, y: lineOfScrimmageY + (60 * attackDirection), radius: 10, type: 'LB', zoneX: 210, zoneY: lineOfScrimmageY + (80 * attackDirection), color: defTeam.primaryColor },
-      { startX: 80, startY: lineOfScrimmageY + (110 * attackDirection), x: 80, y: lineOfScrimmageY + (110 * attackDirection), radius: 10, type: 'CB', assignedReceiver: receivers[0], color: defTeam.primaryColor },
-      { startX: 260, startY: lineOfScrimmageY + (110 * attackDirection), x: 260, y: lineOfScrimmageY + (110 * attackDirection), radius: 10, type: 'CB', assignedReceiver: receivers[1], color: defTeam.primaryColor },
-      { startX: 170, startY: lineOfScrimmageY + (90 * attackDirection), x: 170, y: lineOfScrimmageY + (90 * attackDirection), radius: 10, type: 'MLB', assignedCenter: centerReceiver, color: defTeam.primaryColor },
-      { startX: 170, startY: lineOfScrimmageY + (200 * attackDirection), x: 170, y: lineOfScrimmageY + (220 * attackDirection), radius: 10, type: 'FS', zoneX: 170, zoneY: lineOfScrimmageY + (220 * attackDirection), color: defTeam.primaryColor }
+      { startX: 125, startY: lineOfScrimmageY + (55 * attackDirection), x: 125, y: lineOfScrimmageY + (55 * attackDirection), radius: 10, type: 'LB', zoneX: 125, zoneY: lineOfScrimmageY + (80 * attackDirection), color: defTeam.primaryColor },
+      { startX: 215, startY: lineOfScrimmageY + (55 * attackDirection), x: 215, y: lineOfScrimmageY + (55 * attackDirection), radius: 10, type: 'LB', zoneX: 215, zoneY: lineOfScrimmageY + (80 * attackDirection), color: defTeam.primaryColor },
+      { startX: 70, startY: lineOfScrimmageY + (100 * attackDirection), x: 70, y: lineOfScrimmageY + (100 * attackDirection), radius: 10, type: 'CB', assignedReceiver: receivers[0], color: defTeam.primaryColor },
+      { startX: 270, startY: lineOfScrimmageY + (100 * attackDirection), x: 270, y: lineOfScrimmageY + (100 * attackDirection), radius: 10, type: 'CB', assignedReceiver: receivers[1], color: defTeam.primaryColor },
+      { startX: 170, startY: lineOfScrimmageY + (85 * attackDirection), x: 170, y: lineOfScrimmageY + (85 * attackDirection), radius: 10, type: 'MLB', assignedCenter: centerReceiver, color: defTeam.primaryColor },
+      { startX: 120, startY: lineOfScrimmageY + (190 * attackDirection), x: 120, y: lineOfScrimmageY + (220 * attackDirection), radius: 10, type: 'FS', zoneX: 120, zoneY: lineOfScrimmageY + (220 * attackDirection), color: defTeam.primaryColor },
+      { startX: 220, startY: lineOfScrimmageY + (190 * attackDirection), x: 220, y: lineOfScrimmageY + (220 * attackDirection), radius: 10, type: 'SS', zoneX: 220, zoneY: lineOfScrimmageY + (220 * attackDirection), color: defTeam.primaryColor }
     ];
 
     qb.team = activeOffense;
@@ -2823,23 +2839,24 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   }
 
   function assignRosterPlayers() {
-    const receiverSlots = ['wr-0', 'wr-1', 'wr-2'] as const;
-    const defenderSlots = ['def-0', 'def-1', 'def-2', 'def-3', 'def-4', 'def-5', 'def-6'] as const;
-    const returnBlockerSlots = ['wr-1', 'rb', 'center', 'line-0', 'def-1', 'def-5'] as const;
+    const receiverSlots = ['wr-0', 'wr-2'] as const;
+    const linemanSlots = ['center', 'line-0', 'line-1'] as const;
+    const defenderSlots = ['def-0', 'def-1', 'def-2', 'def-3', 'def-4', 'def-5', 'def-6', 'def-7'] as const;
+    const returnBlockerSlots = ['wr-1', 'rb', 'center', 'line-0', 'line-1', 'def-1', 'def-5'] as const;
     let returnBlockerIndex = 0;
     const isReturnFormation = defenders.some(entity => entity.isReturner);
     const rosterEntities: Array<[RosterSlot, Entity]> = [
       ['qb', qb],
-      ...receivers.map((entity, index): [RosterSlot, Entity] => [receiverSlots[index], entity]),
-      ...(centerReceiver ? [['center', centerReceiver] as [RosterSlot, Entity]] : []),
+      ...receivers.map((entity, index): [RosterSlot, Entity] => [receiverSlots[index] || 'wr-0', entity]),
+      ...(centerReceiver ? [['wr-1', centerReceiver] as [RosterSlot, Entity]] : []),
       ...(rb ? [['rb', rb] as [RosterSlot, Entity]] : []),
       ...linemen.map((entity, index): [RosterSlot, Entity] => [
-        (['line-0', 'def-0', 'def-5'] as const)[index], entity
+        linemanSlots[index] || 'center', entity
       ]),
       ...defenders.map((entity, index): [RosterSlot, Entity] => [
         isReturnFormation
-          ? entity.isReturner ? 'wr-0' : returnBlockerSlots[returnBlockerIndex++]
-          : defenderSlots[index],
+          ? entity.isReturner ? 'wr-0' : returnBlockerSlots[returnBlockerIndex++ % returnBlockerSlots.length]
+          : defenderSlots[index] || 'def-0',
         entity
       ])
     ];
@@ -2847,7 +2864,11 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       const team = entity.team === 'P1' ? p1Team : p2Team;
       const rosterKey = `${entity.team}:${team.id}:${slot}`;
       const stamina = rosterStamina[rosterKey] ?? (entity.rosterKey === rosterKey ? entity.stamina ?? 100 : 100);
-      applyPlayerProfile(entity, team.roster[slot]);
+      applyPlayerProfile(entity, team.roster[slot] || team.roster['center']);
+      if (linemen.includes(entity) && entity.player) {
+        entity.player.ratings.blocking = Math.max(78, entity.player.ratings.blocking);
+        entity.player.ratings.power = Math.max(78, entity.player.ratings.power);
+      }
       entity.rosterKey = rosterKey;
       entity.stamina = stamina;
       rosterStamina[entity.rosterKey] = entity.stamina;
@@ -2900,7 +2921,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     get attackDirection() { return attackDirection; },
     get p1Team() { return p1Team; },
     get p2Team() { return p2Team; },
-    getReceivers: () => receivers,
+    getReceivers: () => (centerReceiver ? [receivers[0], centerReceiver, receivers[1]] : receivers),
     isJoystickActiveForTest: () => joystick.active,
     getQuarterbackScreenPositionForTest: () => worldToCanvas(qb.x, qb.y),
     getReceiverScreenPositionForTest: (index: number) => {
@@ -2912,6 +2933,11 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       return defender ? worldToCanvas(defender.x, defender.y) : null;
     },
     diveTackle,
+    switchDefenderToNearest: () => switchDefenderToNearest(),
+    activateTurbo: (active: boolean) => activateTurbo(active),
+    attemptSwatOrInterception: (mode?: 'SWAT' | 'INT') => attemptSwatOrInterception(mode),
+    getTurboMeter: () => userTurboMeter,
+    isDefenderOnFire: () => Boolean(getControlledDefender()?.isOnFire),
     selectP1Team: (teamId: string) => {
       p1Team = getTeam(teamId);
       callbacks.setP1TeamState?.(p1Team);
@@ -3381,19 +3407,188 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     right: false
   };
 
+  function activateTurbo(active: boolean): void {
+    userTurboActive = active;
+    const defender = getControlledDefender();
+    if (defender) {
+      defender.isTurboActive = active && (userTurboMeter > 0 || Boolean(defender.isOnFire));
+      callbacks.onTurboChange?.(userTurboMeter, Boolean(defender.isTurboActive));
+    }
+  }
+
+  function recordDefensiveBigPlay(defender: Entity, playName: string): void {
+    defender.defensiveBigPlays = (defender.defensiveBigPlays || 0) + 1;
+    if (defender.defensiveBigPlays >= 2 && !defender.isOnFire) {
+      defender.isOnFire = true;
+      defender.fireTimer = 900;
+      screenShakeTimer = 45;
+      sounds.playTouchdown();
+      showAnnouncement("🔥 HE'S ON FIRE! DEFENSE UNSTOPPABLE! 🔥", "#ff3300", true, {
+        category: 'TURNOVER',
+        subtext: "UNLIMITED TURBO • BLITZ SMACKDOWNS • HIGH STRIP FUMBLE RATE",
+        durationMs: 5000
+      });
+      callbacks.onDefenderOnFireChange?.(true);
+    }
+  }
+
+  function executeUserTackleOnCarrier(defender: Entity, carrier: Entity, isDiving: boolean): void {
+    const isTurbo = Boolean(defender.isTurboActive || defender.isOnFire);
+    const isBigHit = isDiving || isTurbo || Boolean(defender.isOnFire);
+
+    if (isBigHit) {
+      carrier.tackleImmunity = 0;
+    } else if ((carrier.tackleImmunity || 0) > 0) {
+      return;
+    }
+
+    const brokenCount = carrier.brokenTacklesCount || 0;
+    const breakChance = isBigHit ? (defender.isOnFire ? 0.02 : 0.07) : 0.16;
+    if (Math.random() < breakChance && brokenCount === 0) {
+      carrier.brokenTacklesCount = brokenCount + 1;
+      carrier.tackleImmunity = 8;
+      defender.brokenTackleStun = isBigHit ? 12 : 22;
+      triggerScreenShake(20, 8);
+      sounds.playBrokenTackle();
+      showAnnouncement("CARRIER BREAKS CONTACT!", "#00ffff");
+      return;
+    }
+
+    // Blitz fumble strip on big hits
+    const fumbleChance = defender.isOnFire ? 0.35 : (isDiving ? 0.18 : (isTurbo ? 0.12 : 0.04));
+    if (Math.random() < fumbleChance) {
+      triggerScreenShake(42, 18);
+      sounds.playTackle();
+      triggerFumble(carrier);
+      showAnnouncement("BALL STRIPPED! FUMBLE ON THE PLAY! 🏈💥", "#ff0000", true, { category: 'FUMBLE' });
+      recordDefensiveBigPlay(defender, "FUMBLE FORCED");
+      return;
+    }
+
+    triggerScreenShake(isBigHit ? 38 : 26, isBigHit ? 16 : 8);
+    sounds.playTackle();
+    phase = 'DEAD';
+
+    const isBehindLine = (attackDirection === -1 && carrier.y > lineOfScrimmageY) ||
+                         (attackDirection === 1 && carrier.y < lineOfScrimmageY);
+    const playEndingType = (carrier === qb && isBehindLine) ? 'SACK' : 'TACKLE';
+
+    let announce = "USER TACKLE! BALL CARRIER STOPPED! 🛑";
+    if (defender.isOnFire) {
+      announce = "🔥 FLAMING BLITZ SMACKDOWN! 🔥";
+    } else if (isDiving) {
+      announce = "BLITZ DIVE TACKLE! 💥🥞";
+    } else if (isTurbo) {
+      announce = "TURBO HIT-STICK! DE-CLEATED! 💥⚡";
+    }
+    if (isBehindLine) {
+      announce += " TACKLE FOR LOSS!";
+      recordDefensiveBigPlay(defender, playEndingType === 'SACK' ? "SACK" : "TFL");
+    }
+
+    handlePlayEnd(carrier.y, playEndingType, announce, defender.isOnFire ? '#ff4400' : '#00ffff');
+  }
+
   function diveTackle(): void {
-    if (isPaused || phase !== 'RUNNING' || activeDefense !== 'P1' || !activeEntity) return;
+    if (isPaused || activeDefense !== 'P1') return;
     const defender = getControlledDefender();
     if (!defender || (defender.diveCooldownTimer || 0) > 0) return;
-    defender.diveCooldownTimer = 60;
-    const distance = Math.hypot(defender.x - activeEntity.x, defender.y - activeEntity.y);
-    if (distance <= defender.radius + activeEntity.radius + 10) {
-      sounds.playTackle();
-      phase = 'DEAD';
-      handlePlayEnd(activeEntity.y, 'TACKLE', 'USER DIVE TACKLE!', '#00ffff');
+    defender.diveCooldownTimer = 45;
+
+    let dirX = defender.vx || 0;
+    let dirY = defender.vy || 0;
+    if (Math.hypot(dirX, dirY) < 0.1) {
+      const target = activeEntity || (phase === 'QB_DROP' ? qb : null);
+      if (target) {
+        dirX = target.x - defender.x;
+        dirY = target.y - defender.y;
+      } else {
+        dirY = attackDirection;
+      }
+    }
+    const mag = Math.hypot(dirX, dirY) || 1;
+    const diveSpeed = defender.isOnFire ? 3.6 : (defender.isTurboActive ? 3.0 : 2.5);
+    defender.diveVx = (dirX / mag) * diveSpeed;
+    defender.diveVy = (dirY / mag) * diveSpeed;
+    defender.diveTimer = 16;
+    defender.brokenTackleStun = 0;
+    sounds.playJuke();
+    screenShakeTimer = Math.max(screenShakeTimer, 8);
+    showAnnouncement(defender.isOnFire ? "🔥 FLAMING BLITZ LUNGE! 🔥" : (defender.isTurboActive ? "TURBO DIVE TACKLE! 💥💨" : "DIVE TACKLE! 💥"), "#00ffff");
+  }
+
+  function switchDefenderToNearest(): number {
+    if (!defenders || defenders.length === 0) return 0;
+    let targetX = 170;
+    let targetY = lineOfScrimmageY;
+
+    if (phase === 'THROWN' && ball) {
+      targetX = ball.targetX ?? ball.x;
+      targetY = ball.targetY ?? ball.y;
+    } else if (phase === 'RUNNING' && activeEntity) {
+      targetX = activeEntity.x;
+      targetY = activeEntity.y;
+    } else if (phase === 'HANDOFF' && activeEntity) {
+      targetX = activeEntity.x;
+      targetY = activeEntity.y;
+    } else if (phase === 'QB_DROP') {
+      targetX = qb.x;
+      targetY = qb.y;
+    }
+
+    const sorted = defenders
+      .map((d, index) => ({
+        index,
+        dist: Math.hypot(d.x - targetX, d.y - targetY)
+      }))
+      .sort((a, b) => a.dist - b.dist);
+
+    let chosenIndex = sorted[0].index;
+    if (chosenIndex === userControlledDefenderIndex && sorted.length > 1) {
+      chosenIndex = sorted[1].index;
+    }
+
+    selectDefender(chosenIndex);
+    const d = defenders[chosenIndex];
+    if (d) {
+      sounds.playCatch();
+      showPlayerScout(d);
+    }
+    return chosenIndex;
+  }
+
+  function attemptSwatOrInterception(mode: 'SWAT' | 'INT' = 'SWAT'): void {
+    if (isPaused || activeDefense !== 'P1' || phase !== 'THROWN' || !ball) return;
+    const defender = getControlledDefender();
+    if (!defender) return;
+
+    defender.swatAttemptTimer = 16;
+    const distToBall = Math.hypot(defender.x - ball.x, defender.y - ball.y);
+    const distToTarget = Math.hypot(defender.x - (ball.targetX ?? ball.x), defender.y - (ball.targetY ?? ball.y));
+
+    const isBallContestable = distToBall < (defender.radius + 28) || (distToTarget < (defender.radius + 32) && ball.currentFrame >= ball.flightFrames - 8);
+
+    if (isBallContestable) {
+      if (mode === 'INT' || Math.random() < 0.35) {
+        screenShakeTimer = 35;
+        sounds.playCatch();
+        const pickX = defender.x;
+        const pickY = defender.y;
+        ball = null;
+        phase = 'DEAD';
+        startInterceptionReturn(pickX, pickY, "USER INTERCEPTION! 🏈🔥", "#ff3333");
+        recordDefensiveBigPlay(defender, "INT");
+      } else {
+        screenShakeTimer = 24;
+        sounds.playTackle();
+        const deflectY = defender.y;
+        ball = null;
+        phase = 'DEAD';
+        handlePlayEnd(deflectY, 'DEFLECT', "USER SWAT! PASS BATTED DOWN! 🚫💥", "#ffaa00");
+        recordDefensiveBigPlay(defender, "PBU");
+      }
     } else {
-      defender.brokenTackleStun = 18;
-      showAnnouncement('DIVE MISSED!', '#ffaa00');
+      showAnnouncement(mode === 'INT' ? "INT ATTEMPT MISSED!" : "SWAT MISSED!", "#ffaa00");
     }
   }
 
@@ -3409,6 +3604,9 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     if (key === 's' || key === 'arrowdown') keysDown.down = true;
     if (key === 'a' || key === 'arrowleft') keysDown.left = true;
     if (key === 'd' || key === 'arrowright') keysDown.right = true;
+    if (key === 'shift') {
+      activateTurbo(true);
+    }
     if ((isDirectionKey || key === ' ') && !e.repeat) {
       if (phase === 'KICKOFF') {
         startReadyKickoff();
@@ -3420,15 +3618,19 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         return;
       }
     }
-    if (phase === 'PRE_SNAP' && activeDefense === 'P1') {
+    if (activeDefense === 'P1') {
       if ((key === 'c' || key === 'tab' || key === 'q') && !e.repeat) {
         e.preventDefault();
-        cycleControlledDefender(1);
-        const d = defenders[userControlledDefenderIndex];
-        if (d) showPlayerScout(d);
+        if (phase === 'PRE_SNAP') {
+          cycleControlledDefender(1);
+          const d = defenders[userControlledDefenderIndex];
+          if (d) showPlayerScout(d);
+        } else {
+          switchDefenderToNearest();
+        }
         return;
       }
-      if (['1', '2', '3', '4', '5', '6', '7'].includes(key) && !e.repeat) {
+      if (phase === 'PRE_SNAP' && ['1', '2', '3', '4', '5', '6', '7'].includes(key) && !e.repeat) {
         e.preventDefault();
         const numIdx = parseInt(key, 10) - 1;
         if (numIdx < defenders.length) {
@@ -3438,11 +3640,15 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           return;
         }
       }
-    }
-
-    if ((key === ' ' || key === 'e') && !e.repeat && activeDefense === 'P1' && phase !== 'PRE_SNAP') {
-      e.preventDefault();
-      diveTackle();
+      if ((key === ' ' || key === 'e') && !e.repeat && phase !== 'PRE_SNAP') {
+        e.preventDefault();
+        if (phase === 'THROWN') {
+          attemptSwatOrInterception('SWAT');
+        } else {
+          diveTackle();
+        }
+        return;
+      }
     }
 
     // Deliberate keyboard juke input on J, E, or Spacebar during ball carrier running
@@ -3466,6 +3672,9 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     if (key === 's' || key === 'arrowdown') keysDown.down = false;
     if (key === 'a' || key === 'arrowleft') keysDown.left = false;
     if (key === 'd' || key === 'arrowright') keysDown.right = false;
+    if (key === 'shift') {
+      activateTurbo(false);
+    }
   };
 
   if (typeof window !== 'undefined') {
@@ -3887,10 +4096,31 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       }
     }
 
-    // Relative Virtual Joystick activation
+    // Relative Virtual Joystick / Movement activation (Fluid one-finger control on mobile)
     const isLiveMovementPhase = (phase === 'QB_DROP' || phase === 'HANDOFF' || phase === 'RUNNING');
-    if (typeof joystick !== 'undefined' && isLiveMovementPhase && !joystick.active && touchedJoystick) {
-      activateJoystick(e.pointerId, screenPos);
+    if (typeof joystick !== 'undefined' && isLiveMovementPhase && !joystick.active) {
+      if (activeDefense === 'P1') {
+        // On defense: Check if player tapped directly on a teammate defender to switch to them immediately
+        let tappedDefIdx = -1;
+        let minTapDist = 45;
+        defenders.forEach((d, idx) => {
+          if (!d) return;
+          const dist = Math.hypot(d.x - px, d.y - py);
+          if (dist < minTapDist) {
+            minTapDist = dist;
+            tappedDefIdx = idx;
+          }
+        });
+        if (tappedDefIdx !== -1 && tappedDefIdx !== userControlledDefenderIndex) {
+          selectDefender(tappedDefIdx);
+          sounds.playCatch();
+          return;
+        }
+        // One-finger control: touching anywhere on screen anchors the virtual joystick under their finger
+        activateJoystick(e.pointerId, screenPos);
+      } else if (touchedJoystick || phase === 'RUNNING') {
+        activateJoystick(e.pointerId, screenPos);
+      }
     }
   };
 
@@ -3921,10 +4151,18 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         joystick.distance = Math.min(1.0, (clampedDist - DEADZONE) / (MAX_RADIUS - DEADZONE));
         joystick.inputX = Math.cos(angle) * joystick.distance;
         joystick.inputY = Math.sin(angle) * joystick.distance;
+
+        // Auto-Turbo on full drag extension for one-finger sprint!
+        if (joystick.distance >= 0.70) {
+          activateTurbo(true);
+        } else if (joystick.distance <= 0.45) {
+          activateTurbo(false);
+        }
       } else {
         joystick.distance = 0;
         joystick.inputX = 0;
         joystick.inputY = 0;
+        activateTurbo(false);
       }
     }
 
@@ -4108,7 +4346,52 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       return;
     }
 
-    if (activeOffense !== 'P1') return;
+    if (activeOffense !== 'P1') {
+      if (activeDefense === 'P1' && phase !== 'PRE_SNAP') {
+        const releaseWorld = screenToWorld(e.clientX, e.clientY);
+        const swipeDist = Math.hypot(e.clientX - touchScreenStartX, e.clientY - touchScreenStartY);
+        const swipeTime = Date.now() - touchStartTime;
+        const swipeSpeed = swipeDist / Math.max(1, swipeTime);
+        const isFlick = swipeTime < 320 && (swipeDist > 28 || swipeSpeed > 0.30);
+
+        // Turn off turbo sprint on release
+        activateTurbo(false);
+
+        if (phase === 'THROWN') {
+          // Ball in the air: Tap or flick leaps to swat / intercept!
+          attemptSwatOrInterception('SWAT');
+        } else if (phase === 'RUNNING' || phase === 'QB_DROP' || phase === 'HANDOFF') {
+          if (isFlick) {
+            // Flick gesture: Blitz dive tackle / hit stick!
+            diveTackle();
+          } else if (swipeDist < 25) {
+            // Short tap gesture:
+            const targetCarrier = activeEntity || qb;
+            const distToCarrier = Math.hypot(releaseWorld.x - targetCarrier.x, releaseWorld.y - targetCarrier.y);
+            if (distToCarrier < 65) {
+              diveTackle();
+            } else {
+              let closestDefIdx = userControlledDefenderIndex;
+              let closestDefDist = Infinity;
+              defenders.forEach((d, idx) => {
+                const dist = Math.hypot(d.x - releaseWorld.x, d.y - releaseWorld.y);
+                if (dist < closestDefDist) {
+                  closestDefDist = dist;
+                  closestDefIdx = idx;
+                }
+              });
+              if (closestDefDist < 50) {
+                selectDefender(closestDefIdx);
+                sounds.playCatch();
+              } else {
+                switchDefenderToNearest();
+              }
+            }
+          }
+        }
+      }
+      return;
+    }
 
     const screenEnd = getScreenCoords(e.clientX, e.clientY);
     const swipeTime = Date.now() - touchStartTime;
@@ -4228,6 +4511,59 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     });
     for (const key of Object.keys(rosterStamina)) {
       if (!activeKeys.has(key) && !key.includes(':wr-')) rosterStamina[key] = updatePlayerStamina(rosterStamina[key], 0, 1, 0.035);
+    }
+
+    // Update Turbo meter & flame particles
+    if (activeDefense === 'P1') {
+      const cd = getControlledDefender();
+      if (cd) {
+        if (cd.isOnFire) {
+          userTurboMeter = 100;
+          cd.isTurboActive = true;
+          if (cd.fireTimer && cd.fireTimer > 0) {
+            cd.fireTimer--;
+            if (cd.fireTimer <= 0) {
+              cd.isOnFire = false;
+              cd.defensiveBigPlays = 0;
+              callbacks.onDefenderOnFireChange?.(false);
+            }
+          }
+        } else if (userTurboActive && userTurboMeter > 0) {
+          userTurboMeter = Math.max(0, userTurboMeter - 0.75);
+          cd.isTurboActive = userTurboMeter > 0;
+        } else {
+          cd.isTurboActive = false;
+          userTurboMeter = Math.min(100, userTurboMeter + 0.45);
+        }
+        callbacks.onTurboChange?.(Math.round(userTurboMeter), Boolean(cd.isTurboActive));
+
+        // Spawn flame / exhaust particles
+        if ((cd.isTurboActive || cd.isOnFire) && (cd.vx !== 0 || cd.vy !== 0 || cd.isOnFire)) {
+          for (let p = 0; p < (cd.isOnFire ? 3 : 2); p++) {
+            defenderFlameParticles.push({
+              x: cd.x + (Math.random() - 0.5) * 10,
+              y: cd.y + (Math.random() - 0.5) * 8,
+              vx: -(cd.vx || 0) * 0.4 + (Math.random() - 0.5) * 0.8,
+              vy: -(cd.vy || 0) * 0.4 + (Math.random() - 0.5) * 0.8,
+              life: 14,
+              maxLife: 14,
+              color: cd.isOnFire ? (Math.random() < 0.5 ? '#ff3300' : '#ffaa00') : '#00ffff',
+              size: Math.random() * 3 + 2
+            });
+          }
+        }
+      }
+    }
+
+    // Update flame particles
+    for (let i = defenderFlameParticles.length - 1; i >= 0; i--) {
+      const fp = defenderFlameParticles[i];
+      fp.x += fp.vx;
+      fp.y += fp.vy;
+      fp.life--;
+      if (fp.life <= 0) {
+        defenderFlameParticles.splice(i, 1);
+      }
     }
   }
 
@@ -5215,50 +5551,90 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     }
 
     if (phase !== 'DEAD') {
-      if (phase === 'QB_DROP') {
-        defenders.forEach(d => {
-          if (d) d.isEngagedWithBlocker = false;
-        });
-      }
-      const passRushers = defenders.filter(d => d && (d.passRusher || d.defenseAssignment === 'BLITZ'));
+      const userDef = activeDefense === 'P1' ? getControlledDefender() : null;
+      const isUserAdvancing = Boolean(userDef && (
+        userDef.passRusher ||
+        userDef.defenseAssignment === 'BLITZ' ||
+        (attackDirection === -1 ? userDef.y > lineOfScrimmageY - 75 : userDef.y < lineOfScrimmageY + 75)
+      ));
+      const passRushers = defenders.filter(d => d && (
+        d.passRusher ||
+        d.defenseAssignment === 'BLITZ' ||
+        (d === userDef && isUserAdvancing)
+      ));
       const hasExtraBlitzer = passRushers.length >= 2;
       const baseBlockHoldFrames = getPassBlockBaseHoldFrames();
-      const blockHoldFrames = getPassBlockHoldFrames(
-        baseBlockHoldFrames,
-        (linemen[0]?.player?.ratings.blocking ?? 70) / 70,
-        (passRushers[0]?.player?.ratings.rush ?? 70) / 70
-      );
-
-      // Extra blockers assigned to pass protection (RB, Center)
       const extraPassBlockers = [rb, centerReceiver].filter((b): b is Entity => Boolean(b && (b.isBlocker || b.routeType === 'BLOCK')));
+      const allPassBlockers = [...linemen, ...extraPassBlockers];
 
-      linemen.forEach((l) => {
-        if (phase === 'QB_DROP') l.blockTimer = (l.blockTimer || 0) + 1;
-        if (passRushers.length > 0) {
-          const interiorRusher = passRushers[0];
-          const isUserRusher = activeDefense === 'P1' && interiorRusher === getControlledDefender();
-          if (!isUserRusher) {
-            if (!shouldHoldPassBlock(l, interiorRusher, blockHoldFrames)) {
-              const rushSpeed = (hasExtraBlitzer ? 1.20 : 0.88) * ((interiorRusher.player?.ratings.rush ?? 70) / 70);
-              moveToward(interiorRusher, qb.x, qb.y, 0.26, rushSpeed);
+      // Form the pocket protection wall during QB_DROP
+      if (phase === 'QB_DROP') {
+        // Pocket offsets for the 3 OL blocking
+        const pocketOffsets = [
+          { x: 170, depth: 6 },   // Center
+          { x: 140, depth: 8 },   // Left Tackle
+          { x: 200, depth: 8 },   // Right Tackle
+        ];
+
+        linemen.forEach((l, idx) => {
+          l.blockTimer = (l.blockTimer || 0) + 1;
+          const targetOffset = pocketOffsets[idx] || { x: l.startX ?? 170, depth: 8 };
+          const pocketAnchorY = lineOfScrimmageY - (targetOffset.depth * attackDirection);
+          const pocketAnchorX = targetOffset.x;
+
+          // Find if any rusher is in or approaching this lineman's sector
+          const nearestRusher = passRushers.reduce<{ rusher: Entity; dist: number } | null>((best, rusher) => {
+            const d = Math.hypot(rusher.x - l.x, rusher.y - l.y);
+            return (!best || d < best.dist) ? { rusher, dist: d } : best;
+          }, null)?.rusher;
+
+          if (nearestRusher && Math.hypot(nearestRusher.x - pocketAnchorX, nearestRusher.y - pocketAnchorY) < 55) {
+            // Slide toward and intercept the rusher at the pocket edge
+            moveToward(l, nearestRusher.x, nearestRusher.y, 0.35, 1.3);
+          } else {
+            // Hold pocket position
+            moveToward(l, pocketAnchorX, pocketAnchorY, 0.25, 0.9);
+          }
+        });
+
+        // Enforce 3 OL blocking wall against all defenders attempting to run through the line
+        defenders.forEach(d => {
+          if (!d) return;
+          checkOffensiveLineWall(d, linemen, lineOfScrimmageY, attackDirection);
+        });
+
+        // Pass Rush vs Pass Protection engagement
+        passRushers.forEach((rusher) => {
+          const isUserRusher = activeDefense === 'P1' && rusher === getControlledDefender();
+
+          // Find engaging blocker
+          const engagingBlocker = allPassBlockers.find(b => canEngagePassBlock(b, rusher));
+
+          if (engagingBlocker) {
+            const holdFrames = getPassBlockHoldFrames(
+              baseBlockHoldFrames,
+              (engagingBlocker.player?.ratings.blocking ?? 78) / 70,
+              (rusher.player?.ratings.rush ?? 70) / 70
+            );
+            if (shouldHoldPassBlock(engagingBlocker, rusher, holdFrames)) {
+              rusher.isEngagedWithBlocker = true;
+              rusher.vx = 0;
+              rusher.vy = 0;
+              // Blockers hold leverage and prevent forward penetration
+              if (attackDirection === -1 && rusher.y > engagingBlocker.y - (engagingBlocker.radius + rusher.radius)) {
+                rusher.y = engagingBlocker.y - (engagingBlocker.radius + rusher.radius);
+              } else if (attackDirection === 1 && rusher.y < engagingBlocker.y + (engagingBlocker.radius + rusher.radius)) {
+                rusher.y = engagingBlocker.y + (engagingBlocker.radius + rusher.radius);
+              }
+              return;
             }
           }
-        }
-      });
 
-      // Extra blitzers: rush straight at QB unless blocked by RB or Center!
-      if (phase === 'QB_DROP' && passRushers.length > 1) {
-        passRushers.slice(1).forEach((extraRusher, idx) => {
-          if (activeDefense === 'P1' && extraRusher === getControlledDefender()) return;
-          const matchingBlocker = extraPassBlockers[idx];
-          const extraHoldFrames = matchingBlocker ? getPassBlockHoldFrames(
-            baseBlockHoldFrames,
-            (matchingBlocker.player?.ratings.blocking ?? 70) / 70,
-            (extraRusher.player?.ratings.rush ?? 70) / 70
-          ) : 0;
-          if (!matchingBlocker || !shouldHoldPassBlock(matchingBlocker, extraRusher, extraHoldFrames)) {
-            const rushSpeed = 1.35 * ((extraRusher.player?.ratings.rush ?? 70) / 70);
-            moveToward(extraRusher, qb.x, qb.y, 0.32, rushSpeed);
+          // Rusher is unblocked or broke the block:
+          rusher.isEngagedWithBlocker = false;
+          if (!isUserRusher) {
+            const rushSpeed = (hasExtraBlitzer ? 1.25 : 0.95) * ((rusher.player?.ratings.rush ?? 70) / 70);
+            moveToward(rusher, qb.x, qb.y, 0.28, rushSpeed);
           }
         });
       }
@@ -5552,70 +5928,81 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         // no matter what the assignment is for that sprite/player (ZONE, MAN, BLITZ, RB_SPY, QB_SPY, USER)!
         const isUserDefender = (activeDefense === 'P1' && d === getControlledDefender());
         if (isUserDefender) {
-          const joy = getEffectiveJoystickInput();
-          if (joy.active && (joy.x !== 0 || joy.y !== 0)) {
-            const defenderSpeedRating = d.speedMultiplier || (d.passRusher
-              ? p1Team.ratings.passRush || 1.0
-              : p1Team.ratings.dbClosingSpeed || p1Team.ratings.passRush || 1.0);
-            const defSpeed = getUserDefenderSpeed(defenderSpeedRating, d.stamina);
-            const defenderDirection = getDirectionalInput(joy.x, joy.y);
-            d.vx = defenderDirection.x * defSpeed;
-            d.vy = defenderDirection.y * defSpeed;
-            if (!d.isEngagedWithBlocker) {
-              d.x += d.vx;
-              d.y += d.vy;
-              d.x = Math.max(20, Math.min(fieldWidth - 20, d.x));
-              d.y = Math.max(30, Math.min(fieldHeight - 30, d.y));
-            }
-
-            // User tackle during running / handoff
-            if (phase === 'HANDOFF' && activeEntity) {
-              const dist = Math.hypot(activeEntity.x - d.x, activeEntity.y - d.y);
-              const contactRadius = (activeEntity.radius || 10) + (d.radius || 10) + 6;
-              if (dist < contactRadius) {
-                screenShakeTimer = 24;
-                phase = 'DEAD';
-                sounds.playTackle();
-                handlePlayEnd(activeEntity.y, 'TACKLE', 'USER TACKLE! BALL CARRIER STOPPED! 🛑💥', '#00ffff');
-                return;
-              }
-            }
-
-            // User sack in pocket during QB_DROP
-            if (phase === 'QB_DROP' && !ball) {
-              const distToQb = Math.hypot(qb.x - d.x, qb.y - d.y);
-              const contactDist = (qb.radius || 10) + (d.radius || 10) + 4;
-              if (distToQb < contactDist) {
-                const isBlocked = isRusherActivelyBlocked(d, [...passBlockers, ...linemen]);
-                if (!isBlocked) {
-                  screenShakeTimer = 28;
-                  phase = 'DEAD';
-                  isAiming = false;
-                  sounds.playTackle();
-                  handlePlayEnd(qb.y, 'SACK');
-                  return;
-                }
-              }
-            }
-
-            return; // 100% USER MANUAL CONTROL: Do not run any AI assignment script!
+          // Lunging dive tackle motion
+          if ((d.diveTimer || 0) > 0) {
+            d.diveTimer!--;
+            d.x += (d.diveVx || 0);
+            d.y += (d.diveVy || 0);
+            d.x = Math.max(20, Math.min(fieldWidth - 20, d.x));
+            d.y = Math.max(30, Math.min(fieldHeight - 30, d.y));
           } else {
-            // User defender holds position: they shouldn't move unless the user moves them!
-            d.vx = 0;
-            d.vy = 0;
-            if (phase === 'HANDOFF' && activeEntity) {
-              const dist = Math.hypot(activeEntity.x - d.x, activeEntity.y - d.y);
-              const contactRadius = (activeEntity.radius || 10) + (d.radius || 10) + 6;
-              if (dist < contactRadius) {
-                screenShakeTimer = 24;
-                phase = 'DEAD';
-                sounds.playTackle();
-                handlePlayEnd(activeEntity.y, 'TACKLE', 'USER TACKLE! BALL CARRIER STOPPED! 🛑💥', '#00ffff');
+            const joy = getEffectiveJoystickInput();
+            if (joy.active && (joy.x !== 0 || joy.y !== 0)) {
+              const defenderSpeedRating = d.speedMultiplier || (d.passRusher
+                ? p1Team.ratings.passRush || 1.0
+                : p1Team.ratings.dbClosingSpeed || p1Team.ratings.passRush || 1.0);
+              const defSpeed = getUserDefenderSpeed(defenderSpeedRating, d.stamina, d.isTurboActive, d.isOnFire);
+              const defenderDirection = getDirectionalInput(joy.x, joy.y);
+              d.vx = defenderDirection.x * defSpeed;
+              d.vy = defenderDirection.y * defSpeed;
+              if (phase === 'QB_DROP') {
+                const wallEngaged = checkOffensiveLineWall(d, linemen, lineOfScrimmageY, attackDirection);
+                if (!wallEngaged && !d.isEngagedWithBlocker) {
+                  d.x += d.vx;
+                  d.y += d.vy;
+                  d.x = Math.max(20, Math.min(fieldWidth - 20, d.x));
+                  d.y = Math.max(30, Math.min(fieldHeight - 30, d.y));
+                  checkOffensiveLineWall(d, linemen, lineOfScrimmageY, attackDirection);
+                }
+              } else if (!d.isEngagedWithBlocker) {
+                d.x += d.vx;
+                d.y += d.vy;
+                d.x = Math.max(20, Math.min(fieldWidth - 20, d.x));
+                d.y = Math.max(30, Math.min(fieldHeight - 30, d.y));
+              }
+            } else {
+              d.vx = 0;
+              d.vy = 0;
+            }
+          }
+
+          // User contact tackle during RUNNING phase (fixes open field phasing)
+          if (phase === 'RUNNING' && activeEntity) {
+            const dist = Math.hypot(activeEntity.x - d.x, activeEntity.y - d.y);
+            const isDiving = (d.diveTimer || 0) > 0;
+            const contactRadius = (activeEntity.radius || 10) + (d.radius || 10) + (isDiving ? 14 : (d.isOnFire ? 12 : (d.isTurboActive ? 10 : 7)));
+            if (dist < contactRadius) {
+              executeUserTackleOnCarrier(d, activeEntity, isDiving);
+              return;
+            }
+          }
+
+          // User tackle during HANDOFF
+          if (phase === 'HANDOFF' && activeEntity) {
+            const dist = Math.hypot(activeEntity.x - d.x, activeEntity.y - d.y);
+            const isDiving = (d.diveTimer || 0) > 0;
+            const contactRadius = (activeEntity.radius || 10) + (d.radius || 10) + (isDiving ? 14 : 7);
+            if (dist < contactRadius) {
+              executeUserTackleOnCarrier(d, activeEntity, isDiving);
+              return;
+            }
+          }
+
+          // User sack in pocket during QB_DROP
+          if (phase === 'QB_DROP' && !ball) {
+            const distToQb = Math.hypot(qb.x - d.x, qb.y - d.y);
+            const isDiving = (d.diveTimer || 0) > 0;
+            const contactDist = (qb.radius || 10) + (d.radius || 10) + (isDiving ? 12 : 5);
+            if (distToQb < contactDist) {
+              const isBlocked = isRusherActivelyBlocked(d, [...passBlockers, ...linemen]);
+              if (!isBlocked && !d.isEngagedWithBlocker) {
+                executeUserTackleOnCarrier(d, qb, isDiving);
                 return;
               }
             }
-            return;
           }
+
+          return; // 100% USER MANUAL CONTROL: Do not run AI assignment script for user sprite
         }
 
         if ((d.passRusher || d.defenseAssignment === 'BLITZ') && phase === 'QB_DROP') {
@@ -5885,7 +6272,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         if (dist < contactDist) {
           // If a pass protection blocker is actively engaged on this defender, protect the QB
           const isBlocked = isRusherActivelyBlocked(d, [...passBlockers, ...linemen]);
-          if (isBlocked) return;
+          if (isBlocked || d.isEngagedWithBlocker) return;
 
           // Defender reached the QB! SACK!
           screenShakeTimer = 28;
@@ -6834,6 +7221,20 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         forwardDirection: getEntityForwardDirection(entity, 'defense')
       }))
     ];
+    // Render flame particles on the field
+    if (defenderFlameParticles.length > 0) {
+      ctx.save();
+      defenderFlameParticles.forEach(fp => {
+        const alpha = Math.max(0, fp.life / fp.maxLife);
+        ctx.fillStyle = fp.color;
+        ctx.globalAlpha = alpha;
+        ctx.beginPath();
+        ctx.arc(fp.x, fp.y, fp.size * (0.5 + alpha * 0.5), 0, Math.PI * 2);
+        ctx.fill();
+      });
+      ctx.restore();
+    }
+
     playersByDepth
       .sort((first, second) => first.entity.y - second.entity.y)
       .forEach(({ entity, role, forwardDirection }) => {
@@ -6895,6 +7296,31 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         ctx.lineTo(controlledPlayer.x + 5, arrowBaseY);
         ctx.closePath();
         ctx.fill();
+
+        if (controlledPlayer.isOnFire) {
+          const firePulse = Math.sin(Date.now() * 0.02) * 3;
+          ctx.strokeStyle = '#ff3300';
+          ctx.lineWidth = 3 / cameraScale;
+          ctx.shadowColor = '#ff6600';
+          ctx.shadowBlur = 14;
+          ctx.beginPath();
+          ctx.arc(controlledPlayer.x, controlledPlayer.y, (controlledPlayer.radius || 10) + 7 + firePulse, 0, Math.PI * 2);
+          ctx.stroke();
+
+          ctx.font = '900 10px monospace';
+          ctx.textAlign = 'center';
+          ctx.fillStyle = '#ffff00';
+          ctx.fillText('🔥 ON FIRE 🔥', controlledPlayer.x, controlledPlayer.y - (controlledPlayer.radius || 10) - 20);
+        }
+
+        if ((controlledPlayer.diveTimer || 0) > 0) {
+          ctx.strokeStyle = '#00ffff';
+          ctx.lineWidth = 3 / cameraScale;
+          ctx.beginPath();
+          ctx.moveTo(controlledPlayer.x - (controlledPlayer.diveVx || 0) * 3, controlledPlayer.y - (controlledPlayer.diveVy || 0) * 3);
+          ctx.lineTo(controlledPlayer.x, controlledPlayer.y);
+          ctx.stroke();
+        }
       }
 
       const joyInput = getEffectiveJoystickInput();

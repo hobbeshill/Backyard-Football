@@ -11,7 +11,7 @@ test('all teams have unique, bounded rosters and persistent jersey identities', 
   const rosters = new Set<string>();
   for (const team of getAllTeams()) {
     const players = Object.values(team.roster);
-    assert.equal(players.length, 14);
+    assert.equal(players.length, 16);
     assert.equal(new Set(players.map(player => player.number)).size, players.length, team.id);
     for (const player of players) {
       for (const rating of Object.values(player.ratings)) {

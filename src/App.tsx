@@ -72,6 +72,9 @@ export default function App() {
   const [phaseState, setPhaseState] = useState('PRE_SNAP');
   const [kickMeterPower, setKickMeterPower] = useState(0.55);
   const [momentumState, setMomentumState] = useState(0);
+  const [turboMeter, setTurboMeter] = useState(100);
+  const [isTurboActive, setIsTurboActive] = useState(false);
+  const [isDefenderOnFire, setIsDefenderOnFire] = useState(false);
   const [gameClockState, setGameClockState] = useState({ quarter: 1, seconds: 120 });
   const [banner, setBanner] = useState<{
     text: string;
@@ -382,6 +385,13 @@ export default function App() {
       setIs4thDownState: (val) => setIs4thDown(val),
       setKickMeterPowerState: (power) => setKickMeterPower(power),
       setFieldGoalMeterState: (state) => setFgMeterState(state),
+      onTurboChange: (meter, active) => {
+        setTurboMeter(meter);
+        setIsTurboActive(active);
+      },
+      onDefenderOnFireChange: (onFire) => {
+        setIsDefenderOnFire(onFire);
+      },
       setP1OffPlayState
     });
   }, []);
@@ -706,7 +716,7 @@ export default function App() {
         {/* Relocated Footer / Game Status Bar */}
         <footer className="mb-1 text-[0.52rem] text-[#adff2f] text-center z-20 px-2 w-full max-w-[430px] flex items-center justify-between gap-2 shrink-0">
           <span className="font-bold opacity-90 whitespace-nowrap">
-            v2.8.6 • 7v7 Football
+            v2.9.0 • 8v8 Football (3 OL Pocket Protection)
             {gameMode === 'SEASON' && (
               <span className="text-emerald-400 font-bold ml-1">
                 • {isChampionshipWeek ? '🏆 SEC TITLE' : `WK ${currentWeekNumber} (${getSeasonRecord(seasonForDisplay).wins}-${getSeasonRecord(seasonForDisplay).losses})`}
@@ -1041,7 +1051,6 @@ export default function App() {
           ref={canvasRef}
           className="bg-[#176620] shadow-[0_8px_30px_rgba(0,0,0,0.9)] rounded-md border-2 border-white touch-none"
         />
-
       </div>
 
       {/* Game Manual / Help Modal */}
@@ -1053,7 +1062,7 @@ export default function App() {
           <div className="bg-[#0b170e] border-2 border-[#ffcc00] rounded-lg max-w-[360px] w-full p-4 max-h-[85vh] overflow-y-auto text-left shadow-2xl">
             <div className="flex items-center justify-between border-b border-neutral-700 pb-2 mb-3">
               <h2 className="text-[#ffcc00] font-bold text-sm tracking-wider flex items-center gap-1.5">
-                <HelpCircle size={16} /> 7 ON 7 FIELD PLAYBOOK & CONTROLS
+                <HelpCircle size={16} /> 8 ON 8 FIELD PLAYBOOK & CONTROLS
               </h2>
               <button onClick={() => setShowHelp(false)} className="text-neutral-400 hover:text-white">
                 <X size={18} />

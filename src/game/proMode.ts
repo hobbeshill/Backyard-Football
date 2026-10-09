@@ -383,7 +383,7 @@ export interface ProMatchupResult {
 }
 
 /**
- * Evaluates the 7-on-7 rock-paper-scissors matchup according to the game engine rules:
+ * Evaluates the 8-on-8 rock-paper-scissors matchup according to the game engine rules:
  * 1. Exact Counter Rule: If Offense == Counter(Defense), yards = -1 to +2 yards (or incomplete).
  * 2. Run vs Deep Pass Mismatch Rule: Deep Pass vs Run Defense triggers Big Gain Event:
  *    - 80% chance of 20+ yard gain or touchdown.

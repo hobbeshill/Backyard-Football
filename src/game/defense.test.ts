@@ -4,7 +4,7 @@ import { chooseProDefensiveCall, getCoverageMistakeChance, getCpuCounterReason, 
 import { alignDefenderAcrossFromReceiver, alignDefenderAcrossFromRunningBack, alignDefenderToZone, alignDefenders, chooseCpuDefensiveAssignments, constrainDefendersToFieldSide, getBlitzAlignmentY, getBracketCoverageTarget, getDefensiveLineAlignmentY, matchCpuDefendersToReceivers, separateDefenderAlignments } from './defense';
 import { getCarrierFumbleChance } from './fumbles';
 import { calculateYardsToGo, canApplyProMatchupAdjustment, canDefenderDeflectPass, canTackleQuarterback, findTappedPassReceiver, getCatchCompletionChance, getDefenderPassReachHeight, getDriveStartY, getSnapBallPosition, getPassArcHeight, getPassArcMaxHeight, getPassFlightFrames, getPassLeadTarget, getRoutePassLeadTarget, isSafety, resolveCatchContestOutcome, resolvePlayResult } from './rules';
-import { canEngagePassBlock, clampPlayerToFieldY, GAME_SPEED_SCALE, getBallCarrierRunSpeed, getFatigueSpeedMultiplier, getPassBlockBaseHoldFrames, getPassBlockHoldFrames, getRunDirectionSpeedFactor, getRunPursuitMovement, getUserDefenderSpeed, isRusherActivelyBlocked, moveToward, resolveCollisions, shouldHoldPassBlock, updatePlayerStamina, updateReceiverTargetStamina, updateRunningBackStamina, updateRouteMovement, USER_CONTROL_SPEED_MULTIPLIER } from './movement';
+import { canEngagePassBlock, checkOffensiveLineWall, clampPlayerToFieldY, GAME_SPEED_SCALE, getBallCarrierRunSpeed, getFatigueSpeedMultiplier, getPassBlockBaseHoldFrames, getPassBlockHoldFrames, getRunDirectionSpeedFactor, getRunPursuitMovement, getUserDefenderSpeed, isRusherActivelyBlocked, moveToward, resolveCollisions, shouldHoldPassBlock, updatePlayerStamina, updateReceiverTargetStamina, updateRunningBackStamina, updateRouteMovement, USER_CONTROL_SPEED_MULTIPLIER } from './movement';
 import type { Entity } from './types';
 
 test('coverage reduces catches smoothly and touching players are not wide open', () => {
@@ -555,7 +555,7 @@ function createAlignedDefense(playKey: string, formation: 'SPREAD' | 'STACK' | '
     { x: positions.right, y: 500, startX: positions.right, startY: 500, radius: 10 }
   ];
   const centerReceiver: Entity = { x: positions.center, y: 500, startX: positions.center, startY: 500, radius: 10 };
-  const defenders: Entity[] = Array.from({ length: 7 }, (_, index) => ({
+  const defenders: Entity[] = Array.from({ length: 8 }, (_, index) => ({
     x: 170,
     y: 500,
     startX: 170,
@@ -1171,23 +1171,27 @@ test('AI ball carrier executes power truck boost in critical short-yardage situa
   assert.ok((carrier.powerBoostTimer || 0) > 0, 'Carrier should activate power boost');
 });
 
-test('both offense and defense have exactly 7 players on the field (7v7)', async () => {
-  // Simulating the 7 offensive entities: QB, RB, Center Lineman, 3 Receivers, Center Receiver
+test('both offense and defense have exactly 8 players on the field (8v8)', async () => {
+  // Simulating the 8 offensive entities: QB, RB, 3 Linemen (OL blocking), 2 Receivers, Center Receiver
   const qb: Entity = { x: 170, y: 575, radius: 10 };
   const rb: Entity = { x: 220, y: 575, radius: 10 };
-  const linemen: Entity[] = [{ x: 170, y: 500, radius: 10 }];
+  const linemen: Entity[] = [
+    { x: 170, y: 500, radius: 12 },
+    { x: 140, y: 500, radius: 12 },
+    { x: 200, y: 500, radius: 12 }
+  ];
   const receivers: Entity[] = [
     { x: 45, y: 500, radius: 10 },
-    { x: 115, y: 500, radius: 10 },
     { x: 295, y: 500, radius: 10 }
   ];
   const centerReceiver: Entity = { x: 225, y: 500, radius: 10 };
 
   const offensePlayers = [qb, rb, ...linemen, ...receivers, centerReceiver];
-  assert.equal(offensePlayers.length, 7, 'Offense must have 7 players');
+  assert.equal(offensePlayers.length, 8, 'Offense must have 8 players');
+  assert.equal(linemen.length, 3, 'Must have 3 OL blocking');
 
   const { defenders } = createAlignedDefense('ZONE34');
-  assert.equal(defenders.length, 7, 'Defense must have 7 players');
+  assert.equal(defenders.length, 8, 'Defense must have 8 players');
 });
 
 test('resolvePlayResult accurately registers a loss of yards on a SACK', async () => {
@@ -2442,4 +2446,53 @@ test('Defenders respond to swipe gestures for blitz, zone, man, and spy assignme
   // Short or diagonal swipe -> RB_SPY
   const spy = evaluateDirtSwipeGesture(defender, 'DEFENDER', 8, -5, -1);
   assert.equal(spy.value, 'RB_SPY', 'Short swipe assigns RB_SPY');
+});
+
+test('3 OL blocking wall engages and stops a player attempting to run through the line', () => {
+  const lineOfScrimmageY = 500;
+  const attackDirection = -1; // Offense attacking UP, QB at y = 575
+  const linemen: Entity[] = [
+    { x: 170, y: 506, radius: 12 }, // Center
+    { x: 140, y: 508, radius: 12 }, // Left Tackle
+    { x: 200, y: 508, radius: 12 }  // Right Tackle
+  ];
+
+  // Test 1: User or blitzing defender attempting to sprint through the A-gap (x: 155)
+  const aGapRusher: Entity = {
+    x: 155,
+    y: lineOfScrimmageY, // Crossing line of scrimmage
+    vx: 0,
+    vy: 3.5, // Sprinting toward QB (attackDirection = -1, positive Y is toward QB)
+    radius: 10
+  };
+
+  const wallHit = checkOffensiveLineWall(aGapRusher, linemen, lineOfScrimmageY, attackDirection);
+  assert.equal(wallHit, true, 'Offensive line wall must engage rusher attempting to run through the line');
+  assert.equal(aGapRusher.isEngagedWithBlocker, true, 'Rusher must be locked in engagement');
+  assert.equal(aGapRusher.vy, 0, 'Forward penetration velocity must be halted');
+  assert.ok(aGapRusher.blockingDefender, 'Lineman must be actively blocking the rusher');
+  assert.ok(isRusherActivelyBlocked(aGapRusher, linemen), 'Rusher must be actively blocked from reaching QB');
+
+  // Test 2: Rusher trying to slip past B-gap (x: 185)
+  const bGapRusher: Entity = {
+    x: 185,
+    y: lineOfScrimmageY + 10,
+    vx: 0,
+    vy: 3.0,
+    radius: 10
+  };
+  const bGapHit = checkOffensiveLineWall(bGapRusher, linemen, lineOfScrimmageY, attackDirection);
+  assert.equal(bGapHit, true, '3 OL wall must engage B-gap penetrator');
+  assert.equal(bGapRusher.vy, 0);
+
+  // Test 3: Rusher rushing wide around the edge outside the tackles (x = 80)
+  const edgeRusher: Entity = {
+    x: 80,
+    y: lineOfScrimmageY,
+    vx: 0,
+    vy: 2.0,
+    radius: 10
+  };
+  const edgeHit = checkOffensiveLineWall(edgeRusher, linemen, lineOfScrimmageY, attackDirection);
+  assert.equal(edgeHit, false, 'Edge rushers outside the tackles can rush the edge without hitting the interior wall');
 });

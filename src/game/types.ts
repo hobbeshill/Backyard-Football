@@ -98,6 +98,16 @@ export interface Entity {
   isHolder?: boolean;
   isReturner?: boolean;
   team?: 'P1' | 'P2';
+  isTurboActive?: boolean;
+  turboMeter?: number;
+  isOnFire?: boolean;
+  fireTimer?: number;
+  defensiveBigPlays?: number;
+  diveVx?: number;
+  diveVy?: number;
+  diveTimer?: number;
+  swatAttemptTimer?: number;
+  intAttemptTimer?: number;
   speechBubble?: {
     text: string;
     timer: number;
