@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { getRouteWaypoints, updateRouteMovement } from './movement';
+import { getRouteWaypoints, getScreenEdgeTargetPosition, updateRouteMovement } from './movement';
 import { allRoutes, offensivePlaybook } from './playbook';
 import type { Entity } from './types';
 
@@ -35,9 +35,11 @@ test('route depths include intermediate targets, long shots and short checkdowns
   for (const route of ['SLANT-L', 'SLANT-R', 'CROSS-L', 'CROSS-R', 'COMEBACK']) {
     assert.equal(depth(route), 12);
   }
-  for (const route of ['FLAG-L', 'FLAG-R', 'POST-L', 'POST-R', 'GO', 'WHEEL']) {
+  for (const route of ['FLAG-L', 'FLAG-R', 'POST-L', 'POST-R', 'GO', 'FLY', 'WHEEL']) {
     assert.ok(depth(route) >= 30, `${route} should reach at least 30 yards`);
   }
+  assert.equal(depth('GO'), 60, 'Go route reaches the opponent goal line');
+  assert.equal(depth('FLY'), 60, 'Fly route reaches the opponent goal line');
 });
 
 test('screen pass receiver slants across the formation toward the middle', () => {
@@ -62,4 +64,17 @@ test('route movement does not take over caught receivers or pre-snap players', (
   receiver.caught = true;
   updateRouteMovement(receiver, 'THROWN', 1, [], 340);
   assert.equal(receiver.y, 500);
+});
+
+test('off-screen receiver targets are anchored to the nearest edge with direction', () => {
+  assert.deepEqual(getScreenEdgeTargetPosition(170, -120, 340, 450), {
+    x: 170, y: 28, direction: 'UP'
+  });
+  assert.deepEqual(getScreenEdgeTargetPosition(500, 225, 340, 450), {
+    x: 312, y: 225, direction: 'RIGHT'
+  });
+  assert.deepEqual(getScreenEdgeTargetPosition(-80, 800, 340, 450), {
+    x: 84.34782608695653, y: 422, direction: 'DOWN'
+  });
+  assert.equal(getScreenEdgeTargetPosition(170, 225, 340, 450), null);
 });

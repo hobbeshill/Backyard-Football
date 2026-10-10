@@ -1,7 +1,7 @@
 import type { Ball, DefensiveAssignment, Entity, FumbleBall, TacticalMode } from './types';
 import { defensiveKeys, defensivePlaybook, proDefensivePlaybook, allDefensivePlaybook, middleRoutes, offensiveKeys, offensivePlaybook, outsideRoutes, runningBackRoutes, wrRoutes, proOffensiveKeys, proDefensiveKeys } from './playbook';
 import { evaluateProMatchup, PRO_OFFENSE_PLAYS, type ProMatchupResult, type ProOffensePlayId, type ProDefensePlayId } from './proMode';
-import { getRouteWaypoints } from './movement';
+import { getRouteWaypoints, getScreenEdgeTargetPosition } from './movement';
 import { alignDefenderAcrossFromReceiver, alignDefenderAcrossFromRunningBack, alignDefenderToZone, alignDefenders, chooseCpuDefensiveAssignments, constrainDefendersToFieldSide, getBlitzAlignmentY, getBracketCoverageTarget, getDefensiveLineAlignmentY, matchCpuDefendersToReceivers, separateDefenderAlignments } from './defense';
 import { chooseProDefensiveCall, chooseTeamOffensivePlay, evaluateCpuOffensiveAudibles, evaluateCpuBallCarrierMoves, getCoverageMistakeChance, getSuccessfulPlayCounter, isCpuPressureRecognized, shouldCpuGoForItOnFourthDown, shouldCpuReleasePass, shouldCpuScramble, scoreRunBlockTarget } from './ai';
 import { createFumbleBall, getCarrierFumbleChance } from './fumbles';
@@ -4181,6 +4181,34 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     return bestReceiver;
   }
 
+  function getOffscreenReceiverTargets(): Array<{
+    receiver: Entity;
+    target: number;
+    x: number;
+    y: number;
+    direction: 'UP' | 'DOWN' | 'LEFT' | 'RIGHT';
+  }> {
+    if (phase !== 'QB_DROP' || !isLocalOffense()) return [];
+    return [...receivers, centerReceiver, rb]
+      .filter((receiver): receiver is Entity => Boolean(receiver && !receiver.caught && !receiver.isBlocker && receiver.routeType !== 'BLOCK'))
+      .flatMap((receiver, target) => {
+        const screenPosition = worldToCanvas(receiver.x, receiver.y);
+        const edge = getScreenEdgeTargetPosition(
+          screenPosition.x,
+          screenPosition.y,
+          logicalCanvasWidth,
+          logicalCanvasHeight
+        );
+        return edge ? [{ receiver, target, ...edge }] : [];
+      });
+  }
+
+  function getTappedOffscreenReceiver(screenX: number, screenY: number): Entity | null {
+    return getOffscreenReceiverTargets().find(target =>
+      Math.hypot(target.x - screenX, target.y - screenY) <= 22
+    )?.receiver ?? null;
+  }
+
   function executeUserPass(tappedReceiver: Entity) {
     if (phase !== 'QB_DROP' || !isUserOffense() || !qb.hasBall) return;
     if (onlineGuestControlsP2 && onlinePlayerSide === 'P2') {
@@ -4495,7 +4523,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
     // Live play: Tap-to-Throw detection (Zero interference with joystick)
     if (phase === 'QB_DROP' && isLocalOffense()) {
-      const tappedWr = typeof getTappedReceiver === 'function' ? getTappedReceiver(screenPos.x, screenPos.y, px, py) : null;
+      const tappedWr = getTappedOffscreenReceiver(screenPos.x, screenPos.y) ||
+        (typeof getTappedReceiver === 'function' ? getTappedReceiver(screenPos.x, screenPos.y, px, py) : null);
       if (tappedWr) {
         if (typeof passPointerId !== 'undefined') passPointerId = e.pointerId;
         if (typeof passTapTarget !== 'undefined') passTapTarget = tappedWr;
@@ -4840,7 +4869,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
     if (!wasJoystick && phase === 'QB_DROP' && isLocalOffense()) {
       const releaseWorld = screenToWorld(e.clientX, e.clientY);
-      const receiverAtRelease = typeof getTappedReceiver === 'function' ? getTappedReceiver(screenEnd.x, screenEnd.y, releaseWorld.x, releaseWorld.y) : null;
+      const receiverAtRelease = getTappedOffscreenReceiver(screenEnd.x, screenEnd.y) ||
+        (typeof getTappedReceiver === 'function' ? getTappedReceiver(screenEnd.x, screenEnd.y, releaseWorld.x, releaseWorld.y) : null);
       if (receiverAtRelease && typeof executeUserPass === 'function') {
         executeUserPass(receiverAtRelease);
         return;
@@ -5261,7 +5291,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         if (!t) return { score: -9999, isBreakOpen: false, depthYards: 0, nearestDefDist: 0 };
 
         const targetDist = Math.hypot(t.x - qb.x, t.y - qb.y);
-        const isDeepRoute = t.routeType === 'GO' || t.routeType === 'FLAG-L' || t.routeType === 'FLAG-R' || t.routeType === 'POST-L' || t.routeType === 'POST-R' || t.routeType === 'WHEEL';
+        const isDeepRoute = t.routeType === 'GO' || t.routeType === 'FLY' || t.routeType === 'FLAG-L' || t.routeType === 'FLAG-R' || t.routeType === 'POST-L' || t.routeType === 'POST-R' || t.routeType === 'WHEEL';
         const estimatedThrowSpeed = (isDeepRoute
           ? (targetDist > 240 ? 9.5 : 8.6)
           : (targetDist > 140 ? 8.8 : 7.6)) * 0.8;
@@ -5348,7 +5378,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
             isBreakOpen = true;
           }
           // Go route streaking deep behind CB (frame 34+)
-          else if (t.routeType === 'GO' && (rTime >= 34 || hasCoverageMistake) && nearestDefDist >= 14 && depthYards > 6) {
+          else if ((t.routeType === 'GO' || t.routeType === 'FLY') && (rTime >= 34 || hasCoverageMistake) && nearestDefDist >= 14 && depthYards > 6) {
             score += 38;
             isBreakOpen = true;
           }
@@ -5443,7 +5473,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
       function executeCpuThrow(chosenTarget: Entity) {
         const targetDist = Math.hypot(chosenTarget.x - qb.x, chosenTarget.y - qb.y);
-        const isDeepRoute = chosenTarget.routeType === 'GO' || chosenTarget.routeType === 'FLAG-L' || chosenTarget.routeType === 'FLAG-R' || chosenTarget.routeType === 'POST-L' || chosenTarget.routeType === 'POST-R' || chosenTarget.routeType === 'WHEEL';
+        const isDeepRoute = chosenTarget.routeType === 'GO' || chosenTarget.routeType === 'FLY' || chosenTarget.routeType === 'FLAG-L' || chosenTarget.routeType === 'FLAG-R' || chosenTarget.routeType === 'POST-L' || chosenTarget.routeType === 'POST-R' || chosenTarget.routeType === 'WHEEL';
         const throwSpeed = (isDeepRoute ? (targetDist > 240 ? 7.8 : 7.0) : (targetDist > 140 ? 7.2 : 6.2)) * 0.8;
         const T = Math.max(18, Math.round(targetDist / throwSpeed));
 
@@ -5621,7 +5651,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
       // Smart release conditions
       const hasCoverageMistakeNow = defenders.some(d => d.coverageMistake && (d.mistakeTimer || 0) > 0);
-      const isTargetDeep = Boolean(bestTarget && (bestTarget.routeType === 'GO' || bestTarget.routeType === 'FLAG-L' || bestTarget.routeType === 'FLAG-R' || bestTarget.routeType === 'POST-L' || bestTarget.routeType === 'POST-R' || bestTarget.routeType === 'WHEEL'));
+      const isTargetDeep = Boolean(bestTarget && (bestTarget.routeType === 'GO' || bestTarget.routeType === 'FLY' || bestTarget.routeType === 'FLAG-L' || bestTarget.routeType === 'FLAG-R' || bestTarget.routeType === 'POST-L' || bestTarget.routeType === 'POST-R' || bestTarget.routeType === 'WHEEL'));
       const isDeepShotOpportunity = hasCoverageMistakeNow && isTargetDeep && playClock >= 40;
 
       const shouldThrowNow = shouldCpuReleasePass({
@@ -6240,7 +6270,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           r.isOpenDeep = (minDefDist >= 18 && distFromLos > 25);
           if (r.isOpenDeep) r.flash = Math.max(r.flash || 0, 35);
         } else {
-          const isDeepRoute = ['GO', 'FLAG-L', 'FLAG-R', 'POST-L', 'POST-R', 'WHEEL'].includes(r.routeType ?? '');
+          const isDeepRoute = ['GO', 'FLY', 'FLAG-L', 'FLAG-R', 'POST-L', 'POST-R', 'WHEEL'].includes(r.routeType ?? '');
           r.isOpenDeep = Boolean(isDeepRoute && distFromLos > 70 && minDefDist >= 22);
         }
       } else {
@@ -8329,6 +8359,28 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     }
 
     ctx.restore();
+
+    getOffscreenReceiverTargets().forEach(target => {
+      const arrow = target.direction === 'UP' ? '↑' : target.direction === 'DOWN' ? '↓' : target.direction === 'LEFT' ? '←' : '→';
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(target.x, target.y, 17, 0, Math.PI * 2);
+      ctx.fillStyle = target.receiver.isOpenDeep ? 'rgba(5, 46, 22, 0.96)' : 'rgba(8, 15, 24, 0.96)';
+      ctx.fill();
+      ctx.strokeStyle = target.receiver.isOpenDeep ? '#4ade80' : '#fbbf24';
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+      ctx.fillStyle = target.receiver.isOpenDeep ? '#bbf7d0' : '#fde68a';
+      ctx.font = 'bold 12px monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(`${arrow}${target.target + 1}`, target.x, target.y);
+      if (target.receiver.isOpenDeep) {
+        ctx.font = 'bold 8px monospace';
+        ctx.fillText('OPEN', target.x, target.y + 25);
+      }
+      ctx.restore();
+    });
 
     // Screen-space Special Teams Kickoff Meter & HUD
     if (phase === 'KICKOFF') {

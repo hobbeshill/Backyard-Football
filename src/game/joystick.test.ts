@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { FIELD_NUMBERS_INNER_EDGE_X, getCanvasRenderScale, getCameraYForAction, getCameraYForLineOfScrimmage, getOffenseJoystickAnchor, getPlayerForwardDirection, isOffenseJoystickStartZone, mountFootballGame, OFFENSE_JOYSTICK_INNER_RING_RADIUS, OFFENSE_JOYSTICK_RADIUS, type GameEngineHandle } from './engine';
-import { createSimulationClock, getDesignedRunLateralBias, getDirectionalInput, getRunLaneOptions, getUserRunnerVelocity } from './movement';
+import { createSimulationClock, getDesignedRunLateralBias, getDirectionalInput, getRunLaneOptions, getScreenEdgeTargetPosition, getUserRunnerVelocity } from './movement';
 import { TEAMS } from './teams';
 import { getPlayerSpeedMultiplier } from './roster';
 
@@ -929,6 +929,63 @@ test('online P2 returner is controlled by guest input, not the opposing defense'
     assert.ok(onlineInputs.some(input => input.active && input.dx > 0.5), 'Guest canvas movement should be sent to the host');
     canvas._listeners.get('pointerup')?.({ clientX: 140, clientY: 220, pointerId: 7 } as PointerEvent);
     assert.equal(onlineInputs.at(-1)?.active, false, 'Guest input release should clear host movement');
+  } finally {
+    cleanup?.();
+    globalThis.requestAnimationFrame = originalRequest;
+    globalThis.cancelAnimationFrame = originalCancel;
+  }
+});
+
+test('native edge target can throw to a Go-route receiver beyond the viewport', () => {
+  const originalRequest = globalThis.requestAnimationFrame;
+  const originalCancel = globalThis.cancelAnimationFrame;
+  let nextFrame: FrameRequestCallback | null = null;
+  let timestamp = 0;
+  globalThis.requestAnimationFrame = callback => { nextFrame = callback; return 1; };
+  globalThis.cancelAnimationFrame = () => {};
+  const canvas = createMockCanvas();
+  const handle: { game?: GameEngineHandle } = {};
+  const cleanup = mountFootballGame(canvas, {
+    setP2OffPlayState: () => {}, setP2DefPlayState: () => {},
+    setDownDistanceText: () => {}, setActiveOffenseState: () => {},
+    setUserScore: () => {}, setCpuScore: () => {}, setP1DefPlayState: () => {},
+    setMomentumState: () => {}, setGameClockState: () => {}, showAnnouncement: () => {},
+    onEngineReady: game => { handle.game = game ?? undefined; }
+  });
+  const advanceFrame = () => {
+    const frame = nextFrame;
+    assert.ok(frame);
+    timestamp += 1000 / 60;
+    frame(timestamp);
+  };
+  try {
+    const game = handle.game;
+    assert.ok(game);
+    game.selectP1Team('ALABAMA');
+    game.setPossessionForTest?.('P1');
+    game.resetDrill();
+    game.selectOffense('BAMA_P2');
+    game.startPlay?.();
+    assert.equal(game.phase, 'QB_DROP');
+    const routeReceiver = game.getReceivers()[0];
+    const manDefender = game.getDefenders?.().find(defender =>
+      !defender.passRusher && (defender.type === 'CB' || defender.type === 'DB')
+    );
+    assert.ok(manDefender);
+    manDefender.defenseAssignment = 'MAN';
+    manDefender.assignedReceiver = routeReceiver;
+
+    for (let frame = 0; frame < 850; frame++) advanceFrame();
+    const receiver = game.getReceiverScreenPositionForTest?.(0);
+    assert.ok(receiver);
+    assert.ok(receiver.y < 0 || receiver.y > 450, 'Go-route receiver should continue beyond the visible field');
+    assert.ok(Math.abs(manDefender.y - routeReceiver.y) < 50, 'Man coverage should stay with the receiver through the deep route');
+    const edge = getScreenEdgeTargetPosition(receiver.x, receiver.y, 340, 450);
+    assert.ok(edge);
+    canvas._listeners.get('pointerdown')?.({
+      clientX: edge.x, clientY: edge.y, pointerId: 11, preventDefault: () => {}
+    } as PointerEvent);
+    assert.equal(game.phase, 'THROWN', 'Tapping the edge marker throws to the off-screen receiver');
   } finally {
     cleanup?.();
     globalThis.requestAnimationFrame = originalRequest;

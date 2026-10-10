@@ -394,7 +394,7 @@ for (const plays of Object.values(SEC_TEAM_TECMO_PLAYS)) {
 
 export const defensiveKeys = Object.keys(defensivePlaybook);
 export const offensiveKeys = Object.keys(offensivePlaybook);
-export const wrRoutes = ['SLANT-L', 'SLANT-R', 'FLAG-L', 'FLAG-R', 'COMEBACK', 'CROSS-L', 'CROSS-R', 'GO', 'BLOCK'];
+export const wrRoutes = ['SLANT-L', 'SLANT-R', 'FLAG-L', 'FLAG-R', 'COMEBACK', 'CROSS-L', 'CROSS-R', 'GO', 'FLY', 'BLOCK'];
 export const outsideRoutes = wrRoutes;
 export const middleRoutes = wrRoutes;
 export const runningBackRoutes = ['FLAT', 'GO', 'ANGLE', 'BLOCK'];

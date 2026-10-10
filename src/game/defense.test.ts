@@ -1036,8 +1036,8 @@ test('players stay inside the back boundary lines of the field', () => {
 
 test('all WRs have all routes available in their route tree, while RB keeps the two assigned routes plus BLOCK', async () => {
   const { wrRoutes, outsideRoutes, middleRoutes, runningBackRoutes } = await import('./playbook');
-  const expectedWRRoutes = ['SLANT-L', 'SLANT-R', 'FLAG-L', 'FLAG-R', 'COMEBACK', 'CROSS-L', 'CROSS-R', 'GO', 'BLOCK'];
-  assert.deepEqual(wrRoutes, expectedWRRoutes, 'wrRoutes should have all 8 pass routes plus BLOCK');
+  const expectedWRRoutes = ['SLANT-L', 'SLANT-R', 'FLAG-L', 'FLAG-R', 'COMEBACK', 'CROSS-L', 'CROSS-R', 'GO', 'FLY', 'BLOCK'];
+  assert.deepEqual(wrRoutes, expectedWRRoutes, 'wrRoutes should have all 9 pass routes plus BLOCK');
   assert.deepEqual(outsideRoutes, expectedWRRoutes, 'outsideRoutes should have all routes in route tree');
   assert.deepEqual(middleRoutes, expectedWRRoutes, 'middleRoutes should have all routes in route tree');
   assert.deepEqual(runningBackRoutes, ['FLAT', 'GO', 'ANGLE', 'BLOCK'], 'runningBackRoutes should include FLAT, GO, ANGLE, BLOCK');

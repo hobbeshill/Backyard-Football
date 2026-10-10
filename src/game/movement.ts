@@ -109,6 +109,41 @@ export function getRunDirectionSpeedFactor(inputY: number, attackDirection: numb
   return Math.max(0.70, Math.min(1.05, 0.90 + (inputY * attackDirection) * 0.25));
 }
 
+export interface ScreenEdgeTarget {
+  x: number;
+  y: number;
+  direction: 'UP' | 'DOWN' | 'LEFT' | 'RIGHT';
+}
+
+export function getScreenEdgeTargetPosition(
+  targetX: number,
+  targetY: number,
+  screenWidth: number,
+  screenHeight: number,
+  inset = 28
+): ScreenEdgeTarget | null {
+  if (targetX >= inset && targetX <= screenWidth - inset && targetY >= inset && targetY <= screenHeight - inset) {
+    return null;
+  }
+
+  const centerX = screenWidth / 2;
+  const centerY = screenHeight / 2;
+  const directionX = targetX - centerX;
+  const directionY = targetY - centerY;
+  const horizontalScale = Math.abs(directionX) > 0 ? (centerX - inset) / Math.abs(directionX) : Infinity;
+  const verticalScale = Math.abs(directionY) > 0 ? (centerY - inset) / Math.abs(directionY) : Infinity;
+  const scale = Math.min(horizontalScale, verticalScale);
+  const hitsHorizontalEdge = horizontalScale < verticalScale;
+
+  return {
+    x: centerX + directionX * scale,
+    y: centerY + directionY * scale,
+    direction: hitsHorizontalEdge
+      ? directionX < 0 ? 'LEFT' : 'RIGHT'
+      : directionY < 0 ? 'UP' : 'DOWN'
+  };
+}
+
 export function getUserDefenderSpeed(speedMultiplier = 1, stamina = 100, isTurbo = false, isOnFire = false): number {
   const blitzBoost = isOnFire ? 1.55 : (isTurbo ? 1.40 : 1.0);
   return 2.15 * 0.72 * GAME_SPEED_SCALE * USER_CONTROL_SPEED_MULTIPLIER *
@@ -400,7 +435,7 @@ export function updateRouteMovement(
     }
   }
 
-  const isDeepRoute = receiver.routeType === 'GO' || receiver.routeType === 'FLAG-L' || receiver.routeType === 'FLAG-R' || receiver.routeType === 'POST-L' || receiver.routeType === 'POST-R' || receiver.routeType === 'WHEEL';
+  const isDeepRoute = receiver.routeType === 'GO' || receiver.routeType === 'FLY' || receiver.routeType === 'FLAG-L' || receiver.routeType === 'FLAG-R' || receiver.routeType === 'POST-L' || receiver.routeType === 'POST-R' || receiver.routeType === 'WHEEL';
   const speed = (isDeepRoute
     ? (isChucked ? 1.40 : 1.95)
     : (isCutting ? (isChucked ? 1.15 : 1.55) : 1.40));
@@ -435,7 +470,11 @@ export function getRouteWaypoints(
     case 'COMEBACK': offsets = [[0, 160], [0, 120]]; break;
     case 'HITCH': offsets = [[0, 70], [0, 60]]; break;
     case 'WHEEL': offsets = [[x < fieldWidth / 2 ? -40 : 40, 40], [x < fieldWidth / 2 ? -40 : 40, 320]]; break;
-    case 'GO': offsets = [[0, 350]]; break;
+    case 'GO': case 'FLY': {
+      const depthToEndZone = attackDirection === -1 ? y - 100 : fieldHeight - 100 - y;
+      offsets = [[0, Math.max(0, depthToEndZone)]];
+      break;
+    }
     default: return [];
   }
   const margin = Math.ceil(receiver.radius * 1.95);
