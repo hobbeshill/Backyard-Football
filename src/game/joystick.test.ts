@@ -182,6 +182,112 @@ test('engine uses team roster profiles across possessions, team switches and ret
   }
 });
 
+test('online guest controls the selected P2 team on offense and defense', () => {
+  const originalRequest = globalThis.requestAnimationFrame;
+  const originalCancel = globalThis.cancelAnimationFrame;
+  let nextFrame: FrameRequestCallback = () => {};
+  globalThis.requestAnimationFrame = callback => { nextFrame = callback; return 1; };
+  globalThis.cancelAnimationFrame = () => {};
+  const handle: { game?: GameEngineHandle } = {};
+  const cleanup = mountFootballGame(createMockCanvas(), {
+    setP2OffPlayState: () => {}, setP2DefPlayState: () => {},
+    setDownDistanceText: () => {}, setActiveOffenseState: () => {},
+    setUserScore: () => {}, setCpuScore: () => {}, setP1DefPlayState: () => {},
+    setMomentumState: () => {}, setGameClockState: () => {}, showAnnouncement: () => {},
+    onEngineReady: game => { handle.game = game ?? undefined; }
+  });
+  try {
+    const game = handle.game;
+    assert.ok(game);
+    game.selectP1Team('FLORIDA');
+    game.selectP2Team('ARKANSAS');
+    game.setTacticalMode?.('ELITE');
+    game.setOnlineGuestControl?.(true);
+    assert.equal(game.p1Team, TEAMS.FLORIDA);
+    assert.equal(game.p2Team, TEAMS.ARKANSAS);
+
+    game.setPossessionForTest?.('P2');
+    game.resetDrill();
+    game.applyRemoteAction?.({ type: 'OFFENSE_PLAY', play: 'ARK_P1' });
+    game.applyRemoteAction?.({ type: 'START' });
+    assert.equal(game.activeOffense, 'P2');
+    assert.equal(game.phase, 'QB_DROP');
+    const quarterbackBefore = game.getQuarterbackScreenPositionForTest?.();
+    assert.ok(quarterbackBefore);
+    game.applyRemoteInput?.(1, 0, true);
+    let timestamp = 0;
+    for (let frame = 0; frame < 8; frame++) {
+      timestamp += 1000 / 60;
+      nextFrame(timestamp);
+    }
+    const quarterbackAfter = game.getQuarterbackScreenPositionForTest?.();
+    assert.ok(quarterbackAfter && quarterbackAfter.x > quarterbackBefore.x, 'Guest input should move the P2 quarterback');
+
+    game.applyRemoteInput?.(0, 0, false);
+    const offenseSnapshot = game.getNetworkSnapshot?.();
+    assert.ok(offenseSnapshot);
+    game.setPossessionForTest?.('P1');
+    game.applyNetworkSnapshot?.(JSON.parse(JSON.stringify(offenseSnapshot)));
+    assert.equal(game.activeOffense, 'P2');
+    assert.equal(game.p2Team.id, 'ARKANSAS');
+
+    game.setPossessionForTest?.('P1');
+    game.resetDrill();
+    game.applyRemoteAction?.({ type: 'DEFENSE_PLAY', play: 'ARK_P2' });
+    const defenseSnapshot = game.getNetworkSnapshot?.();
+    assert.ok(defenseSnapshot);
+    game.applyRemoteAction?.({ type: 'DEFENSE_PLAY', play: 'ARK_P3' });
+    game.applyNetworkSnapshot?.(JSON.parse(JSON.stringify(defenseSnapshot)));
+    assert.equal(game.p2DefPlay, 'ARK_P2', 'Snapshot restore must retain the guest-selected Tecmo defensive play');
+    game.applyRemoteAction?.({ type: 'DEFENDER', index: 6 });
+    const defender = game.getDefenders?.()[6];
+    assert.ok(defender);
+    const defenderXBefore = defender.x;
+    game.applyRemoteInput?.(1, 0, true);
+    game.startPlay?.();
+    for (let frame = 0; frame < 8; frame++) {
+      timestamp += 1000 / 60;
+      nextFrame(timestamp);
+    }
+    assert.ok(defender.x > defenderXBefore, 'Guest input should move the P2 defender while P1 has the ball');
+  } finally {
+    cleanup?.();
+    globalThis.requestAnimationFrame = originalRequest;
+    globalThis.cancelAnimationFrame = originalCancel;
+  }
+});
+
+test('Tecmo coverage mismatch affects defenders only after the offensive snap', () => {
+  const handle: { game?: GameEngineHandle } = {};
+  const cleanup = mountFootballGame(createMockCanvas(), {
+    setP2OffPlayState: () => {}, setP2DefPlayState: () => {},
+    setDownDistanceText: () => {}, setActiveOffenseState: () => {},
+    setUserScore: () => {}, setCpuScore: () => {}, setP1DefPlayState: () => {},
+    setMomentumState: () => {}, setGameClockState: () => {}, showAnnouncement: () => {},
+    onEngineReady: game => { handle.game = game ?? undefined; }
+  });
+  try {
+    const game = handle.game;
+    assert.ok(game);
+    game.selectP1Team('ALABAMA');
+    game.setOnlineGuestControl?.(true);
+    game.setPossessionForTest?.('P1');
+    game.resetDrill();
+    game.selectOffense('BAMA_R1');
+    game.applyRemoteAction?.({ type: 'DEFENSE_PLAY', play: 'BAMA_P1' });
+
+    const coverageDefenders = game.getDefenders?.().filter(defender => defender.type === 'DB' && !defender.passRusher);
+    assert.ok(coverageDefenders?.length);
+    assert.ok(coverageDefenders.every(defender => !defender.runRecognitionTimer), 'No current-play recognition before the snap');
+
+    game.startPlay?.();
+    assert.equal(game.getTecmoMatchup?.()?.level, 'MISMATCH_DROPPED_IN_COVERAGE');
+    assert.ok(coverageDefenders.every(defender => defender.runRecognitionTimer === 30));
+  } finally {
+    cleanup?.();
+  }
+});
+
 test('field is free of player badges while Pro pre-snap scouting preserves controls', () => {
   const originalRequest = globalThis.requestAnimationFrame;
   const originalCancel = globalThis.cancelAnimationFrame;

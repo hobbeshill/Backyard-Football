@@ -486,6 +486,7 @@ export default function App() {
       setP2TeamState(guestTeam);
       engineRef.current?.selectP1Team(hostTeam.id);
       engineRef.current?.selectP2Team(guestTeam.id);
+      engineRef.current?.setOnlineGuestControl?.(true);
       engineRef.current?.resetGame();
       setHasKickedOff(true);
       showAnnouncement(`ONLINE MATCH: ${hostTeam.nickname.toUpperCase()} VS ${guestTeam.nickname.toUpperCase()} 🏈`, '#00ffff', true);
@@ -513,6 +514,10 @@ export default function App() {
 
     const onGameSync = (state: any) => {
       if (onlineRoleRef.current === 'guest') {
+        if (state.snapshot) {
+          engineRef.current?.applyNetworkSnapshot?.(state.snapshot);
+          return;
+        }
         if (typeof state.userScore === 'number') setUserScore(state.userScore);
         if (typeof state.cpuScore === 'number') setCpuScore(state.cpuScore);
         if (state.downDistanceText) setDownDistanceText(state.downDistanceText);
@@ -550,6 +555,7 @@ export default function App() {
     if (onlineRole !== 'host') return;
     const interval = setInterval(() => {
       sendGameSync({
+        snapshot: engineRef.current?.getNetworkSnapshot?.(),
         userScore,
         cpuScore,
         downDistanceText,

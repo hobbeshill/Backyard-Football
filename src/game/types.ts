@@ -93,6 +93,7 @@ export interface Entity {
   coverageMistake?: 'BIT_UNDERNEATH' | 'STUMBLE' | 'BLOWN_ZONE' | null;
   mistakeTimer?: number;
   mistakeAnnounced?: boolean;
+  runRecognitionTimer?: number;
   dropStepTimer?: number;
   isOpenDeep?: boolean;
   isKicker?: boolean;

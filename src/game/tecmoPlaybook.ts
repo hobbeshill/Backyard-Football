@@ -35,6 +35,7 @@ export interface TecmoMatchupResult {
   runLaneSpacing: number; // 0.5 (constricted) to 1.8 (massive daylight)
   pocketHoldMultiplier: number; // 0.2 (instant collapse) to 1.6 (brick wall)
   freezeDefenseFrames: number; // for play-action bite
+  runRecognitionFrames?: number;
 }
 
 function passPlay(
@@ -361,6 +362,7 @@ export function evaluateTecmoMatchup(
     coverageTension: 0.5,
     runLaneSpacing: 1.80, // massive gaping running lanes!
     pocketHoldMultiplier: 1.3,
-    freezeDefenseFrames: 0
+    freezeDefenseFrames: 0,
+    runRecognitionFrames: 30
   };
 }

@@ -12,6 +12,7 @@ import type { Entity, TacticalMode } from './types';
 import { SIGNATURE_PLAYS, signatureOffenseIds, signatureDefenseIds } from './signaturePlays';
 import { PRO_OFFENSE_PLAYS, PRO_DEFENSE_PLAYS, evaluateProMatchup } from './proMode';
 import { chooseProDefensiveCall } from './ai';
+import { evaluateTecmoMatchup, getTecmoPlaysForTeam } from './tecmoPlaybook';
 
 test('each team gains exactly two exclusive executable calls per side in both modes', () => {
   const priorCounts: Record<string, readonly [number, number, number, number]> = {
@@ -193,6 +194,50 @@ function canvas(): HTMLCanvasElement {
     addEventListener() {}, removeEventListener() {}
   } as unknown as HTMLCanvasElement;
 }
+
+test('CPU keeps Tecmo defensive calls in the opposing six-play book across down transitions', () => {
+  const originalRequest = globalThis.requestAnimationFrame;
+  const originalCancel = globalThis.cancelAnimationFrame;
+  globalThis.requestAnimationFrame = () => 1;
+  globalThis.cancelAnimationFrame = () => {};
+  const holder: { game?: GameEngineHandle } = {};
+  const cleanup = mountFootballGame(canvas(), {
+    setP2OffPlayState() {}, setP2DefPlayState() {}, setDownDistanceText() {},
+    setActiveOffenseState() {}, setUserScore() {}, setCpuScore() {},
+    setP1DefPlayState() {}, setMomentumState() {}, setGameClockState() {}, showAnnouncement() {},
+    onEngineReady: game => { holder.game = game ?? undefined; }
+  });
+  try {
+    const game = holder.game;
+    assert.ok(game);
+    game.selectP1Team('ALABAMA');
+    game.selectP2Team('FLORIDA');
+    game.setPossessionForTest?.('P1');
+    game.resetDrill();
+    game.selectOffense('BAMA_R1');
+
+    const defensiveCalls = getTecmoPlaysForTeam('ALABAMA').map(play => play.id);
+    assert.ok(defensiveCalls.includes(game.p2DefPlay));
+    assert.ok(game.triggerPlayEnd);
+    game.triggerPlayEnd(900, 'TACKLE');
+    assert.equal(game.activeOffense, 'P1');
+    assert.ok(defensiveCalls.includes(game.p2DefPlay), 'The CPU must keep defending with a guessed Tecmo call after a down ends');
+
+    const runAgainstPass = evaluateTecmoMatchup('BAMA_R1', 'BAMA_P1', offensivePlaybook);
+    assert.equal(runAgainstPass.level, 'MISMATCH_DROPPED_IN_COVERAGE');
+    assert.equal(runAgainstPass.runLaneSpacing, 1.8);
+    assert.equal(runAgainstPass.runRecognitionFrames, 30);
+
+    const passAgainstRun = evaluateTecmoMatchup('BAMA_P1', 'BAMA_R1', offensivePlaybook);
+    assert.equal(passAgainstRun.level, 'MISMATCH_BIT_ON_RUN');
+    assert.equal(passAgainstRun.freezeDefenseFrames, 45);
+    assert.equal(passAgainstRun.runRecognitionFrames, undefined);
+  } finally {
+    cleanup?.();
+    globalThis.requestAnimationFrame = originalRequest;
+    globalThis.cancelAnimationFrame = originalCancel;
+  }
+});
 
 test('CPU actually selects both new plays and schemes for every team in both modes', () => {
   const originalRequest = globalThis.requestAnimationFrame;
