@@ -111,7 +111,6 @@ export default function App() {
   const [onlineError, setOnlineError] = useState('');
   const [onlineBusy, setOnlineBusy] = useState(false);
   const [copiedLobbyCode, setCopiedLobbyCode] = useState(false);
-  const [guestDefenderIndex, setGuestDefenderIndex] = useState(0);
   const [banner, setBanner] = useState<{
     text: string;
     color: string;
@@ -402,12 +401,19 @@ export default function App() {
       setP2TeamState,
       setGameClockState: (quarter, seconds) => setGameClockState({ quarter, seconds }),
       showAnnouncement,
+      onOnlineAction: action => {
+        if (onlineRoleRef.current === 'guest') sendGameAction(action);
+      },
+      onOnlineInput: (dx, dy, active) => {
+        if (onlineRoleRef.current === 'guest') sendGameInput({ dx, dy, active });
+      },
       onEngineReady: engine => {
         engineRef.current = engine;
         engine?.setTacticalMode?.('PRO');
       },
       onGameOver: (p1FinalScore, p2FinalScore, restored, boxScore) => {
         engineRef.current?.setOnlineGuestControl?.(false);
+        engineRef.current?.setOnlinePlayerSide?.('P1');
         engineRef.current?.applyRemoteInput?.(0, 0, false);
         engineRef.current?.applyLocalInput?.(0, 0, false);
         setFinishedGame({
@@ -490,6 +496,7 @@ export default function App() {
       engineRef.current?.selectP1Team(hostTeam.id);
       engineRef.current?.selectP2Team(guestTeam.id);
       engineRef.current?.setOnlineGuestControl?.(true);
+      engineRef.current?.setOnlinePlayerSide?.(onlineRoleRef.current === 'guest' ? 'P2' : 'P1');
       engineRef.current?.resetGame();
       setHasKickedOff(true);
       showAnnouncement(`ONLINE MATCH: ${hostTeam.nickname.toUpperCase()} VS ${guestTeam.nickname.toUpperCase()} 🏈`, '#00ffff', true);
@@ -533,8 +540,13 @@ export default function App() {
 
     const onPeerDisconnected = (data: { message: string }) => {
       engineRef.current?.setOnlineGuestControl?.(false);
+      engineRef.current?.setOnlinePlayerSide?.('P1');
       engineRef.current?.applyRemoteInput?.(0, 0, false);
       engineRef.current?.applyLocalInput?.(0, 0, false);
+      setOnlineLobby(null);
+      setOnlineRole(null);
+      onlineRoleRef.current = null;
+      setShowOnlineLobby(false);
       showAnnouncement(data?.message || 'Online opponent disconnected', '#ff4444', true);
       setOnlineError(data?.message || 'Opponent disconnected');
     };
@@ -616,6 +628,7 @@ export default function App() {
   const handleLeaveOnlineLobby = () => {
     leaveLobby();
     engineRef.current?.setOnlineGuestControl?.(false);
+    engineRef.current?.setOnlinePlayerSide?.('P1');
     engineRef.current?.applyRemoteInput?.(0, 0, false);
     engineRef.current?.applyLocalInput?.(0, 0, false);
     setOnlineLobby(null);
@@ -626,20 +639,6 @@ export default function App() {
 
   const sendRemoteAction = (action: any) => {
     sendGameAction(action);
-  };
-
-  const sendRemoteInput = (dx: number, dy: number, active: boolean) => {
-    sendGameInput({ dx, dy, active });
-  };
-
-  const sendOnlineAction = (action: any) => {
-    if (onlineRole === 'guest') sendRemoteAction(action);
-    else engineRef.current?.applyRemoteAction?.(action);
-  };
-
-  const sendOnlineInput = (dx: number, dy: number, active: boolean) => {
-    if (onlineRole === 'guest') sendRemoteInput(dx, dy, active);
-    else engineRef.current?.applyLocalInput?.(dx, dy, active);
   };
 
   const selectOnlinePlay = (play: string, onOffense: boolean) => {
@@ -931,17 +930,13 @@ export default function App() {
   const onlineSelectedPlay = onlineRole === 'guest'
     ? isOnlinePlayerOnOffense ? p2OffPlayState : p2DefPlayState
     : isOnlinePlayerOnOffense ? p1OffPlayState : p1DefPlayState;
-  const onlineAvailablePlays = getTecmoPlaysForTeam(
-    isOnlinePlayerOnOffense ? onlinePlayerTeam.id : onlineOpponentTeam.id
-  );
-
   useEffect(() => {
     if (phaseState !== 'PRE_SNAP') {
       playbookCallSelectedRef.current = false;
     }
-    const canShowPlaybook = !onlineRole && hasKickedOff && phaseState === 'PRE_SNAP' &&
+    const canShowPlaybook = hasKickedOff && phaseState === 'PRE_SNAP' &&
       !isKickoffActive &&
-      !showPauseMenu && !showTeamModal && !showTutorial && !showSettings && !finishedGame;
+      !showPauseMenu && !showTeamModal && !showOnlineLobby && !showTutorial && !showSettings && !finishedGame;
     if (!canShowPlaybook) {
       setShowPlaybookCards(false);
       return;
@@ -949,7 +944,7 @@ export default function App() {
     if (!playbookCallSelectedRef.current) {
       setShowPlaybookCards(true);
     }
-  }, [finishedGame, hasKickedOff, isKickoffActive, onlineRole, phaseState, showPauseMenu, showTeamModal, showTutorial, showSettings]);
+  }, [finishedGame, hasKickedOff, isKickoffActive, onlineRole, phaseState, showOnlineLobby, showPauseMenu, showTeamModal, showTutorial, showSettings]);
 
   return (
     <div className="relative w-screen min-h-[100dvh] h-[100dvh] overflow-hidden flex flex-col items-center justify-between pt-1 pb-0 bg-[#030704] text-white font-mono select-none">
@@ -977,7 +972,9 @@ export default function App() {
           </span>
           <span className="text-neutral-300 truncate text-right">
             {isKickoffActive
-              ? 'Touch Field or Joystick to Kick Off • WASD/Arrows to Steer Return'
+              ? onlineRole
+                ? kickoffSide.kicking === onlinePlayerSide ? 'Touch the field to kick off' : 'Waiting for the kickoff'
+                : 'Touch Field or Joystick to Kick Off • WASD/Arrows to Steer Return'
               : onlineRole
                 ? (activeOffenseState === onlinePlayerSide
                     ? 'Choose your call • Use online controls to start'
@@ -1167,6 +1164,26 @@ export default function App() {
         </div>
       )}
 
+      {isUserPreSnapPhase && onlineRole && !isKickoffActive && !showPauseMenu && (
+        <div className="w-full max-w-[430px] px-2 py-1 mb-0.5 z-20 shrink-0">
+          <button
+            type="button"
+            onClick={() => setShowPlaybookCards(true)}
+            className={`flex w-full items-center justify-between gap-2 rounded-lg border px-3 py-1.5 text-left text-[0.62rem] shadow-lg ${
+              isOnlinePlayerOnOffense
+                ? 'border-amber-500/60 bg-amber-950/80 text-amber-200'
+                : 'border-red-500/60 bg-red-950/80 text-red-200'
+            }`}
+            title={isOnlinePlayerOnOffense ? 'Choose your offensive play' : 'Choose your defensive call'}
+          >
+            <span className="truncate font-black uppercase">
+              {isOnlinePlayerOnOffense ? 'YOUR PLAY' : 'YOUR DEFENSE'}: {offensivePlaybook[onlineSelectedPlay]?.name ?? onlineSelectedPlay}
+            </span>
+            <span className="shrink-0 text-[9px] font-bold underline">CHANGE</span>
+          </button>
+        </div>
+      )}
+
       {/* 4th Down Special Teams Punt / Field Goal Action Controls */}
       {!onlineRole && ((showPuntAction && p1OffPlayState !== 'PUNT' && p1OffPlayState !== 'FIELD_GOAL') ||
         (isUserPreSnapPhase && !isKickoffActive && activeOffenseState === 'P1' && p1OffPlayState === 'FIELD_GOAL' && fgMeterState !== null)) && (
@@ -1341,141 +1358,6 @@ export default function App() {
                 </div>
               )}
               <div>{banner.text}</div>
-            </div>
-          )}
-        </div>
-      )}
-
-
-
-      {onlineRole && hasKickedOff && !showPauseMenu && (
-        <div
-          className="fixed inset-x-2 bottom-2 z-[90] mx-auto w-[min(96vw,430px)] max-h-[40dvh] overflow-y-auto rounded-xl border border-cyan-300/50 bg-[#07110f]/95 p-3 text-white shadow-2xl backdrop-blur"
-          style={{ bottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}
-        >
-          <div className="flex items-center justify-between gap-2 border-b border-white/10 px-1 pb-2">
-            <span className="truncate text-[10px] font-black uppercase text-cyan-200">
-              Online {onlineRole} • {isOnlinePlayerOnOffense ? 'Your Offense' : 'Your Defense'}
-            </span>
-            <span className="shrink-0 text-[10px] font-bold text-neutral-400">{phaseState.replace('_', ' ')}</span>
-          </div>
-
-          {phaseState === 'PRE_SNAP' && !isKickoffActive && (
-            <div className="mt-2 flex gap-2">
-              <select
-                aria-label={isOnlinePlayerOnOffense ? 'Choose offensive play' : 'Choose defensive scheme'}
-                value={onlineSelectedPlay}
-                onChange={event => selectOnlinePlay(event.target.value, isOnlinePlayerOnOffense)}
-                className="min-w-0 flex-1 rounded-lg border border-white/15 bg-[#12211f] px-2 py-2 text-xs text-white"
-              >
-                {onlineAvailablePlays.map(play => (
-                  <option key={play.id} value={play.id}>
-                    {play.name} ({play.isRun ? 'RUN' : 'PASS'})
-                  </option>
-                ))}
-              </select>
-              {isOnlinePlayerOnOffense && (
-                <button
-                  type="button"
-                  onClick={() => sendOnlineAction({ type: 'START' })}
-                  className="shrink-0 rounded-lg bg-cyan-400 px-4 py-2 text-xs font-black uppercase text-[#061014] active:scale-95 cursor-pointer"
-                >
-                  Snap
-                </button>
-              )}
-            </div>
-          )}
-
-          {isKickoffActive && kickoffSide.kicking === onlinePlayerSide && (
-            <button
-              type="button"
-              onClick={() => sendOnlineAction({ type: 'START' })}
-              className="mt-2 w-full rounded-lg bg-cyan-400 px-4 py-2.5 text-xs font-black uppercase text-[#061014] active:scale-95 cursor-pointer"
-            >
-              Start Kickoff
-            </button>
-          )}
-
-          {phaseState !== 'PRE_SNAP' && !isKickoffActive && (
-            <div className="mt-2 flex items-center justify-between gap-3">
-              {/* Shared online directional controls */}
-              <div className="grid grid-cols-3 gap-1">
-                <span />
-                <button
-                  type="button"
-                  aria-label="Move up"
-                  onPointerDown={event => { event.preventDefault(); sendOnlineInput(0, -1, true); }}
-                  onPointerUp={() => sendOnlineInput(0, 0, false)}
-                  onPointerCancel={() => sendOnlineInput(0, 0, false)}
-                  className="h-9 w-9 rounded-lg border border-white/15 bg-white/10 text-base font-black active:bg-cyan-500/40"
-                >↑</button>
-                <span />
-                <button
-                  type="button"
-                  aria-label="Move left"
-                  onPointerDown={event => { event.preventDefault(); sendOnlineInput(-1, 0, true); }}
-                  onPointerUp={() => sendOnlineInput(0, 0, false)}
-                  onPointerCancel={() => sendOnlineInput(0, 0, false)}
-                  className="h-9 w-9 rounded-lg border border-white/15 bg-white/10 text-base font-black active:bg-cyan-500/40"
-                >←</button>
-                <button
-                  type="button"
-                  aria-label="Move down"
-                  onPointerDown={event => { event.preventDefault(); sendOnlineInput(0, 1, true); }}
-                  onPointerUp={() => sendOnlineInput(0, 0, false)}
-                  onPointerCancel={() => sendOnlineInput(0, 0, false)}
-                  className="h-9 w-9 rounded-lg border border-white/15 bg-white/10 text-base font-black active:bg-cyan-500/40"
-                >↓</button>
-                <button
-                  type="button"
-                  aria-label="Move right"
-                  onPointerDown={event => { event.preventDefault(); sendOnlineInput(1, 0, true); }}
-                  onPointerUp={() => sendOnlineInput(0, 0, false)}
-                  onPointerCancel={() => sendOnlineInput(0, 0, false)}
-                  className="h-9 w-9 rounded-lg border border-white/15 bg-white/10 text-base font-black active:bg-cyan-500/40"
-                >→</button>
-              </div>
-
-              {/* Online offense and defense actions */}
-              <div className="flex flex-1 flex-wrap justify-end gap-1.5">
-                {phaseState === 'QB_DROP' && isOnlinePlayerOnOffense && [0, 1, 2, 3].map(target => (
-                  <button
-                    key={target}
-                    type="button"
-                    onClick={() => sendOnlineAction({ type: 'THROW', target })}
-                    className="rounded-lg border border-amber-300/40 bg-amber-300/10 px-2.5 py-2 text-[10px] font-black uppercase text-amber-100 active:bg-amber-400 active:text-black cursor-pointer"
-                  >
-                    Pass {target + 1}
-                  </button>
-                ))}
-                {!isOnlinePlayerOnOffense && phaseState !== 'THROWN' && [0, 1, 2, 3, 4, 5, 6].map(index => (
-                  <button
-                    key={index}
-                    type="button"
-                    aria-pressed={guestDefenderIndex === index}
-                    onClick={() => {
-                      setGuestDefenderIndex(index);
-                      sendOnlineAction({ type: 'DEFENDER', index });
-                    }}
-                    className={`rounded-lg border px-2 py-1.5 text-[10px] font-black cursor-pointer ${
-                      guestDefenderIndex === index
-                        ? 'border-cyan-300 bg-cyan-400/20 text-cyan-100'
-                        : 'border-white/10 bg-white/5 text-neutral-300'
-                    }`}
-                  >
-                    D{index + 1}
-                  </button>
-                ))}
-                {!isOnlinePlayerOnOffense && (
-                  <button
-                    type="button"
-                    onClick={() => sendOnlineAction({ type: phaseState === 'THROWN' ? 'SWAT' : 'DIVE' })}
-                    className="rounded-lg bg-[#bd5635] px-3.5 py-2 text-[10px] font-black uppercase text-white hover:bg-[#d46845] active:scale-95 cursor-pointer"
-                  >
-                    {phaseState === 'THROWN' ? 'Swat' : 'Dive'}
-                  </button>
-                )}
-              </div>
             </div>
           )}
         </div>
@@ -2493,24 +2375,29 @@ export default function App() {
 
       {showPlaybookCards && (
         <TecmoPlaybookCards
-          teamId={p1TeamState.id}
-          opposingTeamId={p2TeamState.id}
-          isDefense={activeOffenseState === 'P2'}
-          activeOffensePlay={p1OffPlayState}
-          activeDefensePlay={p1DefPlayState}
+          teamId={onlineRole ? onlinePlayerTeam.id : p1TeamState.id}
+          opposingTeamId={onlineRole ? onlineOpponentTeam.id : p2TeamState.id}
+          isDefense={onlineRole ? !isOnlinePlayerOnOffense : activeOffenseState === 'P2'}
+          activeOffensePlay={onlineRole && isOnlinePlayerOnOffense ? onlineSelectedPlay : p1OffPlayState}
+          activeDefensePlay={onlineRole && !isOnlinePlayerOnOffense ? onlineSelectedPlay : p1DefPlayState}
           downDistanceText={downDistanceText}
           canPunt={is4thDown}
           fieldGoalDistance={engineRef.current?.getFieldGoalDistance?.()}
           onSelectPlay={(playId) => {
-            if (activeOffenseState === 'P1') {
+            if (onlineRole) {
+              selectOnlinePlay(playId, isOnlinePlayerOnOffense);
+            } else if (activeOffenseState === 'P1') {
               handleSelectOffensePlay(playId);
             } else {
               handleSelectDefensePlay(playId);
             }
           }}
-          onSelectSpecialTeams={activeOffenseState === 'P1' ? (playId) => {
-            handleSelectOffensePlay(playId);
-          } : undefined}
+          onSelectSpecialTeams={onlineRole
+            ? isOnlinePlayerOnOffense ? playId => selectOnlinePlay(playId, true) : undefined
+            : activeOffenseState === 'P1' ? playId => {
+              handleSelectOffensePlay(playId);
+            } : undefined
+          }
           onClose={() => setShowPlaybookCards(false)}
         />
       )}

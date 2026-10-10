@@ -864,12 +864,15 @@ test('online P2 returner is controlled by guest input, not the opposing defense'
   let timestamp = 0;
   globalThis.requestAnimationFrame = callback => { nextFrame = callback; return 1; };
   globalThis.cancelAnimationFrame = () => {};
+  const canvas = createMockCanvas();
   const handle: { game?: GameEngineHandle } = {};
-  const cleanup = mountFootballGame(createMockCanvas(), {
+  const onlineInputs: Array<{ dx: number; dy: number; active: boolean }> = [];
+  const cleanup = mountFootballGame(canvas, {
     setP2OffPlayState: () => {}, setP2DefPlayState: () => {},
     setDownDistanceText: () => {}, setActiveOffenseState: () => {},
     setUserScore: () => {}, setCpuScore: () => {}, setP1DefPlayState: () => {},
     setMomentumState: () => {}, setGameClockState: () => {}, showAnnouncement: () => {},
+    onOnlineInput: (dx, dy, active) => { onlineInputs.push({ dx, dy, active }); },
     onEngineReady: game => { handle.game = game ?? undefined; }
   });
   const advanceFrame = () => {
@@ -900,20 +903,134 @@ test('online P2 returner is controlled by guest input, not the opposing defense'
     snapshot.isSpecialTeamsReturn = true;
     snapshot.specialTeamsReturnType = 'KICKOFF';
     game.setOnlineGuestControl?.(true);
+    game.setOnlinePlayerSide?.('P1');
     game.applyNetworkSnapshot?.(snapshot);
 
     assert.equal(game.getControlledDefender?.(), null, 'The P2 returner must not be exposed as a P1 defender');
     const returner = game.getDefenders?.().find(player => player.isReturner);
     assert.ok(returner);
     const xBeforeInput = returner.x;
-    game.applyRemoteInput?.(1, 0, true);
+    game.applyLocalInput?.(1, 0, true);
     advanceFrame();
     advanceFrame();
-    assert.ok(returner.x > xBeforeInput, 'Guest remote input should steer the P2 returner');
+    assert.ok(returner.x - xBeforeInput < 0.5, 'P1 must not steer the P2 returner');
+
+    game.applyLocalInput?.(0, 0, false);
+    game.setOnlinePlayerSide?.('P2');
+    canvas._listeners.get('pointerdown')?.({
+      clientX: 100, clientY: 220, pointerId: 7, preventDefault: () => {}
+    } as PointerEvent);
+    canvas._listeners.get('pointermove')?.({
+      clientX: 140, clientY: 220, pointerId: 7
+    } as PointerEvent);
+    advanceFrame();
+    advanceFrame();
+    assert.ok(returner.x > xBeforeInput, 'Guest native input should steer the P2 returner');
+    assert.ok(onlineInputs.some(input => input.active && input.dx > 0.5), 'Guest canvas movement should be sent to the host');
+    canvas._listeners.get('pointerup')?.({ clientX: 140, clientY: 220, pointerId: 7 } as PointerEvent);
+    assert.equal(onlineInputs.at(-1)?.active, false, 'Guest input release should clear host movement');
   } finally {
     cleanup?.();
     globalThis.requestAnimationFrame = originalRequest;
     globalThis.cancelAnimationFrame = originalCancel;
+  }
+});
+
+test('online kickoff can only be started by the locally assigned kicking team', () => {
+  const originalRequest = globalThis.requestAnimationFrame;
+  const originalCancel = globalThis.cancelAnimationFrame;
+  let nextFrame: FrameRequestCallback = () => {};
+  globalThis.requestAnimationFrame = callback => { nextFrame = callback; return 1; };
+  globalThis.cancelAnimationFrame = () => {};
+  const canvas = createMockCanvas();
+  const handle: { game?: GameEngineHandle } = {};
+  const actions: Array<{ type: string }> = [];
+  const cleanup = mountFootballGame(canvas, {
+    setP2OffPlayState: () => {}, setP2DefPlayState: () => {},
+    setDownDistanceText: () => {}, setActiveOffenseState: () => {},
+    setUserScore: () => {}, setCpuScore: () => {}, setP1DefPlayState: () => {},
+    setMomentumState: () => {}, setGameClockState: () => {}, showAnnouncement: () => {},
+    onOnlineAction: action => { actions.push(action); },
+    onEngineReady: game => { handle.game = game ?? undefined; }
+  });
+  try {
+    const game = handle.game;
+    assert.ok(game);
+    game.setTacticalMode?.('PRO');
+    game.setOnlineGuestControl?.(true);
+    game.setOnlinePlayerSide?.('P1');
+    canvas._listeners.get('pointerdown')?.({
+      clientX: 100, clientY: 220, pointerId: 1, preventDefault: () => {}
+    } as PointerEvent);
+    assert.equal(game.phase, 'KICKOFF', 'The receiving player cannot start the opponent kickoff');
+    assert.equal(game.isJoystickActiveForTest?.(), false, 'The receiving player gets no kickoff steering input');
+    assert.equal(actions.length, 0);
+
+    game.setOnlinePlayerSide?.('P2');
+    canvas._listeners.get('pointerdown')?.({
+      clientX: 100, clientY: 220, pointerId: 2, preventDefault: () => {}
+    } as PointerEvent);
+    assert.equal(game.phase, 'THROWN', 'The P2 kicker can start the kickoff');
+    assert.deepEqual(actions, [{ type: 'START' }], 'Native kickoff start is relayed once');
+    assert.equal(game.isJoystickActiveForTest?.(), false, 'Starting a kick never gives control of the receiving returner');
+
+    game.setPossessionForTest?.('P2');
+    game.resetDrill();
+    game.startPlay?.();
+    assert.ok(game.phase === 'QB_DROP' || game.phase === 'HANDOFF', 'The guest can start its own offense');
+    assert.equal(actions.length, 2);
+
+    game.setPossessionForTest?.('P1');
+    game.resetDrill();
+    game.startPlay?.();
+    assert.equal(game.phase, 'PRE_SNAP', 'The guest cannot start the host offense');
+    assert.equal(actions.length, 2);
+  } finally {
+    cleanup?.();
+    globalThis.requestAnimationFrame = originalRequest;
+    globalThis.cancelAnimationFrame = originalCancel;
+  }
+});
+
+test('native guest start begins only the guest offense', () => {
+  const canvas = createMockCanvas();
+  const handle: { game?: GameEngineHandle } = {};
+  const actions: Array<{ type: string }> = [];
+  const cleanup = mountFootballGame(canvas, {
+    setP2OffPlayState: () => {}, setP2DefPlayState: () => {},
+    setDownDistanceText: () => {}, setActiveOffenseState: () => {},
+    setUserScore: () => {}, setCpuScore: () => {}, setP1DefPlayState: () => {},
+    setMomentumState: () => {}, setGameClockState: () => {}, showAnnouncement: () => {},
+    onOnlineAction: action => { actions.push(action); },
+    onEngineReady: game => { handle.game = game ?? undefined; }
+  });
+  try {
+    const game = handle.game;
+    assert.ok(game);
+    game.setOnlineGuestControl?.(true);
+    game.setOnlinePlayerSide?.('P2');
+    game.selectP2Team('ARKANSAS');
+    game.setPossessionForTest?.('P2');
+    game.resetDrill();
+    game.applyRemoteAction?.({ type: 'OFFENSE_PLAY', play: 'ARK_P1' });
+    game.startPlay?.();
+    assert.equal(game.phase, 'QB_DROP');
+    assert.deepEqual(actions, [{ type: 'START' }]);
+    const receiver = game.getReceiverScreenPositionForTest?.(0);
+    assert.ok(receiver);
+    canvas._listeners.get('pointerdown')?.({
+      clientX: receiver.x, clientY: receiver.y, pointerId: 4, preventDefault: () => {}
+    } as PointerEvent);
+    assert.equal(game.phase, 'THROWN', 'The native guest canvas can throw to a receiver');
+    assert.deepEqual(actions.map(action => action.type), ['START', 'THROW']);
+
+    game.setPossessionForTest?.('P1');
+    game.resetDrill();
+    game.startPlay?.();
+    assert.equal(game.phase, 'PRE_SNAP', 'Guest native start must not start the host offense');
+    assert.deepEqual(actions.map(action => action.type), ['START', 'THROW']);
+  } finally {
+    cleanup?.();
   }
 });
 

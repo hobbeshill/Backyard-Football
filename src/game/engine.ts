@@ -85,6 +85,7 @@ export interface GameEngineHandle {
   applyRemoteAction?: (action: RemoteGameAction) => void;
   applyRemoteInput?: (dx: number, dy: number, active: boolean) => void;
   setOnlineGuestControl?: (enabled: boolean) => void;
+  setOnlinePlayerSide?: (side: 'P1' | 'P2') => void;
   applyLocalInput?: (dx: number, dy: number, active: boolean) => void;
   getNetworkSnapshot?: () => Record<string, any>;
   applyNetworkSnapshot?: (snapshot: Record<string, any>) => void;
@@ -96,6 +97,7 @@ export type RemoteGameAction =
   | { type: 'OFFENSE_PLAY'; play: string }
   | { type: 'DEFENSE_PLAY'; play: string }
   | { type: 'THROW'; target: number }
+  | { type: 'JUKE'; direction: -1 | 1 }
   | { type: 'DEFENDER'; index: number }
   | { type: 'DIVE' }
   | { type: 'SWAT' }
@@ -162,8 +164,11 @@ export function getCameraYForAction(focusY: number, viewHeight: number, pitch: n
 
 export interface GameEngineCallbacks {
   onCameraPerspectiveChange?: (mode: CameraPerspectiveMode) => void;
+  onOnlineAction?: (action: RemoteGameAction) => void;
+  onOnlineInput?: (dx: number, dy: number, active: boolean) => void;
   setP2OffPlayState: (key: string) => void;
   setP2DefPlayState: (key: string) => void;
+    setOnlinePlayerSide?: (side: 'P1' | 'P2') => void;
   setDownDistanceText: (text: string) => void;
   setActiveOffenseState: (side: string) => void;
   setUserScore: (score: number) => void;
@@ -404,6 +409,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   let activeOffense: 'P1' | 'P2' = 'P1';
   let activeDefense: 'P1' | 'P2' = 'P2';
   let onlineGuestControlsP2 = false;
+  let onlinePlayerSide: 'P1' | 'P2' = 'P1';
 
   let p1Team: TeamProfile = getTeam('ALABAMA');
   let p2Team: TeamProfile = getTeam('GEORGIA');
@@ -605,7 +611,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       p2DefPlay = allDefensivePlaybook[state.p2DefPlay] || isTecmoCall(state.p2DefPlay) ? state.p2DefPlay : 'COVER2';
       cpuPreSnapTimer = state.cpuPreSnapTimer; isAllBlocking = state.isAllBlocking;
       openingReceivingTeam = state.openingReceivingTeam; isKickoffPhase = state.isKickoffPhase;
-      requiresProPlaybookSelection = tacticalMode === 'PRO' && phase === 'PRE_SNAP' && !isKickoffPhase;
+      requiresProPlaybookSelection = tacticalMode === 'PRO' && phase === 'PRE_SNAP' && !isKickoffPhase && !onlineGuestControlsP2;
       kickoffKickingTeam = state.kickoffKickingTeam; kickoffReceivingTeam = state.kickoffReceivingTeam;
       kickMeterPower = state.kickMeterPower; kickMeterDirection = state.kickMeterDirection;
       cpuKickoffDelayTimer = state.cpuKickoffDelayTimer; isSpecialTeamsReturn = state.isSpecialTeamsReturn;
@@ -881,6 +887,14 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
   function isUserTeam(team: 'P1' | 'P2' | undefined): boolean {
     return team === 'P1' || (onlineGuestControlsP2 && team === 'P2');
+  }
+
+  function isLocalOffense(): boolean {
+    return activeOffense === onlinePlayerSide;
+  }
+
+  function isLocalDefense(): boolean {
+    return activeDefense === onlinePlayerSide;
   }
 
   function getPlayMatchup(playKey: string, defenseKey: string) {
@@ -2702,7 +2716,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     formationTransitions = [];
     if (gameOver || quarterBreakRemainingMs > 0) return;
     phase = 'PRE_SNAP';
-    requiresProPlaybookSelection = tacticalMode === 'PRO' && !isKickoffPhase;
+    requiresProPlaybookSelection = tacticalMode === 'PRO' && !isKickoffPhase && !onlineGuestControlsP2;
     playEnding = false;
     isInterceptionReturn = false;
     isAllBlocking = false;
@@ -3350,6 +3364,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       onlineGuestControlsP2 = enabled;
       remoteJoystick = { dx: 0, dy: 0, active: false };
     },
+    setOnlinePlayerSide: side => { onlinePlayerSide = side; },
     applyLocalInput: (dx, dy, active) => {
       joystick.active = active;
       joystick.pointerId = null;
@@ -3591,21 +3606,30 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     }
   }
 
-  function startReadyKickoff(): void {
+  function startReadyKickoff(isRemote = false): void {
+    const isRemoteGuestStart = isRemote && onlineGuestControlsP2 && onlinePlayerSide === 'P1' && kickoffKickingTeam === 'P2';
+    if (onlineGuestControlsP2 && kickoffKickingTeam !== onlinePlayerSide && !isRemoteGuestStart) return;
+    if (onlineGuestControlsP2 && onlinePlayerSide === 'P2' && !isRemote) {
+      callbacks.onOnlineAction?.({ type: 'START' });
+    }
     const kickoffPower = kickoffKickingTeam === 'P1'
       ? kickMeterPower
       : 0.85 + Math.random() * 0.12;
     executeKickoff(kickoffPower);
   }
 
-  function startReadyPlay(): void {
+  function startReadyPlay(isRemote = false): void {
     if (phase !== 'PRE_SNAP') return;
     if (requiresProPlaybookSelection) return;
-    if (activeDefense === 'P1' && !(onlineGuestControlsP2 && activeOffense === 'P2')) {
+    if (!onlineGuestControlsP2 && activeDefense === 'P1') {
       startCpuPlay();
       return;
     }
-    if (!isUserOffense()) return;
+    const isRemoteGuestStart = isRemote && onlineGuestControlsP2 && onlinePlayerSide === 'P1' && activeOffense === 'P2';
+    if (activeOffense !== onlinePlayerSide && !isRemoteGuestStart) return;
+    if (onlineGuestControlsP2 && onlinePlayerSide === 'P2' && !isRemote) {
+      callbacks.onOnlineAction?.({ type: 'START' });
+    }
 
     const play = offensivePlaybook[activeOffense === 'P1' ? p1OffPlay : p2OffPlay];
     if (play?.type === 'PUNT') {
@@ -3663,7 +3687,12 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   };
 
   function activateTurbo(active: boolean): void {
+    if (onlineGuestControlsP2 && onlinePlayerSide === 'P2' && !isLocalDefense()) return;
+    const changed = userTurboActive !== active;
     userTurboActive = active;
+    if (changed && onlineGuestControlsP2 && onlinePlayerSide === 'P2' && isLocalDefense()) {
+      callbacks.onOnlineAction?.({ type: 'TURBO', active });
+    }
     const defender = getControlledDefender();
     if (defender) {
       defender.isTurboActive = active && (userTurboMeter > 0 || Boolean(defender.isOnFire));
@@ -3748,6 +3777,9 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     if (isPaused || !isUserDefense()) return;
     const defender = getControlledDefender();
     if (!defender || (defender.diveCooldownTimer || 0) > 0) return;
+    if (onlineGuestControlsP2 && onlinePlayerSide === 'P2') {
+      callbacks.onOnlineAction?.({ type: 'DIVE' });
+    }
     defender.diveCooldownTimer = 45;
 
     let dirX = defender.vx || 0;
@@ -3816,6 +3848,9 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     if (isPaused || !isUserDefense() || phase !== 'THROWN' || !ball) return;
     const defender = getControlledDefender();
     if (!defender) return;
+    if (onlineGuestControlsP2 && onlinePlayerSide === 'P2') {
+      callbacks.onOnlineAction?.({ type: 'SWAT' });
+    }
 
     defender.swatAttemptTimer = 16;
     const distToBall = Math.hypot(defender.x - ball.x, defender.y - ball.y);
@@ -3862,18 +3897,21 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     if (key === 'shift') {
       activateTurbo(true);
     }
+    publishLocalOnlineInput();
     if ((isDirectionKey || key === ' ') && !e.repeat) {
       if (phase === 'KICKOFF') {
+        if (onlineGuestControlsP2 && kickoffKickingTeam !== onlinePlayerSide) return;
         startReadyKickoff();
         return;
       }
       if (phase === 'PRE_SNAP' && !isKickoffPhase &&
           (!options.tutorial || [1, 5, 8].includes(tutorialStep))) {
+        if (onlineGuestControlsP2 && !isLocalOffense()) return;
         startReadyPlay();
         return;
       }
     }
-    if (activeDefense === 'P1') {
+    if (isLocalDefense() || (!onlineGuestControlsP2 && activeDefense === 'P1')) {
       if ((key === 'c' || key === 'tab' || key === 'q') && !e.repeat) {
         e.preventDefault();
         if (phase === 'PRE_SNAP') {
@@ -3907,13 +3945,16 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     }
 
     // Deliberate keyboard juke input on J, E, or Spacebar during ball carrier running
-    if ((key === 'j' || key === 'e' || key === ' ') && phase === 'RUNNING' && activeEntity && activeOffense === 'P1') {
+    if ((key === 'j' || key === 'e' || key === ' ') && phase === 'RUNNING' && activeEntity && isLocalOffense()) {
       if ((activeEntity.jukeCooldownTimer || 0) <= 0) {
         const jukeSign = keysDown.left ? -1 : (keysDown.right ? 1 : (activeEntity.vx && activeEntity.vx < 0 ? -1 : 1));
         activeEntity.jukeTimer = 10;
         activeEntity.jukeVx = jukeSign * 1.35;
         activeEntity.jukeCooldownTimer = 35;
         activeEntity.vx = 0;
+        if (onlineGuestControlsP2 && onlinePlayerSide === 'P2') {
+          callbacks.onOnlineAction?.({ type: 'JUKE', direction: jukeSign });
+        }
         screenShakeTimer = 8;
         sounds.playJuke();
         showAnnouncement(jukeSign > 0 ? "JUKE RIGHT! 💨" : "JUKE LEFT! 💨", "#00ffff");
@@ -3930,6 +3971,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     if (key === 'shift') {
       activateTurbo(false);
     }
+    publishLocalOnlineInput();
   };
 
   if (typeof window !== 'undefined') {
@@ -3942,14 +3984,35 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     remoteJoystick = { dx, dy, active };
   }
 
+  function publishLocalOnlineInput(): void {
+    if (!onlineGuestControlsP2 || onlinePlayerSide !== 'P2') return;
+    let dx = joystick.active ? joystick.inputX : 0;
+    let dy = joystick.active ? joystick.inputY : 0;
+    if (keysDown.left) dx -= 1;
+    if (keysDown.right) dx += 1;
+    if (keysDown.up) dy -= 1;
+    if (keysDown.down) dy += 1;
+    const magnitude = Math.hypot(dx, dy);
+    if (magnitude > 1) {
+      dx /= magnitude;
+      dy /= magnitude;
+    }
+    callbacks.onOnlineInput?.(
+      dx,
+      dy,
+      joystick.active || keysDown.left || keysDown.right || keysDown.up || keysDown.down
+    );
+  }
+
   function getEffectiveJoystickInput(useRemoteInput = false): { x: number; y: number; active: boolean } {
-    let x = useRemoteInput
+    const shouldUseRemote = useRemoteInput && onlinePlayerSide === 'P1';
+    let x = shouldUseRemote
       ? remoteJoystick.active ? remoteJoystick.dx : 0
       : joystick.active ? joystick.inputX : 0;
-    let y = useRemoteInput
+    let y = shouldUseRemote
       ? remoteJoystick.active ? remoteJoystick.dy : 0
       : joystick.active ? joystick.inputY : 0;
-    if (!useRemoteInput) {
+    if (!shouldUseRemote) {
       if (keysDown.left) x -= 1;
       if (keysDown.right) x += 1;
       if (keysDown.up) y -= 1;
@@ -3963,7 +4026,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     return {
       x,
       y,
-      active: useRemoteInput
+      active: shouldUseRemote
         ? remoteJoystick.active
         : joystick.active || keysDown.left || keysDown.right || keysDown.up || keysDown.down
     };
@@ -4016,6 +4079,9 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   function selectDefender(index: number): void {
     if (phase !== 'PRE_SNAP' || !defenders || index < 0 || index >= defenders.length) return;
     userControlledDefenderIndex = index;
+    if (onlineGuestControlsP2 && onlinePlayerSide === 'P2') {
+      callbacks.onOnlineAction?.({ type: 'DEFENDER', index });
+    }
     const d = defenders[index];
     if (d) {
       sounds.playCatch();
@@ -4039,9 +4105,9 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     switch (action.type) {
       case 'START':
         if (isKickoffPhase || phase === 'KICKOFF') {
-          startReadyKickoff();
+          startReadyKickoff(true);
         } else if (phase === 'PRE_SNAP') {
-          startReadyPlay();
+          startReadyPlay(true);
         }
         break;
       case 'OFFENSE_PLAY':
@@ -4072,6 +4138,14 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         break;
       case 'DEFENDER':
         selectDefender(action.index);
+        break;
+      case 'JUKE':
+        if (phase === 'RUNNING' && activeOffense === 'P2' && activeEntity && (activeEntity.jukeCooldownTimer || 0) <= 0) {
+          activeEntity.jukeTimer = 10;
+          activeEntity.jukeVx = action.direction * 1.35;
+          activeEntity.jukeCooldownTimer = 35;
+          activeEntity.vx = 0;
+        }
         break;
       case 'DIVE':
         diveTackle();
@@ -4109,6 +4183,12 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
   function executeUserPass(tappedReceiver: Entity) {
     if (phase !== 'QB_DROP' || !isUserOffense() || !qb.hasBall) return;
+    if (onlineGuestControlsP2 && onlinePlayerSide === 'P2') {
+      const receiverIndex = [...receivers, centerReceiver, rb]
+        .filter((receiver): receiver is Entity => Boolean(receiver && !receiver.isBlocker && receiver.routeType !== 'BLOCK'))
+        .indexOf(tappedReceiver);
+      if (receiverIndex >= 0) callbacks.onOnlineAction?.({ type: 'THROW', target: receiverIndex });
+    }
 
     let projX = tappedReceiver.x;
     let projY = tappedReceiver.y;
@@ -4221,8 +4301,9 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     }
 
     if (phase === 'KICKOFF') {
+      if (onlineGuestControlsP2 && kickoffKickingTeam !== onlinePlayerSide) return;
       startReadyKickoff();
-      if (kickoffReceivingTeam === 'P1') {
+      if (!onlineGuestControlsP2 && kickoffReceivingTeam === 'P1') {
         activateJoystick(e.pointerId, screenPos);
       }
       return;
@@ -4240,13 +4321,13 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
     if (phase === 'PRE_SNAP') {
       // Field Goal Skill Meter tap advancement (Direction -> Distance -> Kick)
-      if (activeOffense === 'P1' && p1OffPlay === 'FIELD_GOAL') {
+      if (isLocalOffense() && activeOffense === 'P1' && p1OffPlay === 'FIELD_GOAL') {
         startReadyPlay();
         return;
       }
 
       // 1. If on offense, check if user tapped/dragged an interactive player (RB, WR, Center) FIRST! (ELITE mode only)
-      if (activeOffense === 'P1' && currentTacticalMode === 'ELITE') {
+      if (isLocalOffense() && currentTacticalMode === 'ELITE') {
         // RB tap / line gesture: checked before the snap zone so tapping the RB never starts the play.
         if (rb && Math.hypot(rb.x - px, rb.y - py) < rb.radius + receiverHitPadding) {
           gestureEntity = rb;
@@ -4297,12 +4378,12 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         if (touchedJoystick) {
           startReadyPlay();
           const phaseAfterStart: string = phase;
-          if (phaseAfterStart === 'QB_DROP' || phaseAfterStart === 'HANDOFF' || activeDefense === 'P1') {
+          if (phaseAfterStart === 'QB_DROP' || phaseAfterStart === 'HANDOFF' || isLocalDefense()) {
             activateJoystick(e.pointerId, screenPos);
           }
           return;
         }
-      } else if (activeOffense === 'P1' && currentTacticalMode === 'PRO') {
+      } else if (isLocalOffense() && currentTacticalMode === 'PRO') {
         const scoutedPlayer = [...receivers, centerReceiver, rb].find(
           player => player && Math.hypot(player.x - px, player.y - py) < player.radius + receiverHitPadding
         );
@@ -4322,15 +4403,14 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         if (touchedJoystick) {
           startReadyPlay();
           const phaseAfterStart: string = phase;
-          if (phaseAfterStart === 'QB_DROP' || phaseAfterStart === 'HANDOFF' || activeDefense === 'P1') {
+          if (phaseAfterStart === 'QB_DROP' || phaseAfterStart === 'HANDOFF' || isLocalDefense()) {
             activateJoystick(e.pointerId, screenPos);
           }
           return;
         }
       }
 
-      // 2. If on defense (activeDefense === 'P1', activeOffense === 'P2')
-      if (activeDefense === 'P1') {
+      if (isLocalDefense()) {
         // Record start position for open field / bottom of screen formation swiping
         preSnapFieldSwipeStartX = px;
         preSnapFieldSwipeStartY = py;
@@ -4397,7 +4477,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       touchScreenStartY = e.clientY;
 
       // Double tap empty field flips RB side
-      if (activeOffense === 'P1' && currentTime - lastTapTime < 350 && rb) {
+      if (isLocalOffense() && activeOffense === 'P1' && currentTime - lastTapTime < 350 && rb) {
         rbDoubleTapConsumed = true;
         if (px < fieldWidth / 2) {
           rb.side = 'left';
@@ -4414,7 +4494,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     }
 
     // Live play: Tap-to-Throw detection (Zero interference with joystick)
-    if (phase === 'QB_DROP' && activeOffense === 'P1') {
+    if (phase === 'QB_DROP' && isLocalOffense()) {
       const tappedWr = typeof getTappedReceiver === 'function' ? getTappedReceiver(screenPos.x, screenPos.y, px, py) : null;
       if (tappedWr) {
         if (typeof passPointerId !== 'undefined') passPointerId = e.pointerId;
@@ -4428,7 +4508,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     // Relative Virtual Joystick / Movement activation (Fluid one-finger control on mobile)
     const isLiveMovementPhase = (phase === 'QB_DROP' || phase === 'HANDOFF' || phase === 'RUNNING');
     if (typeof joystick !== 'undefined' && isLiveMovementPhase && !joystick.active) {
-      if (activeDefense === 'P1') {
+      if (isLocalDefense()) {
         // On defense: Check if player tapped directly on a teammate defender to switch to them immediately
         let tappedDefIdx = -1;
         let minTapDist = 45;
@@ -4447,7 +4527,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         }
         // One-finger control: touching anywhere on screen anchors the virtual joystick under their finger
         activateJoystick(e.pointerId, screenPos);
-      } else if (touchedJoystick || phase === 'RUNNING') {
+      } else if (isLocalOffense() && (touchedJoystick || phase === 'RUNNING')) {
         activateJoystick(e.pointerId, screenPos);
       }
     }
@@ -4493,9 +4573,10 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         joystick.inputY = 0;
         activateTurbo(false);
       }
+      publishLocalOnlineInput();
     }
 
-    if (phase === 'RUNNING' && activeEntity && activeOffense === 'P1' && (typeof joystick === 'undefined' || !joystick.active)) {
+    if (phase === 'RUNNING' && activeEntity && isLocalOffense() && (typeof joystick === 'undefined' || !joystick.active)) {
       if ((activeEntity.jukeTimer || 0) <= 0) {
         const targetX = Math.max(20, Math.min(fieldWidth - 20, curX));
         const steerDiff = targetX - activeEntity.x;
@@ -4545,6 +4626,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       joystick.inputX = 0;
       joystick.inputY = 0;
       joystick.distance = 0;
+      publishLocalOnlineInput();
     }
 
     if (typeof passPointerId !== 'undefined' && passPointerId === e.pointerId) {
@@ -4661,12 +4743,12 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       }
 
       // Check if user swiped open field / bottom of screen horizontally to change formations / alignments!
-      const startedOnOffensivePlayer = activeOffense === 'P1' && [qb, rb, centerReceiver, ...receivers]
+      const startedOnOffensivePlayer = isLocalOffense() && [qb, rb, centerReceiver, ...receivers]
         .some(player => player && Math.hypot(player.x - preSnapFieldSwipeStartX, player.y - preSnapFieldSwipeStartY) < (player.radius || 10) + touchHitPadding);
       if (isSwipeGesture && !startedOnOffensivePlayer) {
         if (currentTacticalMode === 'ELITE') {
           cyclePreSnapFormation(worldDeltaX < 0 ? 1 : -1);
-        } else if (activeOffense === 'P1') {
+        } else if (isLocalOffense()) {
           flipP1ProPlay();
         }
         return;
@@ -4675,8 +4757,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       return;
     }
 
-    if (activeOffense !== 'P1') {
-      if (activeDefense === 'P1' && phase !== 'PRE_SNAP') {
+    if (!isLocalOffense()) {
+      if (isLocalDefense() && phase !== 'PRE_SNAP') {
         const releaseWorld = screenToWorld(e.clientX, e.clientY);
         const swipeDist = Math.hypot(e.clientX - touchScreenStartX, e.clientY - touchScreenStartY);
         const swipeTime = Date.now() - touchStartTime;
@@ -4727,7 +4809,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     const deltaScreenX = screenEnd.x - touchScreenStartX;
     const deltaScreenY = screenEnd.y - touchScreenStartY;
 
-    if (phase === 'RUNNING' && activeEntity && activeOffense === 'P1') {
+    if (phase === 'RUNNING' && activeEntity && isLocalOffense()) {
       // Releasing the joystick or continuous steering MUST NOT trigger an accidental swipe juke!
       if (!wasJoystick && (activeEntity.jukeCooldownTimer || 0) <= 0) {
         const swipeSpeed = Math.abs(deltaScreenX) / Math.max(1, swipeTime);
@@ -4738,6 +4820,9 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           activeEntity.jukeVx = jukeSign * 1.35;
           activeEntity.jukeCooldownTimer = 35;
           activeEntity.vx = 0;
+          if (onlineGuestControlsP2 && onlinePlayerSide === 'P2') {
+            callbacks.onOnlineAction?.({ type: 'JUKE', direction: jukeSign });
+          }
           screenShakeTimer = 8;
           sounds.playJuke();
           showAnnouncement(jukeSign > 0 ? "JUKE RIGHT! 💨" : "JUKE LEFT! 💨", "#00ffff");
@@ -4753,7 +4838,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       return;
     }
 
-    if (!wasJoystick && phase === 'QB_DROP' && activeOffense === 'P1') {
+    if (!wasJoystick && phase === 'QB_DROP' && isLocalOffense()) {
       const releaseWorld = screenToWorld(e.clientX, e.clientY);
       const receiverAtRelease = typeof getTappedReceiver === 'function' ? getTappedReceiver(screenEnd.x, screenEnd.y, releaseWorld.x, releaseWorld.y) : null;
       if (receiverAtRelease && typeof executeUserPass === 'function') {

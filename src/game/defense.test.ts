@@ -1601,6 +1601,9 @@ test('offensive double-taps only reposition the RB on offset and scaled canvases
   const createHandlers = new Function('cyclePreSnapFormation', 'canvasLeft', 'canvasTop', 'scale', 'tacticalMode', 'flipP1ProPlay', `
     let phase = 'PRE_SNAP', activeOffense = 'P1', activeDefense = 'P2';
     const onlineRole = null;
+    const onlineGuestControlsP2 = false, onlinePlayerSide = 'P1';
+    const isLocalOffense = () => activeOffense === onlinePlayerSide;
+    const isLocalDefense = () => activeDefense === onlinePlayerSide;
     const isPaused = false, options = {}, tutorialStep = 0;
     const completeTutorialAction = () => {};
     const receiverHitPadding = 20, touchHitPadding = 18;
