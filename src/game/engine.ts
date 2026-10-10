@@ -85,6 +85,7 @@ export interface GameEngineHandle {
   applyRemoteAction?: (action: RemoteGameAction) => void;
   applyRemoteInput?: (dx: number, dy: number, active: boolean) => void;
   setOnlineGuestControl?: (enabled: boolean) => void;
+  applyLocalInput?: (dx: number, dy: number, active: boolean) => void;
   getNetworkSnapshot?: () => Record<string, any>;
   applyNetworkSnapshot?: (snapshot: Record<string, any>) => void;
 }
@@ -3349,6 +3350,13 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       onlineGuestControlsP2 = enabled;
       remoteJoystick = { dx: 0, dy: 0, active: false };
     },
+    applyLocalInput: (dx, dy, active) => {
+      joystick.active = active;
+      joystick.pointerId = null;
+      joystick.inputX = active ? dx : 0;
+      joystick.inputY = active ? dy : 0;
+      joystick.distance = active ? Math.min(1, Math.hypot(dx, dy)) : 0;
+    },
     is4thDown: () => currentDown === 4 && phase === 'PRE_SNAP',
     triggerPlayEnd: (endingY: number, resultType: string, customMessage?: string, customColor?: string) => {
       handlePlayEnd(endingY, resultType, customMessage, customColor);
@@ -4001,7 +4009,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     if (userControlledDefenderIndex < 0 || userControlledDefenderIndex >= defenders.length) {
       userControlledDefenderIndex = 0;
     }
-    return defenders[userControlledDefenderIndex] || null;
+    const defender = defenders[userControlledDefenderIndex];
+    return defender?.team === activeDefense ? defender : null;
   }
 
   function selectDefender(index: number): void {

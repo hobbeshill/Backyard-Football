@@ -407,6 +407,9 @@ export default function App() {
         engine?.setTacticalMode?.('PRO');
       },
       onGameOver: (p1FinalScore, p2FinalScore, restored, boxScore) => {
+        engineRef.current?.setOnlineGuestControl?.(false);
+        engineRef.current?.applyRemoteInput?.(0, 0, false);
+        engineRef.current?.applyLocalInput?.(0, 0, false);
         setFinishedGame({
           p1Score: p1FinalScore,
           p2Score: p2FinalScore,
@@ -529,6 +532,9 @@ export default function App() {
     };
 
     const onPeerDisconnected = (data: { message: string }) => {
+      engineRef.current?.setOnlineGuestControl?.(false);
+      engineRef.current?.applyRemoteInput?.(0, 0, false);
+      engineRef.current?.applyLocalInput?.(0, 0, false);
       showAnnouncement(data?.message || 'Online opponent disconnected', '#ff4444', true);
       setOnlineError(data?.message || 'Opponent disconnected');
     };
@@ -609,6 +615,9 @@ export default function App() {
 
   const handleLeaveOnlineLobby = () => {
     leaveLobby();
+    engineRef.current?.setOnlineGuestControl?.(false);
+    engineRef.current?.applyRemoteInput?.(0, 0, false);
+    engineRef.current?.applyLocalInput?.(0, 0, false);
     setOnlineLobby(null);
     setOnlineRole(null);
     onlineRoleRef.current = null;
@@ -621,6 +630,32 @@ export default function App() {
 
   const sendRemoteInput = (dx: number, dy: number, active: boolean) => {
     sendGameInput({ dx, dy, active });
+  };
+
+  const sendOnlineAction = (action: any) => {
+    if (onlineRole === 'guest') sendRemoteAction(action);
+    else engineRef.current?.applyRemoteAction?.(action);
+  };
+
+  const sendOnlineInput = (dx: number, dy: number, active: boolean) => {
+    if (onlineRole === 'guest') sendRemoteInput(dx, dy, active);
+    else engineRef.current?.applyLocalInput?.(dx, dy, active);
+  };
+
+  const selectOnlinePlay = (play: string, onOffense: boolean) => {
+    if (onlineRole === 'guest') {
+      if (onOffense) {
+        setP2OffPlayState(play);
+        sendRemoteAction({ type: 'OFFENSE_PLAY', play });
+      } else {
+        setP2DefPlayState(play);
+        sendRemoteAction({ type: 'DEFENSE_PLAY', play });
+      }
+    } else if (onOffense) {
+      engineRef.current?.selectOffense(play);
+    } else {
+      engineRef.current?.selectDefense(play);
+    }
   };
 
   // Handlers for switching teams
@@ -889,12 +924,22 @@ export default function App() {
   const isTacticalModeLocked = hasKickedOff;
   const showPuntAction = tacticalMode !== 'PRO' && isUserPreSnapPhase && activeOffenseState === 'P1' && is4thDown;
   const userTeamPlaybook = getTeamPlaybook(p1TeamState.id);
+  const onlinePlayerSide = onlineRole === 'host' ? 'P1' : 'P2';
+  const isOnlinePlayerOnOffense = activeOffenseState === onlinePlayerSide;
+  const onlinePlayerTeam = onlinePlayerSide === 'P1' ? p1TeamState : p2TeamState;
+  const onlineOpponentTeam = onlinePlayerSide === 'P1' ? p2TeamState : p1TeamState;
+  const onlineSelectedPlay = onlineRole === 'guest'
+    ? isOnlinePlayerOnOffense ? p2OffPlayState : p2DefPlayState
+    : isOnlinePlayerOnOffense ? p1OffPlayState : p1DefPlayState;
+  const onlineAvailablePlays = getTecmoPlaysForTeam(
+    isOnlinePlayerOnOffense ? onlinePlayerTeam.id : onlineOpponentTeam.id
+  );
 
   useEffect(() => {
     if (phaseState !== 'PRE_SNAP') {
       playbookCallSelectedRef.current = false;
     }
-    const canShowPlaybook = hasKickedOff && phaseState === 'PRE_SNAP' &&
+    const canShowPlaybook = !onlineRole && hasKickedOff && phaseState === 'PRE_SNAP' &&
       !isKickoffActive &&
       !showPauseMenu && !showTeamModal && !showTutorial && !showSettings && !finishedGame;
     if (!canShowPlaybook) {
@@ -904,7 +949,7 @@ export default function App() {
     if (!playbookCallSelectedRef.current) {
       setShowPlaybookCards(true);
     }
-  }, [finishedGame, hasKickedOff, isKickoffActive, phaseState, showPauseMenu, showTeamModal, showTutorial, showSettings]);
+  }, [finishedGame, hasKickedOff, isKickoffActive, onlineRole, phaseState, showPauseMenu, showTeamModal, showTutorial, showSettings]);
 
   return (
     <div className="relative w-screen min-h-[100dvh] h-[100dvh] overflow-hidden flex flex-col items-center justify-between pt-1 pb-0 bg-[#030704] text-white font-mono select-none">
@@ -933,7 +978,11 @@ export default function App() {
           <span className="text-neutral-300 truncate text-right">
             {isKickoffActive
               ? 'Touch Field or Joystick to Kick Off • WASD/Arrows to Steer Return'
-              : tacticalMode === 'PRO'
+              : onlineRole
+                ? (activeOffenseState === onlinePlayerSide
+                    ? 'Choose your call • Use online controls to start'
+                    : 'Choose a defensive call • Await the offense to start')
+                : tacticalMode === 'PRO'
               ? (activeOffenseState === 'P1'
                   ? 'Choose a Play Card • Touch Joystick to Snap'
                   : 'Pick Defender to Control • Touch Joystick to Start')
@@ -1009,7 +1058,7 @@ export default function App() {
               >
                 <RefreshCw size={13} />
               </button>
-              {isUserPreSnapPhase && (
+              {isUserPreSnapPhase && !onlineRole && (
                 <button
                   type="button"
                   onClick={() => setShowPlaybookCards(true)}
@@ -1074,7 +1123,7 @@ export default function App() {
       </header>
 
       {/* Pre-Snap Tecmo Playcall Status Bar */}
-      {isUserPreSnapPhase && !isKickoffActive && !showPauseMenu && (
+      {isUserPreSnapPhase && !onlineRole && !isKickoffActive && !showPauseMenu && (
         <div className="flex items-center justify-between gap-1.5 w-full max-w-[430px] px-2 py-1 mb-0.5 bg-black/90 border border-neutral-700/80 rounded-lg text-[0.62rem] z-20 shrink-0 shadow-lg">
           {activeOffenseState === 'P1' ? (
             <>
@@ -1119,7 +1168,7 @@ export default function App() {
       )}
 
       {/* 4th Down Special Teams Punt / Field Goal Action Controls */}
-      {((showPuntAction && p1OffPlayState !== 'PUNT' && p1OffPlayState !== 'FIELD_GOAL') ||
+      {!onlineRole && ((showPuntAction && p1OffPlayState !== 'PUNT' && p1OffPlayState !== 'FIELD_GOAL') ||
         (isUserPreSnapPhase && !isKickoffActive && activeOffenseState === 'P1' && p1OffPlayState === 'FIELD_GOAL' && fgMeterState !== null)) && (
         <div className="flex items-center justify-center gap-2 mb-1 z-30 w-full max-w-[420px] px-2 shrink-0">
           {showPuntAction && p1OffPlayState !== 'PUNT' && p1OffPlayState !== 'FIELD_GOAL' && (
@@ -1299,11 +1348,14 @@ export default function App() {
 
 
 
-      {onlineRole === 'guest' && hasKickedOff && !showPauseMenu && (
-        <div className="fixed bottom-2 left-1/2 z-[90] w-[min(96vw,430px)] -translate-x-1/2 rounded-xl border border-cyan-300/50 bg-[#07110f]/95 p-3 text-white shadow-2xl backdrop-blur">
+      {onlineRole && hasKickedOff && !showPauseMenu && (
+        <div
+          className="fixed inset-x-2 bottom-2 z-[90] mx-auto w-[min(96vw,430px)] max-h-[40dvh] overflow-y-auto rounded-xl border border-cyan-300/50 bg-[#07110f]/95 p-3 text-white shadow-2xl backdrop-blur"
+          style={{ bottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}
+        >
           <div className="flex items-center justify-between gap-2 border-b border-white/10 px-1 pb-2">
             <span className="truncate text-[10px] font-black uppercase text-cyan-200">
-              Online Guest • {activeOffenseState === 'P2' ? 'Your Offense' : 'Your Defense'}
+              Online {onlineRole} • {isOnlinePlayerOnOffense ? 'Your Offense' : 'Your Defense'}
             </span>
             <span className="shrink-0 text-[10px] font-bold text-neutral-400">{phaseState.replace('_', ' ')}</span>
           </div>
@@ -1311,30 +1363,21 @@ export default function App() {
           {phaseState === 'PRE_SNAP' && !isKickoffActive && (
             <div className="mt-2 flex gap-2">
               <select
-                aria-label={activeOffenseState === 'P2' ? 'Choose offensive play' : 'Choose defensive scheme'}
-                value={activeOffenseState === 'P2' ? p2OffPlayState : p2DefPlayState}
-                onChange={event => {
-                  const val = event.target.value;
-                  if (activeOffenseState === 'P2') {
-                    setP2OffPlayState(val);
-                    sendRemoteAction({ type: 'OFFENSE_PLAY', play: val });
-                  } else {
-                    setP2DefPlayState(val);
-                    sendRemoteAction({ type: 'DEFENSE_PLAY', play: val });
-                  }
-                }}
+                aria-label={isOnlinePlayerOnOffense ? 'Choose offensive play' : 'Choose defensive scheme'}
+                value={onlineSelectedPlay}
+                onChange={event => selectOnlinePlay(event.target.value, isOnlinePlayerOnOffense)}
                 className="min-w-0 flex-1 rounded-lg border border-white/15 bg-[#12211f] px-2 py-2 text-xs text-white"
               >
-                {getTecmoPlaysForTeam(activeOffenseState === 'P2' ? p2TeamState.id : p1TeamState.id).map(play => (
+                {onlineAvailablePlays.map(play => (
                   <option key={play.id} value={play.id}>
                     {play.name} ({play.isRun ? 'RUN' : 'PASS'})
                   </option>
                 ))}
               </select>
-              {activeOffenseState === 'P2' && (
+              {isOnlinePlayerOnOffense && (
                 <button
                   type="button"
-                  onClick={() => sendRemoteAction({ type: 'START' })}
+                  onClick={() => sendOnlineAction({ type: 'START' })}
                   className="shrink-0 rounded-lg bg-cyan-400 px-4 py-2 text-xs font-black uppercase text-[#061014] active:scale-95 cursor-pointer"
                 >
                   Snap
@@ -1343,76 +1386,76 @@ export default function App() {
             </div>
           )}
 
-          {isKickoffActive && activeOffenseState === 'P2' && (
+          {isKickoffActive && kickoffSide.kicking === onlinePlayerSide && (
             <button
               type="button"
-              onClick={() => sendRemoteAction({ type: 'START' })}
+              onClick={() => sendOnlineAction({ type: 'START' })}
               className="mt-2 w-full rounded-lg bg-cyan-400 px-4 py-2.5 text-xs font-black uppercase text-[#061014] active:scale-95 cursor-pointer"
             >
               Start Kickoff
             </button>
           )}
 
-          {phaseState !== 'PRE_SNAP' && (
+          {phaseState !== 'PRE_SNAP' && !isKickoffActive && (
             <div className="mt-2 flex items-center justify-between gap-3">
-              {/* Virtual D-Pad for Directional Movement */}
+              {/* Shared online directional controls */}
               <div className="grid grid-cols-3 gap-1">
                 <span />
                 <button
                   type="button"
                   aria-label="Move up"
-                  onPointerDown={event => { event.preventDefault(); sendRemoteInput(0, -1, true); }}
-                  onPointerUp={() => sendRemoteInput(0, 0, false)}
-                  onPointerCancel={() => sendRemoteInput(0, 0, false)}
+                  onPointerDown={event => { event.preventDefault(); sendOnlineInput(0, -1, true); }}
+                  onPointerUp={() => sendOnlineInput(0, 0, false)}
+                  onPointerCancel={() => sendOnlineInput(0, 0, false)}
                   className="h-9 w-9 rounded-lg border border-white/15 bg-white/10 text-base font-black active:bg-cyan-500/40"
                 >↑</button>
                 <span />
                 <button
                   type="button"
                   aria-label="Move left"
-                  onPointerDown={event => { event.preventDefault(); sendRemoteInput(-1, 0, true); }}
-                  onPointerUp={() => sendRemoteInput(0, 0, false)}
-                  onPointerCancel={() => sendRemoteInput(0, 0, false)}
+                  onPointerDown={event => { event.preventDefault(); sendOnlineInput(-1, 0, true); }}
+                  onPointerUp={() => sendOnlineInput(0, 0, false)}
+                  onPointerCancel={() => sendOnlineInput(0, 0, false)}
                   className="h-9 w-9 rounded-lg border border-white/15 bg-white/10 text-base font-black active:bg-cyan-500/40"
                 >←</button>
                 <button
                   type="button"
                   aria-label="Move down"
-                  onPointerDown={event => { event.preventDefault(); sendRemoteInput(0, 1, true); }}
-                  onPointerUp={() => sendRemoteInput(0, 0, false)}
-                  onPointerCancel={() => sendRemoteInput(0, 0, false)}
+                  onPointerDown={event => { event.preventDefault(); sendOnlineInput(0, 1, true); }}
+                  onPointerUp={() => sendOnlineInput(0, 0, false)}
+                  onPointerCancel={() => sendOnlineInput(0, 0, false)}
                   className="h-9 w-9 rounded-lg border border-white/15 bg-white/10 text-base font-black active:bg-cyan-500/40"
                 >↓</button>
                 <button
                   type="button"
                   aria-label="Move right"
-                  onPointerDown={event => { event.preventDefault(); sendRemoteInput(1, 0, true); }}
-                  onPointerUp={() => sendRemoteInput(0, 0, false)}
-                  onPointerCancel={() => sendRemoteInput(0, 0, false)}
+                  onPointerDown={event => { event.preventDefault(); sendOnlineInput(1, 0, true); }}
+                  onPointerUp={() => sendOnlineInput(0, 0, false)}
+                  onPointerCancel={() => sendOnlineInput(0, 0, false)}
                   className="h-9 w-9 rounded-lg border border-white/15 bg-white/10 text-base font-black active:bg-cyan-500/40"
                 >→</button>
               </div>
 
-              {/* Action Buttons for Guest (Passing or Defense) */}
+              {/* Online offense and defense actions */}
               <div className="flex flex-1 flex-wrap justify-end gap-1.5">
-                {phaseState === 'QB_DROP' && activeOffenseState === 'P2' && [0, 1, 2, 3].map(target => (
+                {phaseState === 'QB_DROP' && isOnlinePlayerOnOffense && [0, 1, 2, 3].map(target => (
                   <button
                     key={target}
                     type="button"
-                    onClick={() => sendRemoteAction({ type: 'THROW', target })}
+                    onClick={() => sendOnlineAction({ type: 'THROW', target })}
                     className="rounded-lg border border-amber-300/40 bg-amber-300/10 px-2.5 py-2 text-[10px] font-black uppercase text-amber-100 active:bg-amber-400 active:text-black cursor-pointer"
                   >
                     Pass {target + 1}
                   </button>
                 ))}
-                {activeOffenseState === 'P1' && phaseState !== 'THROWN' && [0, 1, 2, 3, 4, 5, 6].map(index => (
+                {!isOnlinePlayerOnOffense && phaseState !== 'THROWN' && [0, 1, 2, 3, 4, 5, 6].map(index => (
                   <button
                     key={index}
                     type="button"
                     aria-pressed={guestDefenderIndex === index}
                     onClick={() => {
                       setGuestDefenderIndex(index);
-                      sendRemoteAction({ type: 'DEFENDER', index });
+                      sendOnlineAction({ type: 'DEFENDER', index });
                     }}
                     className={`rounded-lg border px-2 py-1.5 text-[10px] font-black cursor-pointer ${
                       guestDefenderIndex === index
@@ -1423,10 +1466,10 @@ export default function App() {
                     D{index + 1}
                   </button>
                 ))}
-                {activeOffenseState === 'P1' && (
+                {!isOnlinePlayerOnOffense && (
                   <button
                     type="button"
-                    onClick={() => sendRemoteAction({ type: phaseState === 'THROWN' ? 'SWAT' : 'DIVE' })}
+                    onClick={() => sendOnlineAction({ type: phaseState === 'THROWN' ? 'SWAT' : 'DIVE' })}
                     className="rounded-lg bg-[#bd5635] px-3.5 py-2 text-[10px] font-black uppercase text-white hover:bg-[#d46845] active:scale-95 cursor-pointer"
                   >
                     {phaseState === 'THROWN' ? 'Swat' : 'Dive'}

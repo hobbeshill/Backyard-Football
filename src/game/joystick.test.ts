@@ -250,6 +250,21 @@ test('online guest controls the selected P2 team on offense and defense', () => 
       nextFrame(timestamp);
     }
     assert.ok(defender.x > defenderXBefore, 'Guest input should move the P2 defender while P1 has the ball');
+
+    game.applyRemoteInput?.(0, 0, false);
+    game.setPossessionForTest?.('P1');
+    game.resetDrill();
+    game.startPlay?.();
+    const localQuarterbackBefore = game.getQuarterbackScreenPositionForTest?.();
+    assert.ok(localQuarterbackBefore);
+    game.applyLocalInput?.(1, 0, true);
+    for (let frame = 0; frame < 2; frame++) {
+      timestamp += 1000 / 60;
+      nextFrame(timestamp);
+    }
+    const localQuarterbackAfter = game.getQuarterbackScreenPositionForTest?.();
+    assert.ok(localQuarterbackAfter && localQuarterbackAfter.x > localQuarterbackBefore.x, 'The shared host dock should drive the local P1 controls');
+    game.applyLocalInput?.(0, 0, false);
   } finally {
     cleanup?.();
     globalThis.requestAnimationFrame = originalRequest;
@@ -790,6 +805,115 @@ test('kickoff receiving team blockers are positioned in a horizontal line in fro
     assert.equal(Math.abs(firstBlockerY - returner.y), 60, 'Blockers must be positioned 60 units in front of the returner');
   } finally {
     cleanup?.();
+  }
+});
+
+test('P1 can steer the return man after fielding a kickoff', () => {
+  const originalRequest = globalThis.requestAnimationFrame;
+  const originalCancel = globalThis.cancelAnimationFrame;
+  let nextFrame: FrameRequestCallback | null = null;
+  let timestamp = 0;
+  globalThis.requestAnimationFrame = callback => { nextFrame = callback; return 1; };
+  globalThis.cancelAnimationFrame = () => {};
+  const canvas = createMockCanvas();
+  const handle: { game?: GameEngineHandle } = {};
+  const cleanup = mountFootballGame(canvas, {
+    setP2OffPlayState: () => {}, setP2DefPlayState: () => {},
+    setDownDistanceText: () => {}, setActiveOffenseState: () => {},
+    setUserScore: () => {}, setCpuScore: () => {}, setP1DefPlayState: () => {},
+    setMomentumState: () => {}, setGameClockState: () => {}, showAnnouncement: () => {},
+    onEngineReady: game => { handle.game = game ?? undefined; }
+  });
+  const advanceFrame = () => {
+    const frame = nextFrame;
+    assert.ok(frame);
+    timestamp += 1000 / 60;
+    frame(timestamp);
+  };
+  try {
+    const game = handle.game;
+    assert.ok(game);
+    game.kickoff(0.35);
+    for (let frame = 0; frame < 1200 && game.phase !== 'RUNNING'; frame++) advanceFrame();
+    assert.equal(game.phase, 'RUNNING', 'The receiving player must field this non-touchback kickoff');
+    const returner = game.getDefenders?.().find(player => player.isReturner);
+    assert.ok(returner);
+    const xBeforeInput = returner.x;
+
+    canvas._listeners.get('pointerdown')?.({
+      clientX: 100, clientY: 220, pointerId: 7, preventDefault: () => {}
+    } as PointerEvent);
+    canvas._listeners.get('pointermove')?.({
+      clientX: 140, clientY: 220, pointerId: 7
+    } as PointerEvent);
+    advanceFrame();
+
+    assert.ok(returner.x > xBeforeInput, 'A rightward joystick drag should move the returner right');
+    canvas._listeners.get('pointerup')?.({ clientX: 140, clientY: 220, pointerId: 7 } as PointerEvent);
+  } finally {
+    cleanup?.();
+    globalThis.requestAnimationFrame = originalRequest;
+    globalThis.cancelAnimationFrame = originalCancel;
+  }
+});
+
+test('online P2 returner is controlled by guest input, not the opposing defense', () => {
+  const originalRequest = globalThis.requestAnimationFrame;
+  const originalCancel = globalThis.cancelAnimationFrame;
+  let nextFrame: FrameRequestCallback | null = null;
+  let timestamp = 0;
+  globalThis.requestAnimationFrame = callback => { nextFrame = callback; return 1; };
+  globalThis.cancelAnimationFrame = () => {};
+  const handle: { game?: GameEngineHandle } = {};
+  const cleanup = mountFootballGame(createMockCanvas(), {
+    setP2OffPlayState: () => {}, setP2DefPlayState: () => {},
+    setDownDistanceText: () => {}, setActiveOffenseState: () => {},
+    setUserScore: () => {}, setCpuScore: () => {}, setP1DefPlayState: () => {},
+    setMomentumState: () => {}, setGameClockState: () => {}, showAnnouncement: () => {},
+    onEngineReady: game => { handle.game = game ?? undefined; }
+  });
+  const advanceFrame = () => {
+    const frame = nextFrame;
+    assert.ok(frame);
+    timestamp += 1000 / 60;
+    frame(timestamp);
+  };
+  try {
+    const game = handle.game;
+    assert.ok(game);
+    const snapshot = game.getNetworkSnapshot?.();
+    assert.ok(snapshot);
+    const returnerId = snapshot.defenderIds.find((id: string) => snapshot.entities[id]?.data?.isReturner);
+    assert.ok(returnerId);
+    snapshot.entities[returnerId].data.team = 'P2';
+    snapshot.entities[returnerId].data.x = 170;
+    snapshot.entities[returnerId].data.y = 500;
+    snapshot.defenderIds.forEach((id: string) => { snapshot.entities[id].data.team = 'P2'; });
+    snapshot.phase = 'RUNNING';
+    snapshot.activeEntityId = returnerId;
+    snapshot.activeOffense = 'P2';
+    snapshot.activeDefense = 'P1';
+    snapshot.attackDirection = 1;
+    snapshot.lineOfScrimmageY = 500;
+    snapshot.firstDownMarkerY = 600;
+    snapshot.isKickoffPhase = false;
+    snapshot.isSpecialTeamsReturn = true;
+    snapshot.specialTeamsReturnType = 'KICKOFF';
+    game.setOnlineGuestControl?.(true);
+    game.applyNetworkSnapshot?.(snapshot);
+
+    assert.equal(game.getControlledDefender?.(), null, 'The P2 returner must not be exposed as a P1 defender');
+    const returner = game.getDefenders?.().find(player => player.isReturner);
+    assert.ok(returner);
+    const xBeforeInput = returner.x;
+    game.applyRemoteInput?.(1, 0, true);
+    advanceFrame();
+    advanceFrame();
+    assert.ok(returner.x > xBeforeInput, 'Guest remote input should steer the P2 returner');
+  } finally {
+    cleanup?.();
+    globalThis.requestAnimationFrame = originalRequest;
+    globalThis.cancelAnimationFrame = originalCancel;
   }
 });
 
