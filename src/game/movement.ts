@@ -300,9 +300,12 @@ export function resolveCollisions(
         if ((isFirstReceiver && isSecondDefender) || (isSecondReceiver && isFirstDefender)) continue;
       }
 
+      const carrierIsOnDefendersTeam = ballCarrier ? defenders.includes(ballCarrier) : false;
       const isFirstDefender = defenders.includes(first);
       const isSecondDefender = defenders.includes(second);
-      if ((first === ballCarrier && isSecondDefender) || (second === ballCarrier && isFirstDefender)) continue;
+      const isFirstOpponent = carrierIsOnDefendersTeam ? !isFirstDefender : isFirstDefender;
+      const isSecondOpponent = carrierIsOnDefendersTeam ? !isSecondDefender : isSecondDefender;
+      if ((first === ballCarrier && isSecondOpponent) || (second === ballCarrier && isFirstOpponent)) continue;
 
       const dx = second.x - first.x;
       const dy = second.y - first.y;
@@ -310,7 +313,7 @@ export function resolveCollisions(
       const minDistance = (first.radius || 10) + (second.radius || 10);
       const carrierIsFirst = first === ballCarrier;
       const carrierIsSecond = second === ballCarrier;
-      const carrierBlockContact = (carrierIsFirst && !isSecondDefender) || (carrierIsSecond && !isFirstDefender);
+      const carrierBlockContact = (carrierIsFirst && !isSecondOpponent) || (carrierIsSecond && !isFirstOpponent);
       const firstIsUserControlled = userControlledEntities.includes(first);
       const secondIsUserControlled = userControlledEntities.includes(second);
 
@@ -322,28 +325,31 @@ export function resolveCollisions(
         if (carrierBlockContact && ballCarrier) {
           const blocker = carrierIsFirst ? second : first;
           const blockerDirection = carrierIsFirst ? 1 : -1;
-          if (userControlledEntities.includes(ballCarrier)) {
-            blocker.x += nx * overlap * blockerDirection;
-            blocker.y += ny * overlap * blockerDirection;
-            ballCarrier.contactSlowTimer = Math.max(ballCarrier.contactSlowTimer || 0, 4);
-            continue;
-          }
-          const leftX = Math.max(ballCarrier.radius || 10, ballCarrier.x - minDistance);
-          const rightX = Math.min(fieldWidth - (ballCarrier.radius || 10), ballCarrier.x + minDistance);
-          const clearance = (candidateX: number) => allEntities.reduce((nearest, entity) => {
-            if (entity === ballCarrier || entity === blocker) return nearest;
-            return Math.min(nearest, Math.hypot(candidateX - entity.x, ballCarrier.y - entity.y) - (entity.radius || 10));
-          }, Infinity);
-          const side = clearance(leftX) > clearance(rightX) ? -1 : 1;
-          const carrierShare = 0.25;
-          const blockerShare = 1 - carrierShare;
+          const carrierIsUserControlled = userControlledEntities.includes(ballCarrier);
 
-          ballCarrier.x += side * Math.min(4, overlap * 0.75);
-          ballCarrier.x -= nx * overlap * carrierShare;
-          ballCarrier.y -= ny * overlap * carrierShare;
-          blocker.x += nx * overlap * blockerShare;
-          blocker.y += ny * overlap * blockerShare;
-          ballCarrier.contactSlowTimer = Math.max(ballCarrier.contactSlowTimer || 0, 4);
+          if (!carrierIsUserControlled) {
+            // AI ball carrier: check if obstacles are to the left/right, and sidestep toward the clearer lane!
+            const otherObstacles = allEntities.filter(e => e !== ballCarrier && e !== blocker);
+            const leftThreat = otherObstacles.some(e => e.x < ballCarrier.x && Math.hypot(e.x - ballCarrier.x, e.y - ballCarrier.y) < 35);
+            const sideStepDir = leftThreat ? 1 : -1;
+            ballCarrier.x += sideStepDir * (distance === 0 ? 5 : 2);
+            ballCarrier.contactSlowTimer = Math.max(ballCarrier.contactSlowTimer || 0, 4);
+          } else {
+            // User-controlled ball carriers keep their chosen lane
+            ballCarrier.contactSlowTimer = Math.max(ballCarrier.contactSlowTimer || 0, 4);
+          }
+
+          // Special teams returners and runners never get stuck behind or obstructed by blockers
+          const isReturnCarrier = Boolean(ballCarrier.isReturner || carrierIsOnDefendersTeam);
+          const lateralMagnitude = isReturnCarrier ? 8.0 : 4.0;
+          const lateralPush = blocker.x >= ballCarrier.x ? lateralMagnitude : -lateralMagnitude;
+          blocker.x += lateralPush;
+          blocker.x += nx * overlap * blockerDirection;
+          blocker.y += ny * overlap * blockerDirection;
+          if (isReturnCarrier) {
+            // Returners do not get held up in traffic by their own blockers
+            ballCarrier.contactSlowTimer = 0;
+          }
           continue;
         }
 

@@ -277,7 +277,8 @@ export function resolveCatchContestOutcome(params: CatchContestParams): CatchCon
       resultType: 'INCOMPLETE'
     };
   }
-  const contested = Math.min(params.effectiveDefDist, params.effectiveBallDist) < 45;
+  const separation = Math.min(params.effectiveDefDist, params.effectiveBallDist);
+  const contested = separation < 45;
   const completionChance = getCatchCompletionChance(params);
   if (roll < 1 - completionChance) {
     const isPro = Boolean(params.isProMode);

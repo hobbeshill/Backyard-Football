@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Volume2, VolumeX, RefreshCw, HelpCircle, X, Users, Shield, ArrowRight, Search, Pause, Play, Home, Hand, Crosshair, Trophy, Award, RotateCcw, Zap, BookOpen, SlidersHorizontal, Info, Settings, ArrowLeft, Copy, Check } from 'lucide-react';
 import { offensivePlaybook, defensivePlaybook } from './game/playbook';
 import { sounds } from './game/sound';
-import { hasSavedGameSession, mountFootballGame, type GameBoxScore, type GameEngineHandle, type RemoteGameAction } from './game/engine';
+import { hasSavedGameSession, mountFootballGame, type GameBoxScore, type GameEngineHandle } from './game/engine';
 import { HelmetSpritePreview } from './game/HelmetSpritePreview';
 import { RealPlayTutorial } from './game/RealPlayTutorial';
 import { TEAM_KEYS, TEAMS, getAllTeams, getTeam, type TeamProfile } from './game/teams';
@@ -10,10 +10,23 @@ import { createSeason, getSeasonRecord, loadGameMode, loadSeasonProgress, record
 import { getRivalryForMatchup, type RivalryGame } from './game/rivalries';
 import type { TacticalMode } from './game/types';
 import { PRO_OFFENSE_PLAYS, PRO_DEFENSE_PLAYS, type ProOffensePlayId, type ProDefensePlayId } from './game/proMode';
-import { ProPlaybookCards } from './game/ProPlaybookCards';
+import { TecmoPlaybookCards } from './game/TecmoPlaybookCards';
+import { getTecmoPlaysForTeam } from './game/tecmoPlaybook';
 import { PLAYER_TRAIT_COLORS } from './game/roster';
 import { getTeamPlaybook, getTeamOffensePlays, getTeamDefensePlays } from './game/teamPlaybooks';
-import { connectToLobbyServer, createLobby, joinLobby, type LobbyRole, type MultiplayerSocket, type OnlineLobby } from './game/multiplayer';
+import {
+  createLobby,
+  joinLobby,
+  setLobbyTeam,
+  setLobbyReady,
+  startOnlineMatch,
+  sendGameAction,
+  sendGameInput,
+  sendGameSync,
+  leaveLobby,
+  getMultiplayerSocket,
+  type LobbyRoom
+} from './game/multiplayer';
 
 function getTeamTextStyle(color: string) {
   const hex = color.replace('#', '');
@@ -37,11 +50,11 @@ export default function App() {
   const [userScore, setUserScore] = useState(0);
   const [cpuScore, setCpuScore] = useState(0);
   const [downDistanceText, setDownDistanceText] = useState('1st & 10 at OWN 20');
-  const [p1OffPlayState, setP1OffPlayState] = useState('SHORT_PASS');
+  const [p1OffPlayState, setP1OffPlayState] = useState(() => getTecmoPlaysForTeam('ALABAMA')[0].id);
   const [p1OffFormationState, setP1OffFormationState] = useState<'SPREAD' | 'STACK' | 'TRIPS'>('SPREAD');
-  const [p1DefPlayState, setP1DefPlayState] = useState('COVER2');
-  const [p2OffPlayState, setP2OffPlayState] = useState('SHORT_PASS');
-  const [p2DefPlayState, setP2DefPlayState] = useState('COVER2');
+  const [p1DefPlayState, setP1DefPlayState] = useState(() => getTecmoPlaysForTeam('GEORGIA')[0].id);
+  const [p2OffPlayState, setP2OffPlayState] = useState(() => getTecmoPlaysForTeam('GEORGIA')[0].id);
+  const [p2DefPlayState, setP2DefPlayState] = useState(() => getTecmoPlaysForTeam('ALABAMA')[0].id);
   const [activeOffenseState, setActiveOffenseState] = useState('P1');
   const [p1TeamState, setP1TeamState] = useState<TeamProfile>(TEAMS.ALABAMA);
   const [p2TeamState, setP2TeamState] = useState<TeamProfile>(TEAMS.GEORGIA);
@@ -50,16 +63,7 @@ export default function App() {
   const [teamSearch, setTeamSearch] = useState('');
   const [showTeamModal, setShowTeamModal] = useState(() => !hasSavedGameSession());
   const [setupStep, setSetupStep] = useState<'MODE' | 'TEAMS'>('MODE');
-  const [showOnlineLobby, setShowOnlineLobby] = useState(false);
-  const [onlineLobby, setOnlineLobby] = useState<OnlineLobby | null>(null);
-  const [onlineRole, setOnlineRole] = useState<LobbyRole | null>(null);
-  const [onlineName, setOnlineName] = useState('Player');
-  const [onlineTeamId, setOnlineTeamId] = useState(TEAMS.ALABAMA.id);
-  const [lobbyCodeInput, setLobbyCodeInput] = useState('');
-  const [onlineError, setOnlineError] = useState('');
-  const [onlineBusy, setOnlineBusy] = useState(false);
-  const [copiedLobbyCode, setCopiedLobbyCode] = useState(false);
-  const [guestDefenderIndex, setGuestDefenderIndex] = useState(0);
+  const [selectedDefenderIdx, setSelectedDefenderIdx] = useState(0);
   const [showSettings, setShowSettings] = useState(false);
   const [hasKickedOff, setHasKickedOff] = useState(hasSavedGameSession);
   const [showPauseMenu, setShowPauseMenu] = useState(hasSavedGameSession);
@@ -70,8 +74,6 @@ export default function App() {
   const [isStartingNewSeason, setIsStartingNewSeason] = useState(false);
   const [finishedGame, setFinishedGame] = useState<{ p1Score: number; p2Score: number; restored: boolean; boxScore: GameBoxScore } | null>(null);
   const finishedGameHandledRef = useRef(false);
-  const multiplayerSocketRef = useRef<MultiplayerSocket | null>(null);
-  const onlineRoleRef = useRef<LobbyRole | null>(null);
   const gameModeRef = useRef(gameMode);
   const seasonProgressRef = useRef(seasonProgress);
   const [isKickoffActive, setIsKickoffActive] = useState(true);
@@ -79,9 +81,9 @@ export default function App() {
   const [is4thDown, setIs4thDown] = useState(false);
   const [fgMeterState, setFgMeterState] = useState<{ stage: 'AIM' | 'POWER' | 'KICKING'; aim: number; power: number; distanceYards: number } | null>(null);
   const [tacticalMode, setTacticalMode] = useState<TacticalMode>('PRO');
-  const [showProPlaybookCards, setShowProPlaybookCards] = useState(false);
+  const [showPlaybookCards, setShowPlaybookCards] = useState(false);
   const [showElitePlaybook, setShowElitePlaybook] = useState(false);
-  const proPlaybookCallSelectedRef = useRef(false);
+  const playbookCallSelectedRef = useRef(false);
   const [phaseState, setPhaseState] = useState('PRE_SNAP');
   const [kickMeterPower, setKickMeterPower] = useState(0.55);
   const [momentumState, setMomentumState] = useState(0);
@@ -89,6 +91,27 @@ export default function App() {
   const [isTurboActive, setIsTurboActive] = useState(false);
   const [isDefenderOnFire, setIsDefenderOnFire] = useState(false);
   const [gameClockState, setGameClockState] = useState({ quarter: 1, seconds: 120 });
+  // Online Multiplayer States
+  const [showOnlineLobby, setShowOnlineLobby] = useState(false);
+  const [onlineLobby, setOnlineLobby] = useState<LobbyRoom | null>(null);
+  const [onlineRole, setOnlineRole] = useState<'host' | 'guest' | null>(null);
+  const onlineRoleRef = useRef<'host' | 'guest' | null>(null);
+  const [onlineName, setOnlineName] = useState(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        return window.localStorage?.getItem('player_display_name') || 'Player 1';
+      } catch {
+        return 'Player 1';
+      }
+    }
+    return 'Player 1';
+  });
+  const [onlineTeamId, setOnlineTeamId] = useState('ALABAMA');
+  const [lobbyCodeInput, setLobbyCodeInput] = useState('');
+  const [onlineError, setOnlineError] = useState('');
+  const [onlineBusy, setOnlineBusy] = useState(false);
+  const [copiedLobbyCode, setCopiedLobbyCode] = useState(false);
+  const [guestDefenderIndex, setGuestDefenderIndex] = useState(0);
   const [banner, setBanner] = useState<{
     text: string;
     color: string;
@@ -405,156 +428,12 @@ export default function App() {
       onDefenderOnFireChange: (onFire) => {
         setIsDefenderOnFire(onFire);
       },
+      onControlledDefenderChange: (index) => {
+        setSelectedDefenderIdx(index);
+      },
       setP1OffPlayState
     });
   }, []);
-
-  const attachOnlineSocket = (socket: MultiplayerSocket) => {
-    socket.on('lobby:update', (lobby: OnlineLobby) => setOnlineLobby(lobby));
-    socket.on('lobby:closed', () => {
-      setOnlineError('The host closed this lobby.');
-      setOnlineLobby(null);
-      setOnlineRole(null);
-      onlineRoleRef.current = null;
-      engineRef.current?.setOnlineRole?.(null);
-    });
-    socket.on('match:input', (message: { kind?: string; input?: { x: number; y: number; active: boolean }; action?: RemoteGameAction }) => {
-      if (onlineRoleRef.current !== 'host') return;
-      if (message.kind === 'move' && message.input) engineRef.current?.setRemoteInput?.(message.input);
-      if (message.kind === 'action' && message.action) engineRef.current?.applyRemoteAction?.(message.action);
-    });
-    socket.on('match:state', (snapshot: Record<string, unknown>) => {
-      if (onlineRoleRef.current === 'guest') engineRef.current?.applyOnlineSnapshot?.(snapshot);
-    });
-    socket.on('match:started', () => {
-      if (onlineRoleRef.current !== 'guest') return;
-      gameModeRef.current = 'ONE_GAME';
-      setGameMode('ONE_GAME');
-      setHasKickedOff(true);
-      setShowOnlineLobby(false);
-      setShowTeamModal(false);
-      setShowPauseMenu(false);
-      engineRef.current?.setOnlineRole?.('guest');
-    });
-    socket.on('disconnect', () => {
-      setOnlineError('Connection lost. Reconnecting to the lobby...');
-    });
-    socket.on('connect', () => setOnlineError(''));
-  };
-
-  const getOnlineSocket = async (): Promise<MultiplayerSocket> => {
-    const existing = multiplayerSocketRef.current;
-    if (existing?.connected) return existing;
-    const socket = existing ?? connectToLobbyServer();
-    multiplayerSocketRef.current = socket;
-    if (!existing) attachOnlineSocket(socket);
-    if (socket.connected) return socket;
-    await new Promise<void>((resolve, reject) => {
-      const timeoutId = window.setTimeout(() => reject(new Error('Could not connect to the multiplayer server.')), 8000);
-      socket.once('connect', () => {
-        window.clearTimeout(timeoutId);
-        resolve();
-      });
-      socket.once('connect_error', error => {
-        window.clearTimeout(timeoutId);
-        reject(error);
-      });
-    });
-    return socket;
-  };
-
-  const handleCreateOnlineLobby = async () => {
-    setOnlineBusy(true);
-    setOnlineError('');
-    try {
-      const socket = await getOnlineSocket();
-      const result = await createLobby(socket, onlineName, onlineTeamId);
-      if (!result.ok || !result.lobby) throw new Error(result.error || 'Unable to create lobby.');
-      onlineRoleRef.current = 'host';
-      setOnlineRole('host');
-      setOnlineLobby(result.lobby);
-      engineRef.current?.setOnlineRole?.('host');
-    } catch (error) {
-      setOnlineError(error instanceof Error ? error.message : 'Unable to connect to multiplayer.');
-    } finally {
-      setOnlineBusy(false);
-    }
-  };
-
-  const handleJoinOnlineLobby = async () => {
-    setOnlineBusy(true);
-    setOnlineError('');
-    try {
-      const socket = await getOnlineSocket();
-      const result = await joinLobby(socket, lobbyCodeInput, onlineName, onlineTeamId);
-      if (!result.ok || !result.lobby) throw new Error(result.error || 'Unable to join lobby.');
-      onlineRoleRef.current = 'guest';
-      setOnlineRole('guest');
-      setOnlineLobby(result.lobby);
-      socket.emit('lobby:team', onlineTeamId);
-      engineRef.current?.setOnlineRole?.('guest');
-    } catch (error) {
-      setOnlineError(error instanceof Error ? error.message : 'Unable to connect to multiplayer.');
-    } finally {
-      setOnlineBusy(false);
-    }
-  };
-
-  const handleStartOnlineMatch = async () => {
-    const socket = multiplayerSocketRef.current;
-    if (!socket || onlineRole !== 'host' || !onlineLobby?.guest?.ready) return;
-    setOnlineBusy(true);
-    setOnlineError('');
-    socket.timeout(8000).emit('lobby:start', async (error: Error | null, result: { ok: boolean; error?: string }) => {
-      if (error || !result?.ok) {
-        setOnlineError(result?.error || 'The guest is not ready yet.');
-        setOnlineBusy(false);
-        return;
-      }
-      gameModeRef.current = 'ONE_GAME';
-      setGameMode('ONE_GAME');
-      engineRef.current?.selectP1Team(onlineLobby.host.teamId || p1TeamState.id);
-      engineRef.current?.selectP2Team(onlineLobby.guest?.teamId || TEAMS.GEORGIA.id);
-      engineRef.current?.setOnlineRole?.('host');
-      engineRef.current?.resetGame();
-      setHasKickedOff(true);
-      setShowOnlineLobby(false);
-      setShowTeamModal(false);
-      setShowPauseMenu(false);
-      sounds.playWhistle();
-      setOnlineBusy(false);
-    });
-  };
-
-  const handleLeaveOnlineLobby = () => {
-    multiplayerSocketRef.current?.emit('lobby:leave');
-    multiplayerSocketRef.current?.disconnect();
-    multiplayerSocketRef.current = null;
-    onlineRoleRef.current = null;
-    setOnlineRole(null);
-    setOnlineLobby(null);
-    setShowOnlineLobby(false);
-    setOnlineError('');
-    engineRef.current?.endGame();
-    engineRef.current?.setRemoteInput?.({ x: 0, y: 0, active: false });
-    engineRef.current?.setOnlineRole?.(null);
-    setHasKickedOff(false);
-    setShowPauseMenu(false);
-    setFinishedGame(null);
-    setShowTeamModal(true);
-    setSetupStep('MODE');
-  };
-
-  useEffect(() => {
-    if (onlineRole !== 'host' || !onlineLobby?.started) return;
-    const socket = multiplayerSocketRef.current;
-    if (!socket) return;
-    const intervalId = window.setInterval(() => {
-      const snapshot = engineRef.current?.getOnlineSnapshot?.();
-      if (snapshot) socket.emit('match:state', snapshot);
-    }, 100);
-    return () => window.clearInterval(intervalId);
-  }, [onlineRole, onlineLobby?.started]);
 
   useEffect(() => {
     if (showPauseMenu) engineRef.current?.setPaused(true);
@@ -587,14 +466,155 @@ export default function App() {
     return () => document.removeEventListener('visibilitychange', pauseWhenHidden);
   }, [hasKickedOff]);
 
-  const sendRemoteAction = (action: RemoteGameAction) => {
-    if (onlineRoleRef.current === 'guest') multiplayerSocketRef.current?.emit('match:input', { kind: 'action', action });
+  // Online Multiplayer Socket.io lifecycle
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const socket = getMultiplayerSocket();
+
+    const onLobbyUpdated = (lobby: LobbyRoom) => {
+      setOnlineLobby(lobby);
+      setOnlineError('');
+    };
+
+    const onMatchStart = (payload: { code: string; hostTeamId: string; guestTeamId: string; hostName: string; guestName: string }) => {
+      setShowOnlineLobby(false);
+      setShowTeamModal(false);
+      setShowPauseMenu(false);
+      const hostTeam = getTeam(payload.hostTeamId);
+      const guestTeam = getTeam(payload.guestTeamId);
+      setP1TeamState(hostTeam);
+      setP2TeamState(guestTeam);
+      engineRef.current?.selectP1Team(hostTeam.id);
+      engineRef.current?.selectP2Team(guestTeam.id);
+      engineRef.current?.resetGame();
+      setHasKickedOff(true);
+      showAnnouncement(`ONLINE MATCH: ${hostTeam.nickname.toUpperCase()} VS ${guestTeam.nickname.toUpperCase()} 🏈`, '#00ffff', true);
+    };
+
+    const onGameAction = (action: any) => {
+      if (onlineRoleRef.current === 'host') {
+        engineRef.current?.applyRemoteAction?.(action);
+      } else if (onlineRoleRef.current === 'guest') {
+        if (action?.type === 'START') {
+          engineRef.current?.startPlay?.();
+        } else if (action?.type === 'OFFENSE_PLAY') {
+          setP1OffPlayState(action.play);
+        } else if (action?.type === 'DEFENSE_PLAY') {
+          setP1DefPlayState(action.play);
+        }
+      }
+    };
+
+    const onGameInput = (input: any) => {
+      if (onlineRoleRef.current === 'host') {
+        engineRef.current?.applyRemoteInput?.(input.dx, input.dy, input.active);
+      }
+    };
+
+    const onGameSync = (state: any) => {
+      if (onlineRoleRef.current === 'guest') {
+        if (typeof state.userScore === 'number') setUserScore(state.userScore);
+        if (typeof state.cpuScore === 'number') setCpuScore(state.cpuScore);
+        if (state.downDistanceText) setDownDistanceText(state.downDistanceText);
+        if (state.phase) setPhaseState(state.phase);
+        if (typeof state.is4thDown === 'boolean') setIs4thDown(state.is4thDown);
+        if (typeof state.isKickoffActive === 'boolean') setIsKickoffActive(state.isKickoffActive);
+        if (state.clock) setGameClockState(state.clock);
+      }
+    };
+
+    const onPeerDisconnected = (data: { message: string }) => {
+      showAnnouncement(data?.message || 'Online opponent disconnected', '#ff4444', true);
+      setOnlineError(data?.message || 'Opponent disconnected');
+    };
+
+    socket.on('lobby:updated', onLobbyUpdated);
+    socket.on('match:start', onMatchStart);
+    socket.on('game:action', onGameAction);
+    socket.on('game:input', onGameInput);
+    socket.on('game:sync', onGameSync);
+    socket.on('peer:disconnected', onPeerDisconnected);
+
+    return () => {
+      socket.off('lobby:updated', onLobbyUpdated);
+      socket.off('match:start', onMatchStart);
+      socket.off('game:action', onGameAction);
+      socket.off('game:input', onGameInput);
+      socket.off('game:sync', onGameSync);
+      socket.off('peer:disconnected', onPeerDisconnected);
+    };
+  }, []);
+
+  // Host synchronizes authoritative state to guest periodically
+  useEffect(() => {
+    if (onlineRole !== 'host') return;
+    const interval = setInterval(() => {
+      sendGameSync({
+        userScore,
+        cpuScore,
+        downDistanceText,
+        phase: phaseState,
+        is4thDown,
+        isKickoffActive,
+        clock: gameClockState
+      });
+    }, 200);
+    return () => clearInterval(interval);
+  }, [onlineRole, userScore, cpuScore, downDistanceText, phaseState, is4thDown, isKickoffActive, gameClockState]);
+
+  const handleCreateOnlineLobby = async () => {
+    setOnlineBusy(true);
+    setOnlineError('');
+    try {
+      window.localStorage?.setItem('player_display_name', onlineName);
+    } catch {}
+    const res = await createLobby(onlineName, onlineTeamId || p1TeamState.id);
+    setOnlineBusy(false);
+    if (res.success && res.lobby) {
+      setOnlineLobby(res.lobby);
+      setOnlineRole('host');
+      onlineRoleRef.current = 'host';
+    } else {
+      setOnlineError(res.error || 'Failed to create lobby');
+    }
   };
 
-  const sendRemoteInput = (x: number, y: number, active: boolean) => {
-    if (onlineRoleRef.current === 'guest') {
-      multiplayerSocketRef.current?.emit('match:input', { kind: 'move', input: { x, y, active } });
+  const handleJoinOnlineLobby = async () => {
+    if (!lobbyCodeInput.trim()) return;
+    setOnlineBusy(true);
+    setOnlineError('');
+    try {
+      window.localStorage?.setItem('player_display_name', onlineName);
+    } catch {}
+    const res = await joinLobby(lobbyCodeInput.trim().toUpperCase(), onlineName, onlineTeamId || p2TeamState.id);
+    setOnlineBusy(false);
+    if (res.success && res.lobby) {
+      setOnlineLobby(res.lobby);
+      setOnlineRole('guest');
+      onlineRoleRef.current = 'guest';
+    } else {
+      setOnlineError(res.error || 'Failed to join lobby');
     }
+  };
+
+  const handleStartOnlineMatch = () => {
+    startOnlineMatch();
+  };
+
+  const handleLeaveOnlineLobby = () => {
+    leaveLobby();
+    setOnlineLobby(null);
+    setOnlineRole(null);
+    onlineRoleRef.current = null;
+    setShowOnlineLobby(false);
+  };
+
+  const sendRemoteAction = (action: any) => {
+    sendGameAction(action);
+  };
+
+  const sendRemoteInput = (dx: number, dy: number, active: boolean) => {
+    sendGameInput({ dx, dy, active });
   };
 
   // Handlers for switching teams
@@ -602,6 +622,9 @@ export default function App() {
     if (engineRef.current) {
       engineRef.current.selectP1Team(teamId);
     }
+    const defOff = getTecmoPlaysForTeam(teamId)[0].id;
+    setP1OffPlayState(defOff);
+    engineRef.current?.selectOffense(defOff);
     if (gameModeRef.current === 'SEASON') {
       const currentSeason = seasonProgressRef.current;
       const nextSeason = currentSeason?.teamId === teamId
@@ -614,6 +637,9 @@ export default function App() {
         const opponent = getTeam(nextOpponentId);
         setP2TeamState(opponent);
         engineRef.current?.selectP2Team(nextOpponentId);
+        const defDef = getTecmoPlaysForTeam(nextOpponentId)[0].id;
+        setP1DefPlayState(defDef);
+        engineRef.current?.selectDefense(defDef);
       }
     }
   };
@@ -622,27 +648,24 @@ export default function App() {
     if (engineRef.current) {
       engineRef.current.selectP2Team(teamId);
     }
+    const defDef = getTecmoPlaysForTeam(teamId)[0].id;
+    setP1DefPlayState(defDef);
+    engineRef.current?.selectDefense(defDef);
   };
 
-  // Handlers for user changing offensive/defensive plays (user only controls their own side)
+  // Handlers for user changing offensive/defensive plays
   const handleSelectOffensePlay = (key: string) => {
-    if (onlineRole === 'guest') {
-      if (activeOffenseState === 'P2') sendRemoteAction({ type: 'OFFENSE_PLAY', play: key });
-      return;
-    }
     if (activeOffenseState === 'P1' && engineRef.current?.phase === 'PRE_SNAP' &&
       !engineRef.current.isKickoffActive() && (key !== 'PUNT' || is4thDown)) {
+      setP1OffPlayState(key);
       engineRef.current.selectOffense(key);
     }
   };
 
   const handleSelectDefensePlay = (key: string) => {
-    if (onlineRole === 'guest') {
-      if (activeOffenseState === 'P1') sendRemoteAction({ type: 'DEFENSE_PLAY', play: key });
-      return;
-    }
     if (activeOffenseState === 'P2') {
       if (engineRef.current) {
+        setP1DefPlayState(key);
         engineRef.current.selectDefense(key);
       }
     }
@@ -862,20 +885,20 @@ export default function App() {
   const userTeamPlaybook = getTeamPlaybook(p1TeamState.id);
 
   useEffect(() => {
-    if (phaseState !== 'PRE_SNAP' || tacticalMode !== 'PRO') {
-      proPlaybookCallSelectedRef.current = false;
+    if (phaseState !== 'PRE_SNAP') {
+      playbookCallSelectedRef.current = false;
     }
-    const canShowPlaybook = onlineRole !== 'guest' && hasKickedOff && phaseState === 'PRE_SNAP' &&
-      !isKickoffActive && tacticalMode === 'PRO' &&
+    const canShowPlaybook = hasKickedOff && phaseState === 'PRE_SNAP' &&
+      !isKickoffActive &&
       !showPauseMenu && !showTeamModal && !showTutorial && !showSettings && !finishedGame;
     if (!canShowPlaybook) {
-      setShowProPlaybookCards(false);
+      setShowPlaybookCards(false);
       return;
     }
-    if (!proPlaybookCallSelectedRef.current) {
-      setShowProPlaybookCards(true);
+    if (!playbookCallSelectedRef.current) {
+      setShowPlaybookCards(true);
     }
-  }, [finishedGame, hasKickedOff, isKickoffActive, onlineRole, phaseState, showPauseMenu, showTeamModal, showTutorial, showSettings, tacticalMode]);
+  }, [finishedGame, hasKickedOff, isKickoffActive, phaseState, showPauseMenu, showTeamModal, showTutorial, showSettings]);
 
   return (
     <div className="relative w-screen min-h-[100dvh] h-[100dvh] overflow-hidden flex flex-col items-center justify-between pt-1 pb-0 bg-[#030704] text-white font-mono select-none">
@@ -983,7 +1006,7 @@ export default function App() {
               {isUserPreSnapPhase && (
                 <button
                   type="button"
-                  onClick={() => tacticalMode === 'PRO' ? setShowProPlaybookCards(true) : setShowElitePlaybook(true)}
+                  onClick={() => setShowPlaybookCards(true)}
                   className="p-1 text-amber-300 hover:text-white transition cursor-pointer"
                   title="Team playbook"
                   aria-label="Team playbook"
@@ -1043,6 +1066,51 @@ export default function App() {
         </div>
 
       </header>
+
+      {/* Pre-Snap Tecmo Playcall Status Bar */}
+      {isUserPreSnapPhase && !isKickoffActive && !showPauseMenu && (
+        <div className="flex items-center justify-between gap-1.5 w-full max-w-[430px] px-2 py-1 mb-0.5 bg-black/90 border border-neutral-700/80 rounded-lg text-[0.62rem] z-20 shrink-0 shadow-lg">
+          {activeOffenseState === 'P1' ? (
+            <>
+              <button
+                type="button"
+                onClick={() => setShowPlaybookCards(true)}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-amber-950/80 border border-amber-500/60 text-amber-200 hover:bg-amber-900 transition active:scale-95 cursor-pointer"
+                title="Tap to change offensive play card"
+              >
+                <BookOpen size={11} className="text-amber-400 shrink-0" />
+                <span className="font-black truncate max-w-[170px]">
+                  PLAY: {offensivePlaybook[p1OffPlayState]?.name ?? p1OffPlayState} ({offensivePlaybook[p1OffPlayState]?.isRun ? 'RUN' : 'PASS'})
+                </span>
+                <span className="text-[9px] text-amber-400/80 font-bold underline">CHANGE</span>
+              </button>
+              <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-red-950/60 border border-red-500/50 text-red-300">
+                <Shield size={11} className="text-red-400 shrink-0" />
+                <span className="font-bold">CPU DEFENSE: SCHEME LOCKED 🔒</span>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-amber-950/60 border border-amber-500/50 text-amber-300">
+                <BookOpen size={11} className="text-amber-400 shrink-0" />
+                <span className="font-bold">CPU OFFENSE: READY</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowPlaybookCards(true)}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-red-950/80 border border-red-500/60 text-red-200 hover:bg-red-900 transition active:scale-95 cursor-pointer"
+                title="Tap to change what play to defend"
+              >
+                <Shield size={11} className="text-red-400 shrink-0" />
+                <span className="font-black truncate max-w-[170px]">
+                  DEFENDING: {offensivePlaybook[p1DefPlayState]?.name ?? p1DefPlayState}
+                </span>
+                <span className="text-[9px] text-red-400/80 font-bold underline">CHANGE</span>
+              </button>
+            </>
+          )}
+        </div>
+      )}
 
       {/* 4th Down Special Teams Punt / Field Goal Action Controls */}
       {((showPuntAction && p1OffPlayState !== 'PUNT' && p1OffPlayState !== 'FIELD_GOAL') ||
@@ -1223,61 +1291,146 @@ export default function App() {
         </div>
       )}
 
+
+
       {onlineRole === 'guest' && hasKickedOff && !showPauseMenu && (
-        <div className="fixed bottom-2 left-1/2 z-[90] w-[min(96vw,430px)] -translate-x-1/2 rounded-lg border border-cyan-300/50 bg-[#07110f]/95 p-2.5 text-white shadow-2xl backdrop-blur">
+        <div className="fixed bottom-2 left-1/2 z-[90] w-[min(96vw,430px)] -translate-x-1/2 rounded-xl border border-cyan-300/50 bg-[#07110f]/95 p-3 text-white shadow-2xl backdrop-blur">
           <div className="flex items-center justify-between gap-2 border-b border-white/10 px-1 pb-2">
-            <span className="truncate text-[10px] font-black uppercase text-cyan-200">Online • {activeOffenseState === 'P2' ? 'Your offense' : 'Your defense'}</span>
+            <span className="truncate text-[10px] font-black uppercase text-cyan-200">
+              Online Guest • {activeOffenseState === 'P2' ? 'Your Offense' : 'Your Defense'}
+            </span>
             <span className="shrink-0 text-[10px] font-bold text-neutral-400">{phaseState.replace('_', ' ')}</span>
           </div>
+
           {phaseState === 'PRE_SNAP' && !isKickoffActive && (
             <div className="mt-2 flex gap-2">
               <select
                 aria-label={activeOffenseState === 'P2' ? 'Choose offensive play' : 'Choose defensive scheme'}
                 value={activeOffenseState === 'P2' ? p2OffPlayState : p2DefPlayState}
-                onChange={event => sendRemoteAction(activeOffenseState === 'P2'
-                  ? { type: 'OFFENSE_PLAY', play: event.target.value }
-                  : { type: 'DEFENSE_PLAY', play: event.target.value })}
-                className="min-w-0 flex-1 rounded border border-white/15 bg-[#12211f] px-2 py-2 text-xs text-white"
+                onChange={event => {
+                  const val = event.target.value;
+                  if (activeOffenseState === 'P2') {
+                    setP2OffPlayState(val);
+                    sendRemoteAction({ type: 'OFFENSE_PLAY', play: val });
+                  } else {
+                    setP2DefPlayState(val);
+                    sendRemoteAction({ type: 'DEFENSE_PLAY', play: val });
+                  }
+                }}
+                className="min-w-0 flex-1 rounded-lg border border-white/15 bg-[#12211f] px-2 py-2 text-xs text-white"
               >
-                {(activeOffenseState === 'P2'
-                  ? getTeamOffensePlays(p2TeamState.id, 'PRO')
-                  : getTeamDefensePlays(p2TeamState.id, 'PRO')).map(playId => (
-                    <option key={playId} value={playId}>
-                      {activeOffenseState === 'P2'
-                        ? PRO_OFFENSE_PLAYS[playId as ProOffensePlayId]?.name || offensivePlaybook[playId]?.name || playId
-                        : PRO_DEFENSE_PLAYS[playId as ProDefensePlayId]?.name || defensivePlaybook[playId]?.name || playId}
-                    </option>
-                  ))}
+                {getTecmoPlaysForTeam(activeOffenseState === 'P2' ? p2TeamState.id : p1TeamState.id).map(play => (
+                  <option key={play.id} value={play.id}>
+                    {play.name} ({play.isRun ? 'RUN' : 'PASS'})
+                  </option>
+                ))}
               </select>
-              {activeOffenseState === 'P2' && <button type="button" onClick={() => sendRemoteAction({ type: 'START' })} className="shrink-0 rounded bg-cyan-400 px-4 py-2 text-xs font-black uppercase text-[#061014]">Snap</button>}
+              {activeOffenseState === 'P2' && (
+                <button
+                  type="button"
+                  onClick={() => sendRemoteAction({ type: 'START' })}
+                  className="shrink-0 rounded-lg bg-cyan-400 px-4 py-2 text-xs font-black uppercase text-[#061014] active:scale-95 cursor-pointer"
+                >
+                  Snap
+                </button>
+              )}
             </div>
           )}
-          {isKickoffActive && <button type="button" onClick={() => sendRemoteAction({ type: 'START' })} className="mt-2 w-full rounded bg-cyan-400 px-4 py-2 text-xs font-black uppercase text-[#061014]">Start kickoff</button>}
+
+          {isKickoffActive && activeOffenseState === 'P2' && (
+            <button
+              type="button"
+              onClick={() => sendRemoteAction({ type: 'START' })}
+              className="mt-2 w-full rounded-lg bg-cyan-400 px-4 py-2.5 text-xs font-black uppercase text-[#061014] active:scale-95 cursor-pointer"
+            >
+              Start Kickoff
+            </button>
+          )}
+
           {phaseState !== 'PRE_SNAP' && (
-            <div className="mt-2 flex items-center justify-between gap-2">
+            <div className="mt-2 flex items-center justify-between gap-3">
+              {/* Virtual D-Pad for Directional Movement */}
               <div className="grid grid-cols-3 gap-1">
                 <span />
-                <button type="button" aria-label="Move up" onPointerDown={event => { event.preventDefault(); sendRemoteInput(0, -1, true); }} onPointerUp={() => sendRemoteInput(0, 0, false)} onPointerCancel={() => sendRemoteInput(0, 0, false)} className="h-10 w-10 rounded border border-white/15 bg-white/10 text-lg font-black">↑</button>
+                <button
+                  type="button"
+                  aria-label="Move up"
+                  onPointerDown={event => { event.preventDefault(); sendRemoteInput(0, -1, true); }}
+                  onPointerUp={() => sendRemoteInput(0, 0, false)}
+                  onPointerCancel={() => sendRemoteInput(0, 0, false)}
+                  className="h-9 w-9 rounded-lg border border-white/15 bg-white/10 text-base font-black active:bg-cyan-500/40"
+                >↑</button>
                 <span />
-                <button type="button" aria-label="Move left" onPointerDown={event => { event.preventDefault(); sendRemoteInput(-1, 0, true); }} onPointerUp={() => sendRemoteInput(0, 0, false)} onPointerCancel={() => sendRemoteInput(0, 0, false)} className="h-10 w-10 rounded border border-white/15 bg-white/10 text-lg font-black">←</button>
-                <button type="button" aria-label="Move down" onPointerDown={event => { event.preventDefault(); sendRemoteInput(0, 1, true); }} onPointerUp={() => sendRemoteInput(0, 0, false)} onPointerCancel={() => sendRemoteInput(0, 0, false)} className="h-10 w-10 rounded border border-white/15 bg-white/10 text-lg font-black">↓</button>
-                <button type="button" aria-label="Move right" onPointerDown={event => { event.preventDefault(); sendRemoteInput(1, 0, true); }} onPointerUp={() => sendRemoteInput(0, 0, false)} onPointerCancel={() => sendRemoteInput(0, 0, false)} className="h-10 w-10 rounded border border-white/15 bg-white/10 text-lg font-black">→</button>
+                <button
+                  type="button"
+                  aria-label="Move left"
+                  onPointerDown={event => { event.preventDefault(); sendRemoteInput(-1, 0, true); }}
+                  onPointerUp={() => sendRemoteInput(0, 0, false)}
+                  onPointerCancel={() => sendRemoteInput(0, 0, false)}
+                  className="h-9 w-9 rounded-lg border border-white/15 bg-white/10 text-base font-black active:bg-cyan-500/40"
+                >←</button>
+                <button
+                  type="button"
+                  aria-label="Move down"
+                  onPointerDown={event => { event.preventDefault(); sendRemoteInput(0, 1, true); }}
+                  onPointerUp={() => sendRemoteInput(0, 0, false)}
+                  onPointerCancel={() => sendRemoteInput(0, 0, false)}
+                  className="h-9 w-9 rounded-lg border border-white/15 bg-white/10 text-base font-black active:bg-cyan-500/40"
+                >↓</button>
+                <button
+                  type="button"
+                  aria-label="Move right"
+                  onPointerDown={event => { event.preventDefault(); sendRemoteInput(1, 0, true); }}
+                  onPointerUp={() => sendRemoteInput(0, 0, false)}
+                  onPointerCancel={() => sendRemoteInput(0, 0, false)}
+                  className="h-9 w-9 rounded-lg border border-white/15 bg-white/10 text-base font-black active:bg-cyan-500/40"
+                >→</button>
               </div>
-              <div className="flex flex-1 flex-wrap justify-end gap-1">
-                {phaseState === 'QB_DROP' && activeOffenseState === 'P2' && [0, 1, 2, 3, 4].map(target => (
-                  <button key={target} type="button" onClick={() => sendRemoteAction({ type: 'THROW', target })} className="rounded border border-amber-300/40 bg-amber-300/10 px-2.5 py-2 text-[10px] font-black uppercase text-amber-100">Pass {target + 1}</button>
+
+              {/* Action Buttons for Guest (Passing or Defense) */}
+              <div className="flex flex-1 flex-wrap justify-end gap-1.5">
+                {phaseState === 'QB_DROP' && activeOffenseState === 'P2' && [0, 1, 2, 3].map(target => (
+                  <button
+                    key={target}
+                    type="button"
+                    onClick={() => sendRemoteAction({ type: 'THROW', target })}
+                    className="rounded-lg border border-amber-300/40 bg-amber-300/10 px-2.5 py-2 text-[10px] font-black uppercase text-amber-100 active:bg-amber-400 active:text-black cursor-pointer"
+                  >
+                    Pass {target + 1}
+                  </button>
                 ))}
-                {activeOffenseState === 'P1' && phaseState !== 'THROWN' && [0, 1, 2, 3, 4, 5, 6, 7].map(index => (
-                  <button key={index} type="button" aria-pressed={guestDefenderIndex === index} onClick={() => { setGuestDefenderIndex(index); sendRemoteAction({ type: 'DEFENDER', index }); }} className={`rounded border px-2 py-2 text-[10px] font-black ${guestDefenderIndex === index ? 'border-cyan-300 bg-cyan-400/20 text-cyan-100' : 'border-white/10 bg-white/5 text-neutral-300'}`}>D{index + 1}</button>
+                {activeOffenseState === 'P1' && phaseState !== 'THROWN' && [0, 1, 2, 3, 4, 5, 6].map(index => (
+                  <button
+                    key={index}
+                    type="button"
+                    aria-pressed={guestDefenderIndex === index}
+                    onClick={() => {
+                      setGuestDefenderIndex(index);
+                      sendRemoteAction({ type: 'DEFENDER', index });
+                    }}
+                    className={`rounded-lg border px-2 py-1.5 text-[10px] font-black cursor-pointer ${
+                      guestDefenderIndex === index
+                        ? 'border-cyan-300 bg-cyan-400/20 text-cyan-100'
+                        : 'border-white/10 bg-white/5 text-neutral-300'
+                    }`}
+                  >
+                    D{index + 1}
+                  </button>
                 ))}
-                {activeOffenseState === 'P1' && <button type="button" onClick={() => sendRemoteAction({ type: phaseState === 'THROWN' ? 'SWAT' : 'DIVE' })} className="rounded bg-[#bd5635] px-3 py-2 text-[10px] font-black uppercase text-white">{phaseState === 'THROWN' ? 'Swat' : 'Dive'}</button>}
+                {activeOffenseState === 'P1' && (
+                  <button
+                    type="button"
+                    onClick={() => sendRemoteAction({ type: phaseState === 'THROWN' ? 'SWAT' : 'DIVE' })}
+                    className="rounded-lg bg-[#bd5635] px-3.5 py-2 text-[10px] font-black uppercase text-white hover:bg-[#d46845] active:scale-95 cursor-pointer"
+                  >
+                    {phaseState === 'THROWN' ? 'Swat' : 'Dive'}
+                  </button>
+                )}
               </div>
             </div>
           )}
         </div>
       )}
-
-      {/* Canvas Element - Sits directly at the bottom so joystick is available from the bottom of the screen */}
       <div className="relative flex-1 flex flex-col items-center justify-end min-h-0 w-full overflow-hidden pb-0">
         <canvas
           ref={canvasRef}
@@ -1431,9 +1584,19 @@ export default function App() {
                   <span className="mt-2 block text-xs leading-5 text-neutral-300">{description}</span>
                 </button>
               ))}
-              <button type="button" onClick={() => { setOnlineError(''); setOnlineLobby(null); setOnlineRole(null); onlineRoleRef.current = null; setShowOnlineLobby(true); }} className="rounded-lg border border-cyan-500/70 bg-[#10232a] p-4 text-left transition hover:border-cyan-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-300">
-                <span className="block text-lg font-black text-white">Online Versus</span>
-                <span className="mt-2 block text-xs leading-5 text-neutral-300">Create a lobby code or join a friend for a live head-to-head game.</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setOnlineError('');
+                  setShowOnlineLobby(true);
+                }}
+                className="rounded-lg border border-cyan-500/70 bg-[#10232a] p-4 text-left transition hover:border-cyan-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-300"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="block text-lg font-black text-white">Online Versus</span>
+                  <span className="rounded bg-cyan-400/20 px-1.5 py-0.5 text-[9px] font-black uppercase text-cyan-300">Live</span>
+                </div>
+                <span className="mt-2 block text-xs leading-5 text-neutral-300">Create an invite code or join a friend for a live head-to-head game.</span>
               </button>
             </div>
             {seasonProgress && (
@@ -1447,78 +1610,195 @@ export default function App() {
           </div>
         </section>
       )}
+
+      {/* Online Versus Lobby Modal with 6-Character Invite Code */}
       {showOnlineLobby && !hasKickedOff && (
         <section role="dialog" aria-modal="true" aria-labelledby="online-lobby-title" className="fixed inset-0 z-[115] flex items-center justify-center bg-[#07110a]/95 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-lg overflow-hidden rounded-lg border border-cyan-500/50 bg-[#0c171b] text-white shadow-2xl">
-            <header className="flex items-center justify-between border-b border-white/10 px-5 py-4">
-              <div>
-                <p className="text-[10px] font-bold uppercase text-cyan-300">Online Versus</p>
-                <h2 id="online-lobby-title" className="mt-1 text-xl font-black uppercase">{onlineLobby ? 'Waiting Room' : 'Play a Friend'}</h2>
+          <div className="w-full max-w-lg overflow-hidden rounded-xl border border-cyan-500/50 bg-[#0c171b] text-white shadow-2xl">
+            <header className="flex items-center justify-between border-b border-white/10 px-5 py-4 bg-gradient-to-r from-[#0c222b] to-[#0c171b]">
+              <div className="flex items-center gap-3">
+                <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-cyan-500/20 text-cyan-300">
+                  <Users size={20} />
+                </span>
+                <div>
+                  <p className="text-[10px] font-bold uppercase text-cyan-300 tracking-wider">Online Multiplayer</p>
+                  <h2 id="online-lobby-title" className="mt-0.5 text-xl font-black uppercase">{onlineLobby ? 'Waiting Room' : 'Play a Friend'}</h2>
+                </div>
               </div>
-              <button type="button" onClick={() => onlineLobby ? handleLeaveOnlineLobby() : setShowOnlineLobby(false)} aria-label="Close online lobby" className="rounded p-2 text-neutral-400 hover:bg-white/10 hover:text-white"><X size={18} /></button>
+              <button
+                type="button"
+                onClick={() => (onlineLobby ? handleLeaveOnlineLobby() : setShowOnlineLobby(false))}
+                aria-label="Close online lobby"
+                className="rounded-lg p-2 text-neutral-400 hover:bg-white/10 hover:text-white cursor-pointer"
+              >
+                <X size={18} />
+              </button>
             </header>
+
             <div className="space-y-4 p-5">
               {!onlineLobby ? (
                 <>
-                  <label className="block text-xs font-bold uppercase text-neutral-400">Your name
-                    <input value={onlineName} maxLength={20} onChange={event => setOnlineName(event.target.value)} className="mt-1.5 w-full rounded border border-white/15 bg-black/30 px-3 py-2.5 text-sm text-white outline-none focus:border-cyan-300" />
+                  <label className="block text-xs font-bold uppercase tracking-wider text-neutral-400">
+                    Your Name
+                    <input
+                      value={onlineName}
+                      maxLength={20}
+                      onChange={event => setOnlineName(event.target.value)}
+                      placeholder="Enter your name"
+                      className="mt-1.5 w-full rounded-lg border border-white/15 bg-black/40 px-3 py-2.5 text-sm text-white outline-none focus:border-cyan-400"
+                    />
                   </label>
-                  <label className="block text-xs font-bold uppercase text-neutral-400">Your team
-                    <select value={onlineTeamId} onChange={event => setOnlineTeamId(event.target.value)} className="mt-1.5 w-full rounded border border-white/15 bg-[#142126] px-3 py-2.5 text-sm text-white outline-none focus:border-cyan-300">
-                      {getAllTeams().map(team => <option key={team.id} value={team.id}>{team.name}</option>)}
+
+                  <label className="block text-xs font-bold uppercase tracking-wider text-neutral-400">
+                    Your Team
+                    <select
+                      value={onlineTeamId}
+                      onChange={event => setOnlineTeamId(event.target.value)}
+                      className="mt-1.5 w-full rounded-lg border border-white/15 bg-[#142126] px-3 py-2.5 text-sm text-white outline-none focus:border-cyan-400"
+                    >
+                      {getAllTeams().map(team => (
+                        <option key={team.id} value={team.id}>{team.name}</option>
+                      ))}
                     </select>
                   </label>
-                  <button type="button" disabled={onlineBusy} onClick={handleCreateOnlineLobby} className="flex w-full items-center justify-center gap-2 rounded bg-cyan-500 px-4 py-3 text-sm font-black uppercase text-[#061014] transition hover:bg-cyan-300 disabled:opacity-50">
-                    <Users size={17} /> {onlineBusy ? 'Connecting...' : 'Create lobby'}
+
+                  <button
+                    type="button"
+                    disabled={onlineBusy}
+                    onClick={handleCreateOnlineLobby}
+                    className="flex w-full items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-cyan-500 to-teal-500 px-4 py-3 text-sm font-black uppercase text-[#061014] shadow-lg transition hover:from-cyan-400 hover:to-teal-400 active:scale-95 disabled:opacity-50 cursor-pointer"
+                  >
+                    <Users size={18} /> {onlineBusy ? 'Creating...' : 'Create Invite Code & Host'}
                   </button>
-                  <div className="flex items-center gap-3 text-[10px] font-bold uppercase text-neutral-500"><span className="h-px flex-1 bg-white/10" />Or join a lobby<span className="h-px flex-1 bg-white/10" /></div>
+
+                  <div className="flex items-center gap-3 text-[10px] font-bold uppercase text-neutral-500">
+                    <span className="h-px flex-1 bg-white/10" />
+                    Or Join With Invite Code
+                    <span className="h-px flex-1 bg-white/10" />
+                  </div>
+
                   <div className="flex gap-2">
-                    <input aria-label="Lobby code" value={lobbyCodeInput} maxLength={6} onChange={event => setLobbyCodeInput(event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))} placeholder="6-character code" className="min-w-0 flex-1 rounded border border-white/15 bg-black/30 px-3 py-2.5 font-mono text-sm uppercase tracking-[0.15em] text-white outline-none focus:border-cyan-300" />
-                    <button type="button" disabled={onlineBusy || lobbyCodeInput.length !== 6} onClick={handleJoinOnlineLobby} className="rounded border border-cyan-400/50 px-4 text-xs font-black uppercase text-cyan-200 transition hover:bg-cyan-400/10 disabled:opacity-40">Join</button>
+                    <input
+                      aria-label="Lobby code"
+                      value={lobbyCodeInput}
+                      maxLength={6}
+                      onChange={event => setLobbyCodeInput(event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
+                      placeholder="6-LETTER CODE"
+                      className="min-w-0 flex-1 rounded-lg border border-white/15 bg-black/40 px-3 py-2.5 font-mono text-sm uppercase tracking-[0.2em] text-white outline-none focus:border-cyan-400 text-center font-bold"
+                    />
+                    <button
+                      type="button"
+                      disabled={onlineBusy || lobbyCodeInput.length !== 6}
+                      onClick={handleJoinOnlineLobby}
+                      className="rounded-lg border border-cyan-400/50 bg-cyan-950/40 px-5 text-xs font-black uppercase tracking-wider text-cyan-200 transition hover:bg-cyan-400 hover:text-black active:scale-95 disabled:opacity-40 cursor-pointer"
+                    >
+                      {onlineBusy ? '...' : 'Join'}
+                    </button>
                   </div>
                 </>
               ) : (
                 <>
-                  <div className="rounded border border-cyan-400/30 bg-cyan-950/30 px-4 py-4 text-center">
-                    <p className="text-[10px] font-bold uppercase text-cyan-200">Invite code</p>
-                    <p className="my-1 font-mono text-4xl font-black tracking-[0.2em] text-white">{onlineLobby.code}</p>
-                    <button type="button" onClick={() => { navigator.clipboard?.writeText(onlineLobby.code).then(() => setCopiedLobbyCode(true)).catch(() => setOnlineError('Could not copy the code.')); }} className="inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs font-bold text-cyan-200 hover:bg-white/10">
-                      {copiedLobbyCode ? <Check size={14} /> : <Copy size={14} />}{copiedLobbyCode ? 'Copied' : 'Copy code'}
+                  {/* Shareable Invite Code Display */}
+                  <div className="rounded-xl border border-cyan-400/40 bg-gradient-to-b from-cyan-950/40 to-black/60 p-5 text-center">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-cyan-300">INVITE CODE</p>
+                    <p className="my-2 font-mono text-4xl sm:text-5xl font-black tracking-[0.25em] text-white drop-shadow-[0_0_12px_rgba(6,182,212,0.6)]">
+                      {onlineLobby.code}
+                    </p>
+                    <p className="text-xs text-neutral-400 mb-3">Send this 6-character code to your friend to join this match</p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (navigator.clipboard) {
+                          navigator.clipboard.writeText(onlineLobby.code)
+                            .then(() => setCopiedLobbyCode(true))
+                            .catch(() => setOnlineError('Could not copy code.'));
+                        }
+                      }}
+                      className="inline-flex items-center gap-2 rounded-lg bg-cyan-500/20 border border-cyan-400/40 px-4 py-2 text-xs font-bold text-cyan-200 hover:bg-cyan-500/30 active:scale-95 cursor-pointer"
+                    >
+                      {copiedLobbyCode ? <Check size={16} className="text-emerald-400" /> : <Copy size={16} />}
+                      {copiedLobbyCode ? 'Copied to Clipboard!' : 'Copy Code'}
                     </button>
                   </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="rounded border border-white/10 bg-white/[0.03] p-3">
-                      <p className="text-[10px] font-bold uppercase text-neutral-500">Host</p>
-                      <p className="mt-1 truncate text-sm font-bold">{onlineLobby.host.name}</p>
-                      <p className="mt-1 text-xs text-neutral-400">{getTeam(onlineLobby.host.teamId || p1TeamState.id).name}</p>
+
+                  {/* Player Slot Cards */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="rounded-lg border border-white/10 bg-white/[0.04] p-3 text-center">
+                      <span className="inline-block rounded bg-cyan-400/20 px-2 py-0.5 text-[9px] font-black uppercase text-cyan-300">HOST</span>
+                      <p className="mt-1.5 truncate text-sm font-bold text-white">{onlineLobby.host.name}</p>
+                      <p className="mt-0.5 text-xs text-neutral-300">{getTeam(onlineLobby.host.teamId || p1TeamState.id).name}</p>
                       <p className="mt-2 text-[10px] font-black uppercase text-emerald-300">Ready</p>
                     </div>
-                    <div className="rounded border border-white/10 bg-white/[0.03] p-3">
-                      <p className="text-[10px] font-bold uppercase text-neutral-500">Guest</p>
-                      {onlineLobby.guest ? <>
-                        <p className="mt-1 truncate text-sm font-bold">{onlineLobby.guest.name}</p>
-                        {onlineRole === 'guest' && !onlineLobby.started ? (
-                          <select value={onlineTeamId} onChange={event => { setOnlineTeamId(event.target.value); multiplayerSocketRef.current?.emit('lobby:team', event.target.value); }} className="mt-1 w-full rounded border border-white/15 bg-[#142126] px-2 py-1.5 text-xs text-white">
-                            {getAllTeams().map(team => <option key={team.id} value={team.id}>{team.name}</option>)}
-                          </select>
-                        ) : <p className="mt-1 text-xs text-neutral-400">{getTeam(onlineLobby.guest.teamId || p2TeamState.id).name}</p>}
-                        <p className={`mt-2 text-[10px] font-black uppercase ${onlineLobby.guest.ready ? 'text-emerald-300' : 'text-amber-300'}`}>{onlineLobby.guest.ready ? 'Ready' : 'Choosing team'}</p>
-                      </> : <p className="mt-2 text-xs text-neutral-500">Waiting for a player...</p>}
+
+                    <div className="rounded-lg border border-white/10 bg-white/[0.04] p-3 text-center">
+                      <span className="inline-block rounded bg-amber-400/20 px-2 py-0.5 text-[9px] font-black uppercase text-amber-300">GUEST</span>
+                      {onlineLobby.guest ? (
+                        <>
+                          <p className="mt-1.5 truncate text-sm font-bold text-white">{onlineLobby.guest.name}</p>
+                          {onlineRole === 'guest' && !onlineLobby.started ? (
+                            <select
+                              value={onlineTeamId}
+                              onChange={event => {
+                                setOnlineTeamId(event.target.value);
+                                setLobbyTeam(event.target.value);
+                              }}
+                              className="mt-1 w-full rounded border border-white/15 bg-[#142126] px-2 py-1 text-xs text-white"
+                            >
+                              {getAllTeams().map(team => (
+                                <option key={team.id} value={team.id}>{team.name}</option>
+                              ))}
+                            </select>
+                          ) : (
+                            <p className="mt-0.5 text-xs text-neutral-300">{getTeam(onlineLobby.guest.teamId || p2TeamState.id).name}</p>
+                          )}
+                          <p className={`mt-2 text-[10px] font-black uppercase ${onlineLobby.guest.ready ? 'text-emerald-300' : 'text-amber-300'}`}>
+                            {onlineLobby.guest.ready ? 'Ready' : 'Selecting Team'}
+                          </p>
+                        </>
+                      ) : (
+                        <p className="mt-3 text-xs text-neutral-400 animate-pulse">Waiting for friend...</p>
+                      )}
                     </div>
                   </div>
+
+                  {/* Ready / Start Actions */}
                   {onlineRole === 'guest' && onlineLobby.guest && !onlineLobby.started && (
-                    <button type="button" disabled={onlineBusy} onClick={() => multiplayerSocketRef.current?.emit('lobby:ready', !onlineLobby.guest?.ready)} className="w-full rounded bg-emerald-500 px-4 py-3 text-sm font-black uppercase text-[#07110a] hover:bg-emerald-300">
-                      {onlineLobby.guest.ready ? 'Not ready' : 'Ready to play'}
+                    <button
+                      type="button"
+                      disabled={onlineBusy}
+                      onClick={() => setLobbyReady(!onlineLobby.guest?.ready)}
+                      className="w-full rounded-lg bg-emerald-500 px-4 py-3 text-sm font-black uppercase text-[#07110a] hover:bg-emerald-400 active:scale-95 transition cursor-pointer"
+                    >
+                      {onlineLobby.guest.ready ? 'Cancel Ready' : 'Ready to Play'}
                     </button>
                   )}
+
                   {onlineRole === 'host' && (
-                    <button type="button" disabled={onlineBusy || !onlineLobby.guest?.ready} onClick={handleStartOnlineMatch} className="w-full rounded bg-[#bd5635] px-4 py-3 text-sm font-black uppercase text-white transition hover:bg-[#d46845] disabled:cursor-not-allowed disabled:opacity-40">
-                      {onlineBusy ? 'Starting...' : onlineLobby.guest?.ready ? 'Start match' : 'Waiting for guest'}
+                    <button
+                      type="button"
+                      disabled={onlineBusy || !onlineLobby.guest?.ready}
+                      onClick={handleStartOnlineMatch}
+                      className="w-full rounded-lg bg-gradient-to-r from-emerald-600 to-teal-600 px-4 py-3 text-sm font-black uppercase tracking-wider text-white shadow-xl transition hover:from-emerald-500 hover:to-teal-500 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer"
+                    >
+                      {onlineBusy ? 'Starting...' : onlineLobby.guest?.ready ? 'Start Head-to-Head Match' : 'Waiting for Guest to Ready Up'}
                     </button>
                   )}
+
+                  <button
+                    type="button"
+                    onClick={handleLeaveOnlineLobby}
+                    className="w-full rounded-lg border border-red-500/40 bg-red-950/20 px-3 py-2 text-xs font-bold uppercase text-red-300 hover:bg-red-900/40 active:scale-95 transition cursor-pointer"
+                  >
+                    Leave Room
+                  </button>
                 </>
               )}
-              {onlineError && <p role="alert" className="rounded border border-red-400/30 bg-red-950/30 px-3 py-2 text-xs text-red-200">{onlineError}</p>}
+
+              {onlineError && (
+                <p role="alert" className="rounded-lg border border-red-400/30 bg-red-950/40 px-3 py-2 text-xs text-red-200 text-center font-bold">
+                  {onlineError}
+                </p>
+              )}
             </div>
           </div>
         </section>
@@ -1919,12 +2199,17 @@ export default function App() {
                   ({engineRef.current?.getFieldGoalDistance?.() ?? fgMeterState?.distanceYards ?? 40} YD)
                 </span>
               </button>}
-              {onlineRole && <button
-                onClick={handleLeaveOnlineLobby}
-                className="flex w-full items-center justify-center gap-2 rounded-md border border-cyan-400/40 bg-cyan-950/30 px-4 py-3 text-sm font-bold text-cyan-100 transition hover:bg-cyan-900/50 cursor-pointer"
-              >
-                <Users size={17} /> Leave online match
-              </button>}
+
+              {onlineRole && (
+                <button
+                  type="button"
+                  onClick={handleLeaveOnlineLobby}
+                  className="flex w-full items-center justify-center gap-2 rounded-md border border-cyan-400/40 bg-cyan-950/30 px-4 py-3 text-sm font-bold text-cyan-100 transition hover:bg-cyan-900/50 cursor-pointer"
+                >
+                  <Users size={17} /> Leave online match
+                </button>
+              )}
+
               <button
                 onClick={handleReturnToMainMenu}
                 className="flex w-full items-center justify-center gap-2 rounded-md border border-[#bd5635] bg-[#32170f] px-4 py-3 text-sm font-bold text-[#ffd8ca] transition hover:bg-[#512116] cursor-pointer"
@@ -2157,33 +2442,27 @@ export default function App() {
         </section>
       )}
 
-      {showProPlaybookCards && (
-        <ProPlaybookCards
-          teamName={p1TeamState.name}
-          offenseIdentity={userTeamPlaybook.offenseIdentity}
-          defenseIdentity={userTeamPlaybook.defenseIdentity}
-          offensePlayIds={userTeamPlaybook.proOffense}
-          defensePlayIds={userTeamPlaybook.proDefense}
+      {showPlaybookCards && (
+        <TecmoPlaybookCards
+          teamId={p1TeamState.id}
+          opposingTeamId={p2TeamState.id}
+          isDefense={activeOffenseState === 'P2'}
           activeOffensePlay={p1OffPlayState}
           activeDefensePlay={p1DefPlayState}
-          initialTab={activeOffenseState === 'P2' ? 'DEFENSE' : 'OFFENSE'}
-          selectionOnly
           downDistanceText={downDistanceText}
           canPunt={is4thDown}
           fieldGoalDistance={engineRef.current?.getFieldGoalDistance?.()}
+          onSelectPlay={(playId) => {
+            if (activeOffenseState === 'P1') {
+              handleSelectOffensePlay(playId);
+            } else {
+              handleSelectDefensePlay(playId);
+            }
+          }}
           onSelectSpecialTeams={activeOffenseState === 'P1' ? (playId) => {
-            proPlaybookCallSelectedRef.current = true;
             handleSelectOffensePlay(playId);
           } : undefined}
-          onSelectOffensePlay={(playId) => {
-            proPlaybookCallSelectedRef.current = true;
-            handleSelectOffensePlay(playId);
-          }}
-          onSelectDefensePlay={(playId) => {
-            proPlaybookCallSelectedRef.current = true;
-            handleSelectDefensePlay(playId);
-          }}
-          onClose={() => setShowProPlaybookCards(false)}
+          onClose={() => setShowPlaybookCards(false)}
         />
       )}
       {showElitePlaybook && isUserPreSnapPhase && tacticalMode === 'ELITE' && (

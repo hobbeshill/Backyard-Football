@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { calculateBrokenTackleChance, calculateKickoffFlight, calculatePuntFlight, getKickoffLineY, getTouchbackYardLineY, isPlayerOutOfBounds } from './rules';
+import { calculateBrokenTackleChance, calculateKickoffFlight, calculatePuntFlight, getKickoffLineY, getTouchbackYardLineY, isPlayerOutOfBounds, resolveCatchContestOutcome, getCatchCompletionChance } from './rules';
 import { offensivePlaybook } from './playbook';
 import { evaluateCpuOffensiveAudibles, scoreRunBlockTarget, shouldCpuGoForItOnFourthDown } from './ai';
 import { mountFootballGame, type GameEngineHandle } from './engine';
-import { getBallCarrierRunSpeed, getReturnPursuitSpeed, getReturnTeamBlockers, shouldApplyRunBlockStun } from './movement';
+import { getBallCarrierRunSpeed, getReturnPursuitSpeed, getReturnTeamBlockers, shouldApplyRunBlockStun, resolveCollisions } from './movement';
+import type { Entity } from './types';
 
 function createMockCanvas() {
   return {
@@ -744,4 +745,45 @@ test('swiping left or right on the RB calls a running play while tapping toggles
   assert.equal(appSrc.includes('handleSelectOffensePlay(\'SWEEP\')'), false, 'Sweep button is removed from UI');
 
   if (cleanup) cleanup();
+});
+
+test('kickoff returner does not stick to blockers: blockers clear lane laterally without slowing the returner', () => {
+  const returner: Entity = { x: 170, y: 950, radius: 10, team: 'P1', isReturner: true };
+  const blocker: Entity = { x: 170, y: 940, radius: 10, team: 'P1', isBlocker: true };
+
+  resolveCollisions([returner, blocker], true, [], [returner, blocker], returner, 340, [returner]);
+
+  // Returner maintains vertical path
+  assert.equal(returner.y, 950);
+  // Blocker yields laterally out of the lane
+  assert.notEqual(blocker.x, 170, 'Blocker must yield laterally so return man is never stuck');
+  // Returner does not suffer traffic slow
+  assert.equal(returner.contactSlowTimer ?? 0, 0, 'Returner must not be slowed by teammate blockers');
+});
+
+test('open receivers catch the ball reliably (open by 10 yards separation)', () => {
+  // Receiver with 45+ separation (10 yards of separation downfield)
+  const wideOpenContest = {
+    effectiveDefDist: 50,
+    effectiveBallDist: 50,
+    isTargetSpammed: false,
+    isRbFlatSpammed: false,
+    isRb: false,
+    receiverX: 170,
+    fieldWidth: 340,
+    receiverRadius: 10,
+    defenderCount: 0,
+    ballSideDefender: false,
+    archetype: 'SPEEDSTER',
+    stamina: 100,
+    distanceToCatch: 0,
+    roll: 0.50
+  };
+
+  const chance = getCatchCompletionChance(wideOpenContest);
+  assert.ok(chance >= 0.85, 'Wide open receiver completion chance must be >= 85%');
+
+  const outcome = resolveCatchContestOutcome(wideOpenContest);
+  assert.equal(outcome.type, 'COMPLETE', 'Wide open receiver must catch the pass cleanly');
+  assert.equal(outcome.caught, true);
 });

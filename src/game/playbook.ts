@@ -1,5 +1,6 @@
 import type { DefOption, PlayOption } from './types';
 import { SIGNATURE_PLAYS, signatureOffenseIds, signatureDefenseIds } from './signaturePlays';
+import { SEC_TEAM_TECMO_PLAYS } from './tecmoPlaybook';
 
 export const offensivePlaybook: Record<string, PlayOption> = {
   SHORT_PASS: {
@@ -378,6 +379,18 @@ export const allDefensivePlaybook: Record<string, DefOption> = {
   ...defensivePlaybook,
   ...proDefensivePlaybook
 };
+
+for (const plays of Object.values(SEC_TEAM_TECMO_PLAYS)) {
+  for (const play of plays) {
+    offensivePlaybook[play.id] = play;
+    allDefensivePlaybook[play.id] = {
+      name: `Defend: ${play.name}`,
+      desc: `Defensive scheme aligned to defend against ${play.name} (${play.category})`,
+      weakness: play.isRun ? 'deep vertical passing' : 'perimeter edge run',
+      vulnerableRouteType: play.isRun ? 'VERTICAL' : 'SHORT'
+    };
+  }
+}
 
 export const defensiveKeys = Object.keys(defensivePlaybook);
 export const offensiveKeys = Object.keys(offensivePlaybook);

@@ -16,6 +16,7 @@ import { applyPlayerProfile, getPlayerSummary, PLAYER_TRAIT_COLORS, type RosterS
 import { getPursuitTarget, getRunBlockEffect } from './movement';
 import { getContactGainYards } from './rules';
 import { getTeamDefensePlays, getTeamOffensePlays } from './teamPlaybooks';
+import { evaluateTecmoMatchup, getTecmoPlaysForTeam, SEC_TEAM_TECMO_PLAYS, type TecmoMatchupResult } from './tecmoPlaybook';
 
 export interface GameEngineHandle {
   p1Score: number;
@@ -80,11 +81,9 @@ export interface GameEngineHandle {
   setCameraPerspective?: (mode: CameraPerspectiveMode) => void;
   getCameraPerspective?: () => CameraPerspectiveMode;
   toggleCameraPerspective?: () => CameraPerspectiveMode;
-  setOnlineRole?: (role: 'host' | 'guest' | null) => void;
-  getOnlineSnapshot?: () => Record<string, unknown> | null;
-  applyOnlineSnapshot?: (snapshot: Record<string, unknown>) => boolean;
-  setRemoteInput?: (input: { x: number; y: number; active: boolean }) => void;
+  getTecmoMatchup?: () => TecmoMatchupResult | null;
   applyRemoteAction?: (action: RemoteGameAction) => void;
+  applyRemoteInput?: (dx: number, dy: number, active: boolean) => void;
 }
 
 export type CameraPerspectiveMode = 'THREE_QUARTER' | 'TOP_DOWN';
@@ -317,8 +316,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   let halftimeAnnouncementPending = false;
   let gameOver = false;
   let isPaused = false;
-  let onlineRole: 'host' | 'guest' | null = null;
-  let remoteInput = { x: 0, y: 0, active: false };
+  let currentTecmoMatchup: TecmoMatchupResult | null = null;
   let isSessionActive = false;
   let lastSessionSaveTime = 0;
   let drillResetTimer: ReturnType<typeof setTimeout> | null = null;
@@ -407,7 +405,6 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
   let tacticalMode: TacticalMode = 'ELITE';
   let userControlledDefenderIndex = 0;
-  let remoteControlledDefenderIndex = 0;
   let userTurboMeter = 100;
   let userTurboActive = false;
   let defenderFlameParticles: Array<{ x: number; y: number; vx: number; vy: number; life: number; maxLife: number; color: string; size: number }> = [];
@@ -491,7 +488,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   }
 
   function saveGameSession(): void {
-    if (options.tutorial || onlineRole === 'guest' || !isSessionActive || typeof window === 'undefined') return;
+    if (options.tutorial || !isSessionActive || typeof window === 'undefined') return;
     try {
       const entries = getSessionEntities();
       const entityIds = new Map(entries.map(([id, entity]) => [entity, id]));
@@ -521,7 +518,6 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         halftimeAnnouncementPending, gameOver, phase, activeOffense, activeDefense,
         p1TeamId: p1Team.id, p2TeamId: p2Team.id,
         p1OffPlay, p1OffFormation, p1DefPlay, p2OffPlay, p2DefPlay, tacticalMode,
-        remoteControlledDefenderIndex,
         cpuPreSnapTimer, isAllBlocking, openingReceivingTeam, isKickoffPhase,
         kickoffKickingTeam, kickoffReceivingTeam, kickMeterPower, kickMeterDirection,
         cpuKickoffDelayTimer, isSpecialTeamsReturn, specialTeamsReturnType, returnCatchY,
@@ -594,10 +590,9 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       p1DefPlay = allDefensivePlaybook[state.p1DefPlay] ? state.p1DefPlay : 'COVER2';
       p2OffPlay = state.p2OffPlay;
       p2DefPlay = allDefensivePlaybook[state.p2DefPlay] ? state.p2DefPlay : 'COVER2';
-      remoteControlledDefenderIndex = Number.isInteger(state.remoteControlledDefenderIndex) ? state.remoteControlledDefenderIndex : 0;
       cpuPreSnapTimer = state.cpuPreSnapTimer; isAllBlocking = state.isAllBlocking;
       openingReceivingTeam = state.openingReceivingTeam; isKickoffPhase = state.isKickoffPhase;
-      requiresProPlaybookSelection = onlineRole === null && tacticalMode === 'PRO' && phase === 'PRE_SNAP' && !isKickoffPhase;
+      requiresProPlaybookSelection = tacticalMode === 'PRO' && phase === 'PRE_SNAP' && !isKickoffPhase;
       kickoffKickingTeam = state.kickoffKickingTeam; kickoffReceivingTeam = state.kickoffReceivingTeam;
       kickMeterPower = state.kickMeterPower; kickMeterDirection = state.kickMeterDirection;
       cpuKickoffDelayTimer = state.cpuKickoffDelayTimer; isSpecialTeamsReturn = state.isSpecialTeamsReturn;
@@ -862,6 +857,28 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   }
 
   function getPlayMatchup(playKey: string, defenseKey: string) {
+    if (currentTecmoMatchup) {
+      if (currentTecmoMatchup.isExact) {
+        return {
+          momentumDelta: -3,
+          successBonus: -0.45,
+          tecmoResult: currentTecmoMatchup
+        };
+      }
+      if (currentTecmoMatchup.level === 'CATEGORY_MATCH') {
+        return {
+          momentumDelta: -1,
+          successBonus: -0.15,
+          tecmoResult: currentTecmoMatchup
+        };
+      }
+      return {
+        momentumDelta: 2,
+        successBonus: 0.35,
+        tecmoResult: currentTecmoMatchup
+      };
+    }
+
     if (playKey.startsWith('PRO_') && defenseKey.startsWith('PRO_')) {
       const proResult = evaluateProMatchup(playKey as ProOffensePlayId, defenseKey as ProDefensePlayId);
       if (proResult.isExactCounter) {
@@ -1150,13 +1167,17 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   function normalizeTeamCalls(): boolean {
     let changed = false;
     const normalizeOffense = (key: string, team: TeamProfile) => {
-      if (key === 'PUNT' || key === 'FIELD_GOAL' || offensePlays(team).includes(key)) return key;
+      const isTecmo = getTecmoPlaysForTeam(team.id).some(p => p.id === key);
+      if (key === 'PUNT' || key === 'FIELD_GOAL' || isTecmo || offensePlays(team).includes(key)) return key;
       changed = true;
       return offensePlays(team)[0];
     };
     const previousOffense = p1OffPlay;
     const normalizeDefense = (key: string, team: TeamProfile) => {
-      if (defensePlays(team).includes(key)) return key;
+      const isTecmo = getTecmoPlaysForTeam(team.id).some(p => p.id === key) ||
+        getTecmoPlaysForTeam(p1Team.id).some(p => p.id === key) ||
+        getTecmoPlaysForTeam(p2Team.id).some(p => p.id === key);
+      if (isTecmo || defensePlays(team).includes(key)) return key;
       changed = true;
       return defensePlays(team)[0];
     };
@@ -1173,6 +1194,56 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     callbacks.setP1DefPlayState(p1DefPlay);
     callbacks.setP2DefPlayState(p2DefPlay);
     return changed;
+  }
+
+  function getCpuDefensiveChoice(): string {
+    const oppTeamId = activeDefense === 'P2' ? p1Team.id : p2Team.id;
+    const oppPlays = getTecmoPlaysForTeam(oppTeamId);
+    if (!oppPlays || oppPlays.length === 0) return getAdaptiveDefensiveCall();
+
+    const passPlays = oppPlays.filter(p => !p.isRun);
+    const runPlays = oppPlays.filter(p => p.isRun);
+
+    // 1. Tendency & Repeat Play Detection
+    const lastUserPlay = userPlayHistory[userPlayHistory.length - 1];
+    const secondLastUserPlay = userPlayHistory.length >= 2 ? userPlayHistory[userPlayHistory.length - 2] : null;
+    const samePlayRepeated = lastUserPlay && secondLastUserPlay && lastUserPlay.play === secondLastUserPlay.play;
+
+    if (samePlayRepeated && oppPlays.some(p => p.id === lastUserPlay.play) && Math.random() < 0.65) {
+      return lastUserPlay.play; // AI sniffs out spammed play!
+    }
+
+    if (lastUserPlay && oppPlays.some(p => p.id === lastUserPlay.play) && Math.random() < 0.35) {
+      return lastUserPlay.play;
+    }
+
+    // 2. Down & Distance Situational Playcalling:
+    // Long yardage (7+ yards to go) or 3rd/4th down passing situations:
+    if ((yardsToGo >= 7 || currentDown >= 3) && passPlays.length > 0) {
+      if (Math.random() < 0.85) {
+        return passPlays[Math.floor(Math.random() * passPlays.length)].id;
+      } else {
+        return runPlays[Math.floor(Math.random() * runPlays.length)].id;
+      }
+    }
+
+    // Short yardage (<= 2 yards): heavily predict run
+    if (yardsToGo <= 2 && runPlays.length > 0) {
+      if (Math.random() < 0.70) {
+        return runPlays[Math.floor(Math.random() * runPlays.length)].id;
+      } else {
+        return passPlays[Math.floor(Math.random() * passPlays.length)].id;
+      }
+    }
+
+    // Standard downs (1st & 10, 2nd & 5): balanced call (55% pass, 45% run)
+    if (Math.random() < 0.55 && passPlays.length > 0) {
+      return passPlays[Math.floor(Math.random() * passPlays.length)].id;
+    } else if (runPlays.length > 0) {
+      return runPlays[Math.floor(Math.random() * runPlays.length)].id;
+    }
+
+    return oppPlays[Math.floor(Math.random() * oppPlays.length)].id;
   }
 
   function getAdaptiveDefensiveCall(): string {
@@ -1320,6 +1391,41 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
   // CPU Offensive Play Selection using tactical football knowledge & situational awareness
   function getCpuOffensivePlayCall(): string {
+    const isTecmoContext = Object.values(SEC_TEAM_TECMO_PLAYS).some(plays =>
+      plays.some(p => p.id === p1OffPlay || p.id === p1DefPlay || p.id === p2OffPlay || p.id === p2DefPlay)
+    );
+    const tecmoPlays = getTecmoPlaysForTeam(p2Team.id);
+    if (isTecmoContext && tecmoPlays && tecmoPlays.length === 6 && !options.tutorial) {
+      if (currentDown === 4) {
+        const distanceToEndzoneYards = (attackDirection === -1
+          ? lineOfScrimmageY - endZoneHeight
+          : (fieldHeight - endZoneHeight) - lineOfScrimmageY) / 10;
+        const fgDist = getFieldGoalDistanceYards(lineOfScrimmageY, attackDirection, fieldHeight, endZoneHeight);
+        const shouldGoForIt = shouldCpuGoForItOnFourthDown({
+          distanceToEndzoneYards,
+          yardsToGo,
+          quarter,
+          secondsRemaining: gameClockSeconds,
+          scoreDifferential: p2Score - p1Score
+        });
+        if (!shouldGoForIt) {
+          if (fgDist <= 54) return 'FIELD_GOAL';
+          return 'PUNT';
+        }
+      }
+      const passes = tecmoPlays.filter(p => !p.isRun);
+      const runs = tecmoPlays.filter(p => p.isRun);
+      if (yardsToGo > 8) {
+        return passes[Math.floor(Math.random() * passes.length)].id;
+      }
+      if (yardsToGo <= 2) {
+        return Math.random() < 0.65
+          ? runs[Math.floor(Math.random() * runs.length)].id
+          : passes[Math.floor(Math.random() * passes.length)].id;
+      }
+      return tecmoPlays[Math.floor(Math.random() * tecmoPlays.length)].id;
+    }
+
     const choose = (plays: readonly string[]) => {
       const available = offensePlays(p2Team);
       const signatures = available.filter(key => key.includes('TEAM_') && (
@@ -1920,6 +2026,26 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       endZoneHeight
     });
     let yardsGained = playResult.yardsGained;
+    const tecmoResult = (matchup as any)?.tecmoResult as TecmoMatchupResult | undefined;
+    if (tecmoResult && !endedInterceptionReturn && !endedSpecialTeamsReturn && !playResult.isTouchdown) {
+      if (tecmoResult.isExact) {
+        yardsGained = Math.min(-1, Math.max(-4, yardsGained));
+        playResult.isTouchdown = false;
+        playResult.yardsGained = yardsGained;
+        endingY = lineOfScrimmageY + (yardsGained * 10 * attackDirection);
+        playResult.endingY = endingY;
+      } else if (tecmoResult.level === 'MISMATCH_DROPPED_IN_COVERAGE' && tecmoResult.offenseIsRun) {
+        yardsGained = Math.max(12, yardsGained);
+        playResult.yardsGained = yardsGained;
+        endingY = lineOfScrimmageY + (yardsGained * 10 * attackDirection);
+        playResult.endingY = endingY;
+      } else if (tecmoResult.level === 'MISMATCH_BIT_ON_RUN' && !tecmoResult.offenseIsRun && resultType === 'CATCH') {
+        yardsGained = Math.max(18, yardsGained);
+        playResult.yardsGained = yardsGained;
+        endingY = lineOfScrimmageY + (yardsGained * 10 * attackDirection);
+        playResult.endingY = endingY;
+      }
+    }
     const proResult = (matchup as any)?.proResult as ProMatchupResult | undefined;
     if (proResult && !endedInterceptionReturn && !endedSpecialTeamsReturn && canApplyProMatchupAdjustment(resultType) && !playResult.isTouchdown) {
       if (proResult.isExactCounter) {
@@ -2607,8 +2733,15 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       p2OffPlay = getCpuOffensivePlayCall();
       setP2OffPlayState(p2OffPlay);
     }
+    currentTecmoMatchup = null;
     if (activeDefense === 'P2') {
-      p2DefPlay = getAdaptiveDefensiveCall();
+      const isTecmoOffense = getTecmoPlaysForTeam(p1Team.id).some(p => p.id === p1OffPlay) ||
+        getTecmoPlaysForTeam(p2Team.id).some(p => p.id === p1DefPlay);
+      if (isTecmoOffense) {
+        p2DefPlay = getCpuDefensiveChoice();
+      } else {
+        p2DefPlay = getAdaptiveDefensiveCall();
+      }
       setP2DefPlayState(p2DefPlay);
     }
 
@@ -2916,37 +3049,9 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     });
   }
 
-  function triggerCpuOffensiveAudible(silent = false) {
-    if (options.tutorial || tacticalMode === 'PRO') return;
-    if (activeOffense !== 'P2') return;
-    const cpuPlay = offensivePlaybook[p2OffPlay];
-    if (!cpuPlay) return;
-    const audibleRes = evaluateCpuOffensiveAudibles(
-      cpuPlay.type,
-      receivers,
-      centerReceiver,
-      rb,
-      defenders,
-      currentDown,
-      yardsToGo,
-      lineOfScrimmageY,
-      attackDirection,
-      fieldWidth
-    );
-    if (audibleRes.newPlayKey) {
-      const availablePasses = offensePlays(p2Team).filter(key => offensivePlaybook[key].type === 'PASS');
-      p2OffPlay = offensePlays(p2Team).includes(audibleRes.newPlayKey)
-        ? audibleRes.newPlayKey : availablePasses[0];
-      callbacks.setP2OffPlayState(p2OffPlay);
-    }
-
-    if (audibleRes.rbFlipped) {
-      positionRBDefender();
-    }
-    if (!silent && audibleRes.audibleMessage) {
-      sounds.playJuke();
-      showAnnouncement(audibleRes.audibleMessage, "#00ffff");
-    }
+  function triggerCpuOffensiveAudible(_silent = false) {
+    // No audibles should be available per Tecmo Super Bowl rules
+    return;
   }
 
   const engineHandle: GameEngineHandle = {
@@ -3049,7 +3154,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     },
     selectOffense: (key: string) => {
       if (options.tutorial && tutorialStep !== 0 && tutorialStep !== 7) return;
-      if (key !== 'PUNT' && key !== 'FIELD_GOAL' && !offensePlays(p1Team).includes(key)) {
+      const isTecmoPlay = getTecmoPlaysForTeam(p1Team.id).some(p => p.id === key);
+      if (key !== 'PUNT' && key !== 'FIELD_GOAL' && !isTecmoPlay && !offensePlays(p1Team).includes(key)) {
         showAnnouncement(`${p1Team.nickname.toUpperCase()}: PLAY NOT IN TEAM PLAYBOOK`, '#ffcc00');
         return;
       }
@@ -3070,6 +3176,13 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           callbacks.setP1OffFormationState?.(p1OffFormation);
         }
         resetDrill(true);
+        if (activeDefense === 'P2') {
+          const isTecmoOffense = getTecmoPlaysForTeam(p1Team.id).some(p => p.id === p1OffPlay);
+          if (isTecmoOffense) {
+            p2DefPlay = getCpuDefensiveChoice();
+            callbacks.setP2DefPlayState(p2DefPlay);
+          }
+        }
         requiresProPlaybookSelection = false;
         completeTutorialAction(0);
         if (key === 'PUNT') completeTutorialAction(7);
@@ -3077,11 +3190,12 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     },
     selectDefense: (key: string) => {
       if (options.tutorial && tutorialStep !== 4) return;
-      if (!defensePlays(p1Team).includes(key)) {
+      const isTecmoDefendPlay = getTecmoPlaysForTeam(p2Team.id).some(p => p.id === key);
+      if (!isTecmoDefendPlay && !defensePlays(p1Team).includes(key)) {
         showAnnouncement(`${p1Team.nickname.toUpperCase()}: SCHEME NOT IN TEAM PLAYBOOK`, '#ffcc00');
         return;
       }
-      if (activeDefense === 'P1' && phase === 'PRE_SNAP' && !isKickoffPhase && allDefensivePlaybook[key]) {
+      if (activeDefense === 'P1' && phase === 'PRE_SNAP' && !isKickoffPhase && (allDefensivePlaybook[key] || isTecmoDefendPlay)) {
         lastDefenseSelectTime = Date.now();
         const previousPositions = defenders.map(({ x, y }) => ({ x, y }));
         p1DefPlay = key;
@@ -3089,11 +3203,11 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         defenseOverrides.clear();
         applyDefensiveAlignment();
         startFormationTransition(defenders, previousPositions);
+        if (isTecmoDefendPlay && offensivePlaybook[key]) {
+          showAnnouncement(`DEFENDING: ${offensivePlaybook[key].name.toUpperCase()} (${offensivePlaybook[key].isRun ? 'RUN' : 'PASS'}) 🛡️`, '#00ffff');
+        }
         if (tacticalMode === 'PRO') requiresProPlaybookSelection = false;
         completeTutorialAction(4);
-        if (activeOffense === 'P2') {
-          triggerCpuOffensiveAudible(false);
-        }
       }
     },
     setTacticalMode: (mode: TacticalMode) => {
@@ -3266,39 +3380,13 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     setCameraPerspective,
     getCameraPerspective: () => cameraPerspectiveMode,
     toggleCameraPerspective,
-    setOnlineRole: role => {
-      onlineRole = role;
-      remoteInput = { x: 0, y: 0, active: false };
-      if (role) requiresProPlaybookSelection = false;
+    getTecmoMatchup: () => currentTecmoMatchup,
+    applyRemoteAction: (action: RemoteGameAction) => {
+      applyRemoteGameAction(action);
     },
-    getOnlineSnapshot: () => {
-      if (onlineRole !== 'host' || !isSessionActive || typeof window === 'undefined') return null;
-      saveGameSession();
-      try {
-        const raw = window.localStorage.getItem(GAME_SESSION_STORAGE_KEY);
-        if (!raw) return null;
-        const snapshot = JSON.parse(raw) as Record<string, any>;
-        snapshot.userPlayHistory = (snapshot.userPlayHistory || []).slice(-12);
-        snapshot.cpuPlayHistory = (snapshot.cpuPlayHistory || []).slice(-12);
-        snapshot.userDefenseHistory = (snapshot.userDefenseHistory || []).slice(-12);
-        return snapshot;
-      } catch {
-        return null;
-      }
+    applyRemoteInput: (dx: number, dy: number, active: boolean) => {
+      applyRemoteInput(dx, dy, active);
     },
-    applyOnlineSnapshot: snapshot => {
-      if (onlineRole !== 'guest') return false;
-      return restoreGameSession(snapshot);
-    },
-    setRemoteInput: input => {
-      if (onlineRole !== 'host') return;
-      remoteInput = {
-        x: Math.max(-1, Math.min(1, Number(input.x) || 0)),
-        y: Math.max(-1, Math.min(1, Number(input.y) || 0)),
-        active: Boolean(input.active)
-      };
-    },
-    applyRemoteAction: action => applyRemoteGameAction(action),
   };
   callbacks.onEngineReady(engineHandle);
 
@@ -3360,12 +3448,63 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     tutorialAimFrames = 0;
     completeTutorialAction(1);
     completeTutorialAction(5);
+
+    // Tecmo Super Bowl Matchup Evaluation
+    const offKey = activeOffense === 'P1' ? p1OffPlay : p2OffPlay;
+    const defKey = activeOffense === 'P1' ? p2DefPlay : p1DefPlay;
+    currentTecmoMatchup = evaluateTecmoMatchup(offKey, defKey, offensivePlaybook);
+    if (currentTecmoMatchup) {
+      if (currentTecmoMatchup.isExact) {
+        showAnnouncement(currentTecmoMatchup.announcement, '#ff0033');
+        sounds.playJuke();
+        screenShakeTimer = Math.max(screenShakeTimer, 14);
+      } else if (currentTecmoMatchup.level === 'MISMATCH_BIT_ON_RUN') {
+        showAnnouncement(currentTecmoMatchup.announcement, '#00ffff');
+        sounds.playJuke();
+      } else if (currentTecmoMatchup.level === 'MISMATCH_DROPPED_IN_COVERAGE') {
+        showAnnouncement(currentTecmoMatchup.announcement, '#00ffaa');
+      } else if (currentTecmoMatchup.level === 'CATEGORY_MATCH') {
+        showAnnouncement(currentTecmoMatchup.announcement, '#ffaa00');
+      }
+
+      // When the wrong play is called on defense (bit on run or wrong pass play),
+      // cause defenders to hesitate/bite and immediately open up passing windows!
+      if (currentTecmoMatchup.freezeDefenseFrames > 0 && !currentTecmoMatchup.offenseIsRun) {
+        defenders.forEach(d => {
+          if (!d || d.passRusher) return;
+          if (currentTecmoMatchup!.level === 'MISMATCH_BIT_ON_RUN') {
+            if (d.type === 'LB' || d.type === 'MLB') {
+              d.coverageMistake = 'BIT_UNDERNEATH';
+              d.mistakeTimer = currentTecmoMatchup!.freezeDefenseFrames;
+            } else if (d.type === 'FS' || d.type === 'SS') {
+              d.coverageMistake = 'STUMBLE';
+              d.mistakeTimer = Math.round(currentTecmoMatchup!.freezeDefenseFrames * 0.75);
+            } else {
+              d.coverageMistake = 'BIT_UNDERNEATH';
+              d.mistakeTimer = Math.round(currentTecmoMatchup!.freezeDefenseFrames * 0.5);
+            }
+          } else {
+            d.coverageMistake = 'STUMBLE';
+            d.mistakeTimer = currentTecmoMatchup!.freezeDefenseFrames;
+          }
+        });
+
+        // Flag receivers as open
+        receivers.forEach(r => {
+          if (r && !r.isBlocker) {
+            r.flash = 60;
+            r.isOpenDeep = true;
+          }
+        });
+        if (centerReceiver && !centerReceiver.isBlocker) {
+          centerReceiver.flash = 60;
+          centerReceiver.isOpenDeep = true;
+        }
+      }
+    }
   }
 
   function startCpuPlay(): void {
-    if (activeOffense === 'P2') {
-      triggerCpuOffensiveAudible(true);
-    }
     let cpuPlay = offensivePlaybook[p2OffPlay];
     if (cpuPlay && cpuPlay.type === 'PUNT') {
       snapToQuarterback();
@@ -3420,11 +3559,11 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   function startReadyPlay(): void {
     if (phase !== 'PRE_SNAP') return;
     if (requiresProPlaybookSelection) return;
-    if (activeDefense === 'P1' && onlineRole !== 'host') {
+    if (activeDefense === 'P1') {
       startCpuPlay();
       return;
     }
-    if (activeOffense !== 'P1' && !(activeOffense === 'P2' && onlineRole === 'host')) return;
+    if (activeOffense !== 'P1') return;
 
     const play = offensivePlaybook[activeOffense === 'P1' ? p1OffPlay : p2OffPlay];
     if (play?.type === 'PUNT') {
@@ -3564,7 +3703,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   }
 
   function diveTackle(): void {
-    if (isPaused || (activeDefense !== 'P1' && !(onlineRole === 'host' && activeDefense === 'P2'))) return;
+    if (isPaused || activeDefense !== 'P1') return;
     const defender = getControlledDefender();
     if (!defender || (defender.diveCooldownTimer || 0) > 0) return;
     defender.diveCooldownTimer = 45;
@@ -3632,7 +3771,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   }
 
   function attemptSwatOrInterception(mode: 'SWAT' | 'INT' = 'SWAT'): void {
-    if (isPaused || (activeDefense !== 'P1' && !(onlineRole === 'host' && activeDefense === 'P2')) || phase !== 'THROWN' || !ball) return;
+    if (isPaused || activeDefense !== 'P1' || phase !== 'THROWN' || !ball) return;
     const defender = getControlledDefender();
     if (!defender) return;
 
@@ -3667,7 +3806,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   }
 
   const handleKeyDown = (e: KeyboardEvent) => {
-    if (isPaused || onlineRole === 'guest' || e.defaultPrevented) return;
+    if (isPaused || e.defaultPrevented) return;
     const target = e.target as HTMLElement | null;
     if (target?.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON', 'A'].includes(target?.tagName ?? '')) return;
     const key = e.key.toLowerCase();
@@ -3756,12 +3895,18 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     window.addEventListener('keyup', handleKeyUp);
   }
 
+  let remoteJoystick = { dx: 0, dy: 0, active: false };
+  function applyRemoteInput(dx: number, dy: number, active: boolean): void {
+    remoteJoystick = { dx, dy, active };
+  }
+
   function getEffectiveJoystickInput(): { x: number; y: number; active: boolean } {
-    if (onlineRole === 'host' && (activeDefense === 'P2' || (activeOffense === 'P2' && phase !== 'PRE_SNAP') || activeEntity?.team === 'P2')) {
-      return remoteInput;
-    }
     let x = joystick.active ? joystick.inputX : 0;
     let y = joystick.active ? joystick.inputY : 0;
+    if (remoteJoystick.active) {
+      x = remoteJoystick.dx;
+      y = remoteJoystick.dy;
+    }
     if (keysDown.left) x -= 1;
     if (keysDown.right) x += 1;
     if (keysDown.up) y -= 1;
@@ -3774,7 +3919,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     return {
       x,
       y,
-      active: joystick.active || keysDown.left || keysDown.right || keysDown.up || keysDown.down
+      active: joystick.active || remoteJoystick.active || keysDown.left || keysDown.right || keysDown.up || keysDown.down
     };
   }
 
@@ -3813,14 +3958,12 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   }
 
   function getControlledDefender(): Entity | null {
-    if (activeDefense !== 'P1' && !(onlineRole !== null && activeDefense === 'P2')) return null;
+    if (activeDefense !== 'P1') return null;
     if (!defenders || defenders.length === 0) return null;
-    const selectedIndex = activeDefense === 'P1' ? userControlledDefenderIndex : remoteControlledDefenderIndex;
-    if (selectedIndex < 0 || selectedIndex >= defenders.length) {
-      if (activeDefense === 'P1') userControlledDefenderIndex = 0;
-      else remoteControlledDefenderIndex = 0;
+    if (userControlledDefenderIndex < 0 || userControlledDefenderIndex >= defenders.length) {
+      userControlledDefenderIndex = 0;
     }
-    return defenders[activeDefense === 'P1' ? userControlledDefenderIndex : remoteControlledDefenderIndex] || null;
+    return defenders[userControlledDefenderIndex] || null;
   }
 
   function selectDefender(index: number): void {
@@ -3845,39 +3988,51 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   }
 
   function applyRemoteGameAction(action: RemoteGameAction): void {
-    if (onlineRole !== 'host') return;
-    if (action.type === 'START') {
-      if (phase === 'KICKOFF') startReadyKickoff();
-      else startReadyPlay();
-      return;
+    if (!action) return;
+    switch (action.type) {
+      case 'START':
+        if (isKickoffPhase || phase === 'KICKOFF') {
+          startReadyKickoff();
+        } else if (phase === 'PRE_SNAP') {
+          startReadyPlay();
+        }
+        break;
+      case 'OFFENSE_PLAY':
+        if (phase === 'PRE_SNAP') {
+          p2OffPlay = action.play;
+          callbacks.setP2OffPlayState?.(action.play);
+        }
+        break;
+      case 'DEFENSE_PLAY':
+        if (phase === 'PRE_SNAP') {
+          p2DefPlay = action.play;
+          callbacks.setP2DefPlayState?.(action.play);
+        }
+        break;
+      case 'THROW':
+        if (phase === 'QB_DROP' && qb.hasBall) {
+          const eligible = [...receivers, centerReceiver, rb].filter(
+            (r): r is Entity => Boolean(r && !r.isBlocker && r.routeType !== 'BLOCK')
+          );
+          const target = eligible[action.target];
+          if (target) {
+            executeUserPass(target);
+          }
+        }
+        break;
+      case 'DEFENDER':
+        selectDefender(action.index);
+        break;
+      case 'DIVE':
+        diveTackle();
+        break;
+      case 'SWAT':
+        attemptSwatOrInterception('SWAT');
+        break;
+      case 'TURBO':
+        activateTurbo(action.active);
+        break;
     }
-    if (action.type === 'OFFENSE_PLAY' && activeOffense === 'P2' && phase === 'PRE_SNAP' && offensePlays(p2Team).includes(action.play)) {
-      p2OffPlay = action.play;
-      callbacks.setP2OffPlayState(p2OffPlay);
-      resetDrill(true);
-      requiresProPlaybookSelection = false;
-      return;
-    }
-    if (action.type === 'DEFENSE_PLAY' && activeDefense === 'P2' && phase === 'PRE_SNAP' && defensePlays(p2Team).includes(action.play)) {
-      p2DefPlay = action.play;
-      callbacks.setP2DefPlayState(p2DefPlay);
-      applyDefensiveAlignment();
-      requiresProPlaybookSelection = false;
-      return;
-    }
-    if (action.type === 'DEFENDER' && activeDefense === 'P2' && Number.isInteger(action.index)) {
-      remoteControlledDefenderIndex = Math.max(0, Math.min(defenders.length - 1, action.index));
-      return;
-    }
-    if (action.type === 'THROW' && activeOffense === 'P2' && phase === 'QB_DROP') {
-      const targets = [...receivers, centerReceiver, rb].filter((receiver): receiver is Entity => Boolean(receiver && !receiver.isBlocker && receiver.routeType !== 'BLOCK'));
-      const target = targets[action.target];
-      if (target) executeUserPass(target);
-      return;
-    }
-    if (action.type === 'DIVE') diveTackle();
-    else if (action.type === 'SWAT') attemptSwatOrInterception('SWAT');
-    else if (action.type === 'TURBO') activateTurbo(action.active);
   }
 
   function getTappedReceiver(screenX: number, screenY: number, worldX: number, worldY: number): Entity | null {
@@ -3903,7 +4058,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   }
 
   function executeUserPass(tappedReceiver: Entity) {
-    if (phase !== 'QB_DROP' || (activeOffense !== 'P1' && !(onlineRole === 'host' && activeOffense === 'P2')) || !qb.hasBall) return;
+    if (phase !== 'QB_DROP' || activeOffense !== 'P1' || !qb.hasBall) return;
 
     let projX = tappedReceiver.x;
     let projY = tappedReceiver.y;
@@ -3986,7 +4141,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
   // Pointer events
   const handlePointerDown = (e: PointerEvent) => {
-    if (isPaused || onlineRole === 'guest') return;
+    if (isPaused) return;
     const currentTacticalMode: TacticalMode = typeof tacticalMode !== 'undefined' ? tacticalMode : 'ELITE';
     rbDoubleTapConsumed = false;
     const { x: px, y: py } = screenToWorld(e.clientX, e.clientY);
@@ -4249,7 +4404,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   };
 
   const handlePointerMove = (e: PointerEvent) => {
-    if (isPaused || onlineRole === 'guest') return;
+    if (isPaused) return;
     const { x: curX, y: curY } = screenToWorld(e.clientX, e.clientY);
     const screenPos = getScreenCoords(e.clientX, e.clientY);
     aimCurrentX = curX;
@@ -4330,7 +4485,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   };
 
   const handlePointerUp = (e: PointerEvent) => {
-    if (isPaused || onlineRole === 'guest') return;
+    if (isPaused) return;
     const currentTacticalMode: TacticalMode = typeof tacticalMode !== 'undefined' ? tacticalMode : 'ELITE';
 
     const wasJoystick = typeof joystick !== 'undefined' && joystick.active && e.pointerId === joystick.pointerId;
@@ -4638,7 +4793,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     }
 
     // Update Turbo meter & flame particles
-    if (activeDefense === 'P1' || (onlineRole === 'host' && activeDefense === 'P2')) {
+    if (activeDefense === 'P1') {
       const cd = getControlledDefender();
       if (cd) {
         if (cd.isOnFire) {
@@ -4945,7 +5100,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       }
     }
 
-    if (phase === 'QB_DROP' && activeOffense === 'P2' && onlineRole !== 'host' && !ball) {
+    if (phase === 'QB_DROP' && activeOffense === 'P2' && !ball) {
       let nearestUnblockedDefender = Infinity;
       defenders.forEach(defender => {
         if (!defender || defender.isEngagedWithBlocker) return;
@@ -5548,8 +5703,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
             }
           }
         } else if (phase === 'RUNNING') {
-          const isUserControlled = (activeEntity?.team ? activeEntity.team === 'P1' : activeOffense === 'P1') ||
-            (onlineRole === 'host' && (activeOffense === 'P2' || activeEntity?.team === 'P2'));
+          const isUserControlled = (activeEntity?.team ? activeEntity.team === 'P1' : activeOffense === 'P1');
           const isReturn = Boolean(isSpecialTeamsReturn || activeEntity.isReturner);
           const baseRunSpeed = getBallCarrierRunSpeed(isReturn, (activeEntity.powerBoostTimer || 0) > 0);
           const contactSpeed = (activeEntity.contactSlowTimer || 0) > 0 ? 0.75 : 1;
@@ -5584,7 +5738,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           }
 
           // CPU AI ball carrier moves (juke / power truck boost)
-          if (activeOffense === 'P2' && activeEntity && onlineRole !== 'host') {
+          if (activeOffense === 'P2' && activeEntity) {
             if (isReturn) {
               // Symmetrical return steering: AI returner reads lanes at the exact same speed and steering factor
               const oncomingPursuers = [qb, rb, centerReceiver, ...receivers, ...linemen]
@@ -5736,11 +5890,17 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           const engagingBlocker = allPassBlockers.find(b => canEngagePassBlock(b, rusher));
 
           if (engagingBlocker) {
-            const holdFrames = getPassBlockHoldFrames(
+            let holdFrames = getPassBlockHoldFrames(
               baseBlockHoldFrames,
               (engagingBlocker.player?.ratings.blocking ?? 78) / 70,
               (rusher.player?.ratings.rush ?? 70) / 70
             );
+            if (currentTecmoMatchup) {
+              holdFrames = Math.round(holdFrames * currentTecmoMatchup.pocketHoldMultiplier);
+              if (currentTecmoMatchup.isExact) {
+                holdFrames = Math.min(holdFrames, currentTecmoMatchup.blockShedFrames);
+              }
+            }
             if (shouldHoldPassBlock(engagingBlocker, rusher, holdFrames)) {
               rusher.isEngagedWithBlocker = true;
               rusher.vx = 0;
@@ -5758,7 +5918,10 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           // Rusher is unblocked or broke the block:
           rusher.isEngagedWithBlocker = false;
           if (!isUserRusher) {
-            const rushSpeed = (hasExtraBlitzer ? 1.25 : 0.95) * ((rusher.player?.ratings.rush ?? 70) / 70);
+            let rushSpeed = (hasExtraBlitzer ? 1.25 : 0.95) * ((rusher.player?.ratings.rush ?? 70) / 70);
+            if (currentTecmoMatchup) {
+              rushSpeed *= currentTecmoMatchup.rusherSpeedMultiplier;
+            }
             moveToward(rusher, qb.x, qb.y, 0.28, rushSpeed);
           }
         });
@@ -5780,7 +5943,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         ].filter((p): p is Entity => Boolean(p));
         const assignedTacklers = new Set<Entity>();
 
-        returnBlockers.forEach((blocker) => {
+        returnBlockers.forEach((blocker, bIdx) => {
           blocker.isBlocker = true;
           let targetTackler: Entity | null = null;
           let minThreatDist = Infinity;
@@ -5789,7 +5952,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
             if (assignedTacklers.has(tackler)) return;
             const tacklerToRunner = Math.hypot(tackler.x - runner.x, tackler.y - runner.y);
             const threatScore = scoreRunBlockTarget(blocker, runner, tackler, attackDirection, false);
-            if (threatScore < minThreatDist && tacklerToRunner < 260) {
+            if (threatScore < minThreatDist && tacklerToRunner < 450) {
               minThreatDist = threatScore;
               targetTackler = tackler;
             }
@@ -5800,8 +5963,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
             assignedTacklers.add(target);
             const isNewEngagement = shouldApplyRunBlockStun(blocker, target);
             blocker.blockingDefender = target;
-            const blockSpeed = 1.8;
-            const blockAccel = 0.34;
+            const blockSpeed = 2.4;
+            const blockAccel = 0.40;
             moveToward(blocker, target.x, target.y, blockAccel, blockSpeed);
 
             const contactDist = Math.hypot(blocker.x - target.x, blocker.y - target.y);
@@ -5821,9 +5984,20 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           } else {
             blocker.blockingDefender = null;
             blocker.isEngagedWithBlocker = false;
-            // Advance downfield as lead blocker in front of the runner
-            const advanceY = runner.y + (30 * attackDirection);
-            moveToward(blocker, blocker.x, advanceY, 0.25, 1.6);
+            // Advance downfield as lead blocker in front of the runner with generous clearance and wedge formation
+            const leadOffset = 80 + (bIdx % 3) * 25;
+            const advanceY = runner.y + (leadOffset * attackDirection);
+            const wedgeSpread = [-80, -45, -20, 20, 45, 80];
+            const targetX = Math.max(35, Math.min(fieldWidth - 35, runner.x + wedgeSpread[bIdx % wedgeSpread.length]));
+            moveToward(blocker, targetX, advanceY, 0.35, 2.2);
+          }
+
+          // Anti-sticking clearance: if a blocker is ever too close to the returner, clear blocker forward and outward
+          const distToRunner = Math.hypot(blocker.x - runner.x, blocker.y - runner.y);
+          if (distToRunner < 38) {
+            const clearX = blocker.x >= runner.x ? 25 : -25;
+            blocker.x += clearX * 0.2;
+            blocker.y += (15 * attackDirection) * 0.2;
           }
           blocker.x = Math.max(25, Math.min(fieldWidth - 25, blocker.x));
         });
@@ -5900,20 +6074,37 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       }
     }
 
-    // Deep route separation evaluation: Create the possibility of open deep receivers for long passes!
-    receivers.forEach(r => {
-      if (phase === 'QB_DROP' && !r.isBlocker && (r.routeType === 'GO' || r.routeType === 'FLAG-L' || r.routeType === 'FLAG-R' || r.routeType === 'POST-L' || r.routeType === 'POST-R' || r.routeType === 'WHEEL')) {
+    // Open route separation evaluation: Highlight open receivers when the defense calls the wrong play or is beaten deep
+    const allEligibleReceivers = [
+      ...receivers,
+      ...(centerReceiver && !centerReceiver.isBlocker ? [centerReceiver] : []),
+      ...(rb && !rb.isBlocker && rb.routeType !== 'BLOCK' ? [rb] : [])
+    ].filter((r): r is Entity => Boolean(r && !r.isBlocker));
+
+    allEligibleReceivers.forEach(r => {
+      if (phase === 'QB_DROP') {
+        let minDefDist = Infinity;
+        defenders.forEach(d => {
+          if (!d || d.passRusher) return;
+          const dist = Math.hypot(d.x - r.x, d.y - r.y);
+          if (dist < minDefDist) minDefDist = dist;
+        });
+
         const distFromLos = Math.abs(r.y - lineOfScrimmageY);
-        if (distFromLos > 75) {
-          let minDefDist = Infinity;
-          defenders.forEach(d => {
-            if (!d || d.passRusher) return;
-            const dist = Math.hypot(d.x - r.x, d.y - r.y);
-            if (dist < minDefDist) minDefDist = dist;
-          });
-          r.isOpenDeep = (minDefDist >= 22);
+        const isRunBite = currentTecmoMatchup?.level === 'MISMATCH_BIT_ON_RUN';
+        const isWrongPassCall = currentTecmoMatchup?.level === 'CATEGORY_MATCH' && !currentTecmoMatchup.isExact && !currentTecmoMatchup.offenseIsRun;
+
+        if (isRunBite) {
+          // If defense bit on the run, receivers crossing past LOS are wide open!
+          r.isOpenDeep = distFromLos > 15;
+          if (r.isOpenDeep) r.flash = Math.max(r.flash || 0, 45);
+        } else if (isWrongPassCall) {
+          // Defense called the wrong pass play: receivers with moderate cushion gain open windows!
+          r.isOpenDeep = (minDefDist >= 18 && distFromLos > 25);
+          if (r.isOpenDeep) r.flash = Math.max(r.flash || 0, 35);
         } else {
-          r.isOpenDeep = false;
+          const isDeepRoute = ['GO', 'FLAG-L', 'FLAG-R', 'POST-L', 'POST-R', 'WHEEL'].includes(r.routeType ?? '');
+          r.isOpenDeep = Boolean(isDeepRoute && distFromLos > 70 && minDefDist >= 22);
         }
       } else {
         r.isOpenDeep = false;
@@ -6255,49 +6446,95 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           const isSpammed = routeRepeatCount >= 1;
           const shade = isSpammed ? (rec.x >= 170 ? -8 : 8) : 0;
           targetX = rec.x + shade;
-          targetY = (rec.routeType === 'COMEBACK' && (rec.timer || 0) >= 50) ? rec.y - (4 * dir) : rec.y + ((isSpammed ? 3 : 10) * dir);
-          moveSpeed = isSpammed ? 1.94 : 1.76;
-          moveAccel = isSpammed ? 0.44 : 0.32;
+
+          // Looser trailing cushion when defense called the wrong play
+          const tension = currentTecmoMatchup ? currentTecmoMatchup.coverageTension : 1.0;
+          const extraCushion = tension < 1.0 ? Math.round((1.0 - tension) * 28) : 0;
+          targetY = (rec.routeType === 'COMEBACK' && (rec.timer || 0) >= 50)
+            ? rec.y - (4 * dir)
+            : rec.y + ((isSpammed ? 3 : (10 + extraCushion)) * dir);
+
+          const isDeepPassRoute = (rec.y - lineOfScrimmageY) * dir > 50;
+          moveSpeed = isDeepPassRoute ? 2.05 : (isSpammed ? 1.94 : 1.76);
+          moveAccel = isDeepPassRoute ? 0.42 : (isSpammed ? 0.44 : 0.32);
+          if (currentTecmoMatchup) {
+            moveSpeed *= currentTecmoMatchup.dbClosingSpeedMultiplier;
+            moveAccel *= currentTecmoMatchup.dbClosingSpeedMultiplier;
+          }
           if (d.coverageLeverage) {
             const bracketTarget = getBracketCoverageTarget(d, rec, dir);
             targetX = bracketTarget.x;
             targetY = bracketTarget.y;
             moveSpeed = isSpammed ? 2.15 : 2.05;
             moveAccel = 0.44;
+            if (currentTecmoMatchup) {
+              moveSpeed *= currentTecmoMatchup.dbClosingSpeedMultiplier;
+            }
           }
         } else if (d.defenseAssignment === 'ZONE') {
           const zoneX = d.zoneX ?? d.startX ?? d.x;
           const zoneY = d.zoneY ?? (lineOfScrimmageY + (80 * dir));
           const eligibleZoneReceivers = [...receivers, centerReceiver, ...(rb && !rb.isBlocker ? [rb] : [])]
             .filter((receiver): receiver is Entity => receiver !== null && !receiver.caught && !receiver.isBlocker && receiver.routeType !== 'BLOCK');
+
+          const isDeepDefender = d.type === 'FS' || d.type === 'SS' || d.type === 'CB' || Math.abs(zoneY - lineOfScrimmageY) >= 110;
+
+          // Detect any receiver running deep in this defender's coverage zone / half of field
+          const deepThreats = eligibleZoneReceivers
+            .filter(r => {
+              const rDepth = (r.y - lineOfScrimmageY) * dir;
+              if (rDepth < 60) return false;
+              const xRange = (d.type === 'FS' || d.type === 'SS') ? 160 : 115;
+              return Math.abs(r.x - zoneX) <= xRange;
+            })
+            .sort((a, b) => ((b.y - lineOfScrimmageY) * dir) - ((a.y - lineOfScrimmageY) * dir));
+          const primaryDeepThreat = deepThreats[0];
+
+          // Underneath / intermediate zone target detection
           const zoneTargets = eligibleZoneReceivers
-            .filter(receiver => Math.abs(receiver.x - zoneX) <= 75 && Math.abs(receiver.y - zoneY) <= 85)
+            .filter(receiver => Math.abs(receiver.x - zoneX) <= 85 && (receiver.y - lineOfScrimmageY) * dir >= 10 && Math.abs(receiver.y - zoneY) <= 95)
             .sort((first, second) =>
               Math.hypot(first.x - d.x, first.y - d.y) - Math.hypot(second.x - d.x, second.y - d.y)
             );
           const zoneTarget = zoneTargets[0];
           const isSpammed = zoneTarget ? getReceiverRouteRepeatCount(zoneTarget) >= 1 : false;
-          if (zoneTarget && zoneTarget.routeType === 'COMEBACK' && (zoneTarget.timer || 0) >= 50) {
-            targetX = zoneTarget.x;
-            targetY = zoneTarget.y - (4 * dir);
-            moveSpeed = 1.84;
-            moveAccel = 0.38;
-          } else {
-            targetX = zoneTarget ? (zoneTarget.x + (isSpammed ? (zoneTarget.x >= 170 ? -6 : 6) : 0)) : zoneX;
-            targetY = zoneTarget ? zoneTarget.y + ((isSpammed ? 3 : 8) * dir) : zoneY;
-            moveSpeed = isSpammed ? 1.84 : (zoneTarget ? 1.72 : 1.5);
-            moveAccel = isSpammed ? 0.38 : (zoneTarget ? 0.32 : 0.26);
-          }
-          if (d.type === 'FS' || Math.abs(zoneY - lineOfScrimmageY) >= 150) {
-            const deepThreat = eligibleZoneReceivers
-              .filter(receiver => ['GO', 'POST-L', 'POST-R', 'FLAG-L', 'FLAG-R', 'WHEEL'].includes(receiver.routeType ?? '') && Math.abs(receiver.x - zoneX) <= 110)
-              .sort((first, second) => (second.y - first.y) * dir)[0];
-            if (deepThreat) {
-              targetX = deepThreat.x;
-              targetY = Math.max((zoneY - lineOfScrimmageY) * dir, (deepThreat.y - lineOfScrimmageY) * dir + 24) * dir + lineOfScrimmageY;
-              moveSpeed = 2.15;
+
+          if (isDeepDefender && primaryDeepThreat) {
+            // Deep zone defenders (FS, SS, outside CBs) carry deep routes and stay over the top of the deepest receiver
+            const tension = currentTecmoMatchup ? currentTecmoMatchup.coverageTension : 1.0;
+            const topMargin = tension < 1.0 ? 8 : 22; // Stay 8 to 22px deeper than the receiver to protect against over-the-top passes
+            targetX = primaryDeepThreat.x;
+            targetY = primaryDeepThreat.y + (topMargin * dir);
+            moveSpeed = 2.12;
+            moveAccel = 0.40;
+          } else if (zoneTarget) {
+            if (zoneTarget.routeType === 'COMEBACK' && (zoneTarget.timer || 0) >= 50) {
+              targetX = zoneTarget.x;
+              targetY = zoneTarget.y - (4 * dir);
+              moveSpeed = 1.84;
               moveAccel = 0.38;
+            } else {
+              targetX = zoneTarget.x + (isSpammed ? (zoneTarget.x >= 170 ? -6 : 6) : 0);
+              targetY = zoneTarget.y + ((isSpammed ? 3 : 8) * dir);
+              moveSpeed = isSpammed ? 1.90 : 1.76;
+              moveAccel = isSpammed ? 0.38 : 0.30;
             }
+          } else if (!isDeepDefender && primaryDeepThreat && (primaryDeepThreat.y - lineOfScrimmageY) * dir > 40) {
+            // Underneath defenders sink with vertical route through their area rather than stopping dead in their tracks
+            targetX = primaryDeepThreat.x;
+            targetY = lineOfScrimmageY + Math.min(130, (primaryDeepThreat.y - lineOfScrimmageY) * dir * 0.7) * dir;
+            moveSpeed = 1.60;
+            moveAccel = 0.28;
+          } else {
+            targetX = zoneX;
+            targetY = zoneY;
+            moveSpeed = 1.45;
+            moveAccel = 0.24;
+          }
+
+          if (currentTecmoMatchup) {
+            moveSpeed *= currentTecmoMatchup.dbClosingSpeedMultiplier;
+            moveAccel *= currentTecmoMatchup.dbClosingSpeedMultiplier;
           }
         }
 
@@ -6320,8 +6557,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           }
         }
 
-        targetX = Math.max(35, Math.min(fieldWidth - 35, targetX));
-        targetY = Math.max(60, Math.min(fieldHeight - 60, targetY));
+        targetX = Math.max(25, Math.min(fieldWidth - 25, targetX));
+        targetY = Math.max(22, Math.min(fieldHeight - 22, targetY));
 
         if (phase === 'RUNNING' && activeEntity) {
           const isRunnerQb = (activeEntity === qb);
@@ -6362,7 +6599,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     const includeReceiverCollisions = (phase === 'RUNNING');
     const userControlledEntities: Entity[] = [];
     if (activeOffense === 'P1' && activeEntity) userControlledEntities.push(activeEntity);
-    if (activeDefense === 'P1' || (onlineRole === 'host' && activeDefense === 'P2')) {
+    if (activeDefense === 'P1') {
       const controlledDefender = getControlledDefender();
       if (controlledDefender) userControlledEntities.push(controlledDefender);
     }
@@ -6496,6 +6733,9 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
             defenderTackling: d.player?.ratings.tackling,
             stamina: activeEntity.stamina
           });
+          if (currentTecmoMatchup?.isExact && currentTecmoMatchup.offenseIsRun) {
+            breakChance = 0;
+          }
           const roll = Math.random();
           if (roll < breakChance) {
             // BROKEN TACKLE! Shed defender and explode for long breakaway gain
@@ -6621,8 +6861,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         const engagedCoverageUnits = new Set<Entity>();
 
         const returner = defenders.find(d => d.isReturner) || (ball.isKickoff ? defenders[0] : defenders[6]);
-        const targetWallY = (returner ? returner.y : (ball.targetY || 500)) - (55 * attackDirection);
-        const wallOffsets = [-100, -60, -20, 20, 60, 100];
+        const targetWallY = (returner ? returner.y : (ball.targetY || 500)) - (80 * attackDirection);
+        const wallOffsets = [-110, -70, -35, 35, 70, 110];
 
         blockers.forEach((b, bIdx) => {
           b.isBlocker = true;
@@ -6712,12 +6952,17 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
             returnCatchY = returner.y;
 
             // Mobilize all receiving team teammates to run block for the returner
+            const wedgeSpread = [-80, -45, -20, 20, 45, 80];
+            let bIndex = 0;
             defenders.forEach(d => {
               if (d && d !== returner) {
                 d.isBlocker = true;
                 d.archetype = 'BLOCKER';
                 d.blockingDefender = null;
                 d.isEngagedWithBlocker = false;
+                d.x = Math.max(35, Math.min(fieldWidth - 35, returner.x + wedgeSpread[bIndex % wedgeSpread.length]));
+                d.y = returner.y + (75 * (-kickAttackDir));
+                bIndex++;
               }
             });
 
@@ -6861,10 +7106,38 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
             const recentRbPassCount = userPlayHistory.slice(-4).filter(p => p.targetWasRb || p.isFlatPass || p.routes?.rb === 'FLAT').length;
             const isRbFlatSpammed = isRb && (recentRbPassCount >= 1 || routeRepeatCount >= 1);
             const isTargetSpammed = (activeOffense === 'P1') && (routeRepeatCount >= 1 || isRbFlatSpammed);
-            const effectiveDefDist = minDefDist;
-            const effectiveBallDist = defDistToBall;
+            let effectiveDefDist = minDefDist;
+            let effectiveBallDist = defDistToBall;
+            let effectiveDefenderCount = defenderCount;
 
-            const outcome = resolveCatchContestOutcome({
+            const isReceiverOpen = minDefDist >= 35 || Boolean(c.isOpenDeep);
+
+            if (currentTecmoMatchup?.isExact && !currentTecmoMatchup.offenseIsRun) {
+              if (isReceiverOpen) {
+                // If the WR is open by separation / route beat, it doesn't matter if the right play was called:
+                // He is open by yards and should catch the ball cleanly!
+                effectiveDefDist = Math.max(minDefDist, 55);
+                effectiveBallDist = Math.max(defDistToBall, 55);
+                effectiveDefenderCount = 0;
+              } else {
+                // EXACT CALL on Pass when tightly contested: TOTAL SHUTDOWN! Blanket lockdown coverage
+                effectiveDefDist = Math.min(effectiveDefDist, 2);
+                effectiveBallDist = Math.min(effectiveBallDist, 2);
+                effectiveDefenderCount = Math.max(effectiveDefenderCount, 2);
+              }
+            } else if (currentTecmoMatchup?.level === 'CATEGORY_MATCH' && !currentTecmoMatchup.offenseIsRun) {
+              // Anticipated Pass generally, but wrong specific play: open passing windows!
+              effectiveDefDist = Math.max(effectiveDefDist, 35);
+              effectiveBallDist = Math.max(effectiveBallDist, 35);
+              effectiveDefenderCount = Math.min(effectiveDefenderCount, 1);
+            } else if (currentTecmoMatchup?.level === 'MISMATCH_BIT_ON_RUN') {
+              // Bit on the Run: Wide open receivers!
+              effectiveDefDist = Math.max(effectiveDefDist, 75);
+              effectiveBallDist = Math.max(effectiveBallDist, 75);
+              effectiveDefenderCount = 0;
+            }
+
+            let outcome = resolveCatchContestOutcome({
               effectiveDefDist,
               effectiveBallDist,
               isTargetSpammed,
@@ -6872,7 +7145,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
               isRb,
               receiverX: c.x,
               receiverRadius: c.radius,
-              defenderCount,
+              defenderCount: effectiveDefenderCount,
               ballSideDefender,
               archetype: c.archetype,
               handsRating: c.player?.ratings.hands,
@@ -6882,6 +7155,18 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
               fieldWidth,
               isProMode: tacticalMode === 'PRO'
             });
+
+            // Shutdown breakup ONLY applies when the pass is ACTUALLY contested by a nearby defender!
+            // If the receiver is open by 10 yards, he catches the ball!
+            if (!isReceiverOpen && currentTecmoMatchup?.isExact && !currentTecmoMatchup.offenseIsRun && outcome.type === 'COMPLETE') {
+              outcome = {
+                type: 'BROKEN_UP',
+                caught: false,
+                announcement: 'SHUTDOWN DEFENSE! PASS BROKEN UP! 🔒🚫',
+                color: '#ff3333',
+                resultType: 'DEFLECT'
+              };
+            }
 
             if (outcome.type === 'COMPLETE') {
               playResolved = true;
@@ -7393,7 +7678,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     }
 
     // Controlled player indicator halo (QB in pocket, Ball Carrier running, Edge Rusher on defense)
-    const userOnDefense = activeDefense === 'P1' || (onlineRole !== null && activeDefense === 'P2');
+    const userOnDefense = activeDefense === 'P1';
     const controlledPlayer = userOnDefense
       ? getControlledDefender()
       : (phase === 'QB_DROP')
@@ -7499,6 +7784,22 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         ctx.stroke();
       }
 
+      if ((centerReceiver.isOpenDeep || (centerReceiver.flash || 0) > 0) && phase === 'QB_DROP' && !centerReceiver.isBlocker) {
+        ctx.save();
+        const pulse = 0.8 + Math.sin(Date.now() * 0.012) * 0.2;
+        ctx.strokeStyle = `rgba(0, 255, 255, ${pulse})`;
+        ctx.lineWidth = 2.5 / cameraScale;
+        ctx.beginPath();
+        ctx.arc(centerReceiver.x, centerReceiver.y, centerReceiver.radius + 6, 0, Math.PI * 2);
+        ctx.stroke();
+
+        ctx.fillStyle = '#00ffff';
+        ctx.font = `bold ${Math.max(8, Math.round(9 / cameraScale))}px monospace`;
+        ctx.textAlign = 'center';
+        ctx.fillText('OPEN', centerReceiver.x, centerReceiver.y - ((centerReceiver.radius + 8) * attackDirection));
+        ctx.restore();
+      }
+
       // The center should always be assigned pass block and act as the RB does when he is pass blocking
       if (centerReceiver.isBlocker || centerReceiver.routeType === 'BLOCK') {
         const barWidth = centerReceiver.radius * 2 + 10;
@@ -7537,7 +7838,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         ctx.restore();
       }
 
-      // Open receiver indicator: Glow and banner for long pass bomb or capitalized coverage bust!
+      // Open receiver indicator: Glow and banner for open receivers!
       if ((r.isOpenDeep || (r.flash || 0) > 0) && phase === 'QB_DROP') {
         ctx.save();
         const pulse = 0.8 + Math.sin(Date.now() * 0.012) * 0.2;
@@ -7547,6 +7848,10 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         ctx.arc(r.x, r.y, r.radius + 6, 0, Math.PI * 2);
         ctx.stroke();
 
+        ctx.fillStyle = '#00ffff';
+        ctx.font = `bold ${Math.max(8, Math.round(9 / cameraScale))}px monospace`;
+        ctx.textAlign = 'center';
+        ctx.fillText('OPEN', r.x, r.y - ((r.radius + 8) * attackDirection));
         ctx.restore();
       }
     });
@@ -8288,7 +8593,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   const simulationClock = createSimulationClock();
   function loop(timestamp: number) {
     const steps = simulationClock(timestamp, isPaused);
-    if (!isPaused && onlineRole !== 'guest') {
+    if (!isPaused) {
       if (!options.tutorial) updateGameClock(timestamp);
       for (let step = 0; step < steps && !isPaused; step++) {
         const tutorialSnapAnimating = options.tutorial && tutorialStep === 2 && tutorialAimFrames++ < 24;

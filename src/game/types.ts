@@ -8,6 +8,7 @@ export type TacticalMode = 'ELITE' | 'PRO';
 export interface PlayOption {
   name: string;
   type: string;
+  isRun?: boolean;
   alignment?: 'SPREAD' | 'STACK' | 'TRIPS';
   left?: string;
   right?: string;

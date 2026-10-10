@@ -1,48 +1,100 @@
-import { io, type Socket } from 'socket.io-client';
+import { io, Socket } from 'socket.io-client';
 
-export interface LobbyPlayer {
+export interface PlayerInfo {
+  id: string;
   name: string;
   teamId: string;
   ready: boolean;
 }
 
-export interface OnlineLobby {
+export interface LobbyRoom {
   code: string;
-  host: LobbyPlayer;
-  guest: LobbyPlayer | null;
+  host: PlayerInfo;
+  guest: PlayerInfo | null;
   started: boolean;
+  createdAt: number;
 }
 
-export type LobbyRole = 'host' | 'guest';
-export type MultiplayerSocket = Socket;
-
-export interface LobbyActionResult {
-  ok: boolean;
-  lobby?: OnlineLobby;
-  role?: LobbyRole;
-  error?: string;
+export interface MatchStartPayload {
+  code: string;
+  hostTeamId: string;
+  guestTeamId: string;
+  hostName: string;
+  guestName: string;
 }
 
-export function connectToLobbyServer(): MultiplayerSocket {
-  return io(location.origin, {
-    path: '/socket.io',
-    transports: ['websocket']
-  });
+let socketInstance: Socket | null = null;
+
+export function getMultiplayerSocket(): Socket {
+  if (!socketInstance) {
+    socketInstance = io(window.location.origin, {
+      transports: ['websocket', 'polling'],
+      autoConnect: true,
+      reconnection: true,
+      reconnectionAttempts: 5,
+      reconnectionDelay: 1000
+    });
+  }
+  return socketInstance;
 }
 
 export function createLobby(
-  socket: MultiplayerSocket,
   name: string,
   teamId: string
-): Promise<LobbyActionResult> {
-  return new Promise((resolve, reject) => socket.timeout(8000).emit('lobby:create', { name, teamId }, (error: Error | null, result: LobbyActionResult) => error ? reject(error) : resolve(result)));
+): Promise<{ success: boolean; lobby?: LobbyRoom; error?: string }> {
+  const socket = getMultiplayerSocket();
+  return new Promise((resolve) => {
+    socket.emit('lobby:create', { name, teamId }, (res: any) => {
+      resolve(res || { success: false, error: 'Failed to create lobby' });
+    });
+  });
 }
 
 export function joinLobby(
-  socket: MultiplayerSocket,
   code: string,
   name: string,
   teamId: string
-): Promise<LobbyActionResult> {
-  return new Promise((resolve, reject) => socket.timeout(8000).emit('lobby:join', { code, name, teamId }, (error: Error | null, result: LobbyActionResult) => error ? reject(error) : resolve(result)));
+): Promise<{ success: boolean; lobby?: LobbyRoom; error?: string }> {
+  const socket = getMultiplayerSocket();
+  return new Promise((resolve) => {
+    socket.emit('lobby:join', { code, name, teamId }, (res: any) => {
+      resolve(res || { success: false, error: 'Failed to join lobby' });
+    });
+  });
+}
+
+export function setLobbyTeam(teamId: string): void {
+  const socket = getMultiplayerSocket();
+  socket.emit('lobby:team', teamId);
+}
+
+export function setLobbyReady(ready: boolean): void {
+  const socket = getMultiplayerSocket();
+  socket.emit('lobby:ready', ready);
+}
+
+export function startOnlineMatch(): void {
+  const socket = getMultiplayerSocket();
+  socket.emit('lobby:start');
+}
+
+export function sendGameAction(action: any): void {
+  const socket = getMultiplayerSocket();
+  socket.emit('game:action', action);
+}
+
+export function sendGameInput(input: any): void {
+  const socket = getMultiplayerSocket();
+  socket.emit('game:input', input);
+}
+
+export function sendGameSync(gameState: any): void {
+  const socket = getMultiplayerSocket();
+  socket.emit('game:sync', gameState);
+}
+
+export function leaveLobby(): void {
+  if (socketInstance) {
+    socketInstance.emit('lobby:leave');
+  }
 }
