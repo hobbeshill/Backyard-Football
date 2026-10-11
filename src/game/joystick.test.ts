@@ -816,6 +816,8 @@ test('P1 can steer the return man after fielding a kickoff', () => {
   globalThis.requestAnimationFrame = callback => { nextFrame = callback; return 1; };
   globalThis.cancelAnimationFrame = () => {};
   const canvas = createMockCanvas();
+  const capturedPointers: number[] = [];
+  canvas.setPointerCapture = pointerId => { capturedPointers.push(pointerId); };
   const handle: { game?: GameEngineHandle } = {};
   const cleanup = mountFootballGame(canvas, {
     setP2OffPlayState: () => {}, setP2DefPlayState: () => {},
@@ -838,18 +840,36 @@ test('P1 can steer the return man after fielding a kickoff', () => {
     assert.equal(game.phase, 'RUNNING', 'The receiving player must field this non-touchback kickoff');
     const returner = game.getDefenders?.().find(player => player.isReturner);
     assert.ok(returner);
+    const catchY = returner.y;
+    for (let frame = 0; frame < 6; frame++) advanceFrame();
+    assert.ok((returner.y - catchY) * game.attackDirection > 0, 'The returner continues upfield when no lateral input is held');
     const xBeforeInput = returner.x;
+    const yBeforeInput = returner.y;
 
     canvas._listeners.get('pointerdown')?.({
       clientX: 100, clientY: 220, pointerId: 7, preventDefault: () => {}
     } as PointerEvent);
+    assert.deepEqual(capturedPointers, [7], 'The native joystick should capture its pointer while steering');
     canvas._listeners.get('pointermove')?.({
       clientX: 140, clientY: 220, pointerId: 7
     } as PointerEvent);
     advanceFrame();
 
     assert.ok(returner.x > xBeforeInput, 'A rightward joystick drag should move the returner right');
-    canvas._listeners.get('pointerup')?.({ clientX: 140, clientY: 220, pointerId: 7 } as PointerEvent);
+    assert.ok((returner.y - yBeforeInput) * game.attackDirection > 0, 'A lateral drag still preserves forward return progress');
+    canvas._listeners.get('pointercancel')?.({ clientX: 140, clientY: 220, pointerId: 7 } as PointerEvent);
+    assert.equal(game.isJoystickActiveForTest?.(), false, 'Pointer cancellation releases returner control');
+
+    const xBeforeReverse = returner.x;
+    canvas._listeners.get('pointerdown')?.({
+      clientX: 160, clientY: 220, pointerId: 8, preventDefault: () => {}
+    } as PointerEvent);
+    canvas._listeners.get('pointermove')?.({
+      clientX: 120, clientY: 220, pointerId: 8
+    } as PointerEvent);
+    advanceFrame();
+    assert.ok(returner.x < xBeforeReverse, 'The returner must reverse left even while blockers pursue coverage');
+    canvas._listeners.get('pointerup')?.({ clientX: 120, clientY: 220, pointerId: 8 } as PointerEvent);
   } finally {
     cleanup?.();
     globalThis.requestAnimationFrame = originalRequest;
@@ -904,6 +924,7 @@ test('online P2 returner is controlled by guest input, not the opposing defense'
     snapshot.specialTeamsReturnType = 'KICKOFF';
     game.setOnlineGuestControl?.(true);
     game.setOnlinePlayerSide?.('P1');
+    game.setNetworkMirror?.(true);
     game.applyNetworkSnapshot?.(snapshot);
 
     assert.equal(game.getControlledDefender?.(), null, 'The P2 returner must not be exposed as a P1 defender');
@@ -917,6 +938,7 @@ test('online P2 returner is controlled by guest input, not the opposing defense'
 
     game.applyLocalInput?.(0, 0, false);
     game.setOnlinePlayerSide?.('P2');
+    const guestReturnYBefore = returner.y;
     canvas._listeners.get('pointerdown')?.({
       clientX: 100, clientY: 220, pointerId: 7, preventDefault: () => {}
     } as PointerEvent);
@@ -925,14 +947,190 @@ test('online P2 returner is controlled by guest input, not the opposing defense'
     } as PointerEvent);
     advanceFrame();
     advanceFrame();
-    assert.ok(returner.x > xBeforeInput, 'Guest native input should steer the P2 returner');
+    assert.equal(returner.x, xBeforeInput, 'The guest mirror must not simulate a second returner locally');
     assert.ok(onlineInputs.some(input => input.active && input.dx > 0.5), 'Guest canvas movement should be sent to the host');
     canvas._listeners.get('pointerup')?.({ clientX: 140, clientY: 220, pointerId: 7 } as PointerEvent);
     assert.equal(onlineInputs.at(-1)?.active, false, 'Guest input release should clear host movement');
+
+    const hostSnapshot = game.getNetworkSnapshot?.();
+    assert.ok(hostSnapshot);
+    hostSnapshot.entities[returnerId].data.x = xBeforeInput + 12;
+    hostSnapshot.entities[returnerId].data.y = guestReturnYBefore + 12;
+    game.applyNetworkSnapshot?.(hostSnapshot);
+    for (let frame = 0; frame < 24; frame++) advanceFrame();
+    const mirroredReturner = game.getDefenders?.().find(player => player.isReturner);
+    assert.ok(mirroredReturner);
+    assert.equal(mirroredReturner.x, xBeforeInput + 12, 'The guest should render host-authoritative return movement smoothly');
+    assert.equal(mirroredReturner.y, guestReturnYBefore + 12);
   } finally {
     cleanup?.();
     globalThis.requestAnimationFrame = originalRequest;
     globalThis.cancelAnimationFrame = originalCancel;
+  }
+});
+
+test('guest native input cannot steer the host-controlled P1 quarterback', () => {
+  const originalRequest = globalThis.requestAnimationFrame;
+  const originalCancel = globalThis.cancelAnimationFrame;
+  let nextFrame: FrameRequestCallback | null = null;
+  let timestamp = 0;
+  globalThis.requestAnimationFrame = callback => { nextFrame = callback; return 1; };
+  globalThis.cancelAnimationFrame = () => {};
+  const handle: { game?: GameEngineHandle } = {};
+  const cleanup = mountFootballGame(createMockCanvas(), {
+    setP2OffPlayState: () => {}, setP2DefPlayState: () => {},
+    setDownDistanceText: () => {}, setActiveOffenseState: () => {},
+    setUserScore: () => {}, setCpuScore: () => {}, setP1DefPlayState: () => {},
+    setMomentumState: () => {}, setGameClockState: () => {}, showAnnouncement: () => {},
+    onEngineReady: game => { handle.game = game ?? undefined; }
+  });
+  const advanceFrame = () => {
+    const frame = nextFrame;
+    assert.ok(frame);
+    timestamp += 1000 / 60;
+    frame(timestamp);
+  };
+  try {
+    const game = handle.game;
+    assert.ok(game);
+    game.setOnlineGuestControl?.(true);
+    game.setOnlinePlayerSide?.('P2');
+    game.setPossessionForTest?.('P1');
+    game.resetDrill();
+    const snapshot = game.getNetworkSnapshot?.();
+    assert.ok(snapshot?.entities.qb);
+    snapshot.phase = 'QB_DROP';
+    snapshot.activeEntityId = 'qb';
+    snapshot.entities.qb.data.hasBall = true;
+    snapshot.entities.qb.data.dropStepTimer = 28;
+    snapshot.userControlledDefenderIndex = 6;
+    game.applyNetworkSnapshot?.(snapshot);
+
+    for (let frame = 0; frame < 8; frame++) advanceFrame();
+    const baseline = game.getNetworkSnapshot?.();
+    assert.ok(baseline);
+    const expectedQb = baseline.entities.qb.data;
+
+    game.applyNetworkSnapshot?.(snapshot);
+    const guestDefender = game.getControlledDefender?.();
+    assert.ok(guestDefender);
+    const defenderXBefore = guestDefender.x;
+    game.applyLocalInput?.(1, 0, true);
+    for (let frame = 0; frame < 8; frame++) advanceFrame();
+    const after = game.getNetworkSnapshot?.().entities.qb.data;
+    assert.equal(after.x, expectedQb.x, 'Guest defensive direction must not alter the host QB x-position');
+    assert.ok(Math.abs(after.y - expectedQb.y) < 1.5, 'Guest defensive direction must not alter the host QB dropback');
+    assert.ok(guestDefender.x > defenderXBefore, 'The same guest input should move the controlled defender');
+
+  } finally {
+    cleanup?.();
+    globalThis.requestAnimationFrame = originalRequest;
+    globalThis.cancelAnimationFrame = originalCancel;
+  }
+});
+
+test('guest mirror interpolates host snapshots without simulating QB movement', () => {
+  const originalRequest = globalThis.requestAnimationFrame;
+  const originalCancel = globalThis.cancelAnimationFrame;
+  let nextFrame: FrameRequestCallback | null = null;
+  let timestamp = 0;
+  globalThis.requestAnimationFrame = callback => { nextFrame = callback; return 1; };
+  globalThis.cancelAnimationFrame = () => {};
+  const handle: { game?: GameEngineHandle } = {};
+  const cleanup = mountFootballGame(createMockCanvas(), {
+    setP2OffPlayState: () => {}, setP2DefPlayState: () => {},
+    setDownDistanceText: () => {}, setActiveOffenseState: () => {},
+    setUserScore: () => {}, setCpuScore: () => {}, setP1DefPlayState: () => {},
+    setMomentumState: () => {}, setGameClockState: () => {}, showAnnouncement: () => {},
+    onEngineReady: game => { handle.game = game ?? undefined; }
+  });
+  const advanceFrame = () => {
+    const frame = nextFrame;
+    assert.ok(frame);
+    timestamp += 1000 / 60;
+    frame(timestamp);
+  };
+  try {
+    const game = handle.game;
+    assert.ok(game);
+    game.setOnlineGuestControl?.(true);
+    game.setOnlinePlayerSide?.('P2');
+    game.setPossessionForTest?.('P1');
+    game.resetDrill();
+    const snapshot = game.getNetworkSnapshot?.();
+    assert.ok(snapshot?.entities.qb);
+    snapshot.phase = 'QB_DROP';
+    snapshot.activeEntityId = 'qb';
+    snapshot.entities.qb.data.hasBall = true;
+    snapshot.entities.qb.data.dropStepTimer = 0;
+    const previousX = snapshot.entities.qb.data.x;
+    const previousY = snapshot.entities.qb.data.y;
+    snapshot.entities.qb.data.x = previousX + 40;
+    snapshot.entities.qb.data.y = previousY + 20;
+
+    game.setNetworkMirror?.(true);
+    game.applyNetworkSnapshot?.(snapshot);
+    let guestState = game.getNetworkSnapshot?.();
+    assert.ok(guestState);
+    assert.equal(guestState.entities.qb.data.x, previousX, 'A mirror snapshot should not jump player positions');
+
+    for (let frame = 0; frame < 2; frame++) advanceFrame();
+    guestState = game.getNetworkSnapshot?.();
+    assert.ok(guestState);
+    assert.ok(guestState.entities.qb.data.x > previousX && guestState.entities.qb.data.x < previousX + 40, 'The guest render should interpolate toward the host QB position');
+
+    game.applyLocalInput?.(-1, 0, true);
+    for (let frame = 0; frame < 25; frame++) advanceFrame();
+    guestState = game.getNetworkSnapshot?.();
+    assert.ok(guestState);
+    assert.equal(guestState.entities.qb.data.x, previousX + 40, 'Guest defensive input must not change the host snapshot target');
+  } finally {
+    cleanup?.();
+    globalThis.requestAnimationFrame = originalRequest;
+    globalThis.cancelAnimationFrame = originalCancel;
+  }
+});
+
+test('guest mirror relays native start and throw without simulating a second play', () => {
+  const canvas = createMockCanvas();
+  const handle: { game?: GameEngineHandle } = {};
+  const actions: Array<{ type: string }> = [];
+  const cleanup = mountFootballGame(canvas, {
+    setP2OffPlayState: () => {}, setP2DefPlayState: () => {},
+    setDownDistanceText: () => {}, setActiveOffenseState: () => {},
+    setUserScore: () => {}, setCpuScore: () => {}, setP1DefPlayState: () => {},
+    setMomentumState: () => {}, setGameClockState: () => {}, showAnnouncement: () => {},
+    onOnlineAction: action => { actions.push(action); },
+    onEngineReady: game => { handle.game = game ?? undefined; }
+  });
+  try {
+    const game = handle.game;
+    assert.ok(game);
+    game.setOnlineGuestControl?.(true);
+    game.setOnlinePlayerSide?.('P2');
+    game.setNetworkMirror?.(true);
+    game.setPossessionForTest?.('P2');
+    game.resetDrill();
+    game.startPlay?.();
+    assert.equal(game.phase, 'PRE_SNAP', 'The guest waits for the authoritative start snapshot');
+    assert.deepEqual(actions, [{ type: 'START' }]);
+
+    const snapshot = game.getNetworkSnapshot?.();
+    assert.ok(snapshot);
+    snapshot.phase = 'QB_DROP';
+    snapshot.activeEntityId = 'qb';
+    snapshot.entities.qb.data.hasBall = true;
+    snapshot.entities.qb.data.dropStepTimer = 0;
+    game.applyNetworkSnapshot?.(snapshot);
+    const receiver = game.getReceiverScreenPositionForTest?.(0);
+    assert.ok(receiver);
+    canvas._listeners.get('pointerdown')?.({
+      clientX: receiver.x, clientY: receiver.y, pointerId: 3, preventDefault: () => {}
+    } as PointerEvent);
+    assert.equal(game.phase, 'QB_DROP', 'The guest does not locally execute a second pass');
+    assert.deepEqual(actions.map(action => action.type), ['START', 'THROW']);
+  } finally {
+    cleanup?.();
   }
 });
 

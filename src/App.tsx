@@ -414,6 +414,7 @@ export default function App() {
       onGameOver: (p1FinalScore, p2FinalScore, restored, boxScore) => {
         engineRef.current?.setOnlineGuestControl?.(false);
         engineRef.current?.setOnlinePlayerSide?.('P1');
+        engineRef.current?.setNetworkMirror?.(false);
         engineRef.current?.applyRemoteInput?.(0, 0, false);
         engineRef.current?.applyLocalInput?.(0, 0, false);
         setFinishedGame({
@@ -497,6 +498,7 @@ export default function App() {
       engineRef.current?.selectP2Team(guestTeam.id);
       engineRef.current?.setOnlineGuestControl?.(true);
       engineRef.current?.setOnlinePlayerSide?.(onlineRoleRef.current === 'guest' ? 'P2' : 'P1');
+      engineRef.current?.setNetworkMirror?.(onlineRoleRef.current === 'guest');
       engineRef.current?.resetGame();
       setHasKickedOff(true);
       showAnnouncement(`ONLINE MATCH: ${hostTeam.nickname.toUpperCase()} VS ${guestTeam.nickname.toUpperCase()} 🏈`, '#00ffff', true);
@@ -541,6 +543,7 @@ export default function App() {
     const onPeerDisconnected = (data: { message: string }) => {
       engineRef.current?.setOnlineGuestControl?.(false);
       engineRef.current?.setOnlinePlayerSide?.('P1');
+      engineRef.current?.setNetworkMirror?.(false);
       engineRef.current?.applyRemoteInput?.(0, 0, false);
       engineRef.current?.applyLocalInput?.(0, 0, false);
       setOnlineLobby(null);
@@ -582,7 +585,7 @@ export default function App() {
         isKickoffActive,
         clock: gameClockState
       });
-    }, 200);
+    }, 100);
     return () => clearInterval(interval);
   }, [onlineRole, userScore, cpuScore, downDistanceText, phaseState, is4thDown, isKickoffActive, gameClockState]);
 
@@ -629,6 +632,7 @@ export default function App() {
     leaveLobby();
     engineRef.current?.setOnlineGuestControl?.(false);
     engineRef.current?.setOnlinePlayerSide?.('P1');
+    engineRef.current?.setNetworkMirror?.(false);
     engineRef.current?.applyRemoteInput?.(0, 0, false);
     engineRef.current?.applyLocalInput?.(0, 0, false);
     setOnlineLobby(null);

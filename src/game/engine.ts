@@ -86,6 +86,7 @@ export interface GameEngineHandle {
   applyRemoteInput?: (dx: number, dy: number, active: boolean) => void;
   setOnlineGuestControl?: (enabled: boolean) => void;
   setOnlinePlayerSide?: (side: 'P1' | 'P2') => void;
+  setNetworkMirror?: (enabled: boolean) => void;
   applyLocalInput?: (dx: number, dy: number, active: boolean) => void;
   getNetworkSnapshot?: () => Record<string, any>;
   applyNetworkSnapshot?: (snapshot: Record<string, any>) => void;
@@ -98,6 +99,7 @@ export type RemoteGameAction =
   | { type: 'DEFENSE_PLAY'; play: string }
   | { type: 'THROW'; target: number }
   | { type: 'JUKE'; direction: -1 | 1 }
+  | { type: 'BOOST' }
   | { type: 'DEFENDER'; index: number }
   | { type: 'DIVE' }
   | { type: 'SWAT' }
@@ -410,6 +412,10 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   let activeDefense: 'P1' | 'P2' = 'P2';
   let onlineGuestControlsP2 = false;
   let onlinePlayerSide: 'P1' | 'P2' = 'P1';
+  let networkMirror = false;
+  let networkInterpolationTargets = new Map<Entity, { x: number; y: number }>();
+  let networkCameraTarget: number | null = null;
+  let networkBallTarget: { x: number; y: number; z: number } | null = null;
 
   let p1Team: TeamProfile = getTeam('ALABAMA');
   let p2Team: TeamProfile = getTeam('GEORGIA');
@@ -547,7 +553,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   }
 
   function saveGameSession(): void {
-    if (options.tutorial || !isSessionActive || typeof window === 'undefined') return;
+    if (networkMirror || options.tutorial || !isSessionActive || typeof window === 'undefined') return;
     try {
       window.localStorage.setItem(GAME_SESSION_STORAGE_KEY, JSON.stringify(getGameStateSnapshot()));
     } catch {
@@ -666,6 +672,36 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     } catch {
       if (!snapshotOverride) window.localStorage.removeItem(GAME_SESSION_STORAGE_KEY);
       return false;
+    }
+  }
+
+  function applyGameNetworkSnapshot(snapshot: Record<string, any>): void {
+    if (!networkMirror) {
+      restoreGameSession(snapshot);
+      return;
+    }
+
+    const previousPositions = new Map(getSessionEntities().map(([id, entity]) => [id, { x: entity.x, y: entity.y }]));
+    const previousCameraY = cameraY;
+    const previousBall = ball ? { x: ball.x, y: ball.y, z: ball.z } : null;
+    if (!restoreGameSession(snapshot)) return;
+
+    networkInterpolationTargets = new Map();
+    getSessionEntities().forEach(([id, entity]) => {
+      const target = { x: entity.x, y: entity.y };
+      const previous = previousPositions.get(id);
+      if (!previous) return;
+      entity.x = previous.x;
+      entity.y = previous.y;
+      networkInterpolationTargets.set(entity, target);
+    });
+    networkCameraTarget = cameraY;
+    cameraY = previousCameraY;
+    networkBallTarget = ball && previousBall ? { x: ball.x, y: ball.y, z: ball.z } : null;
+    if (ball && previousBall) {
+      ball.x = previousBall.x;
+      ball.y = previousBall.y;
+      ball.z = previousBall.z;
     }
   }
 
@@ -3359,12 +3395,18 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     },
     isKickoffActive: () => isKickoffPhase,
     getNetworkSnapshot: () => getGameStateSnapshot(),
-    applyNetworkSnapshot: snapshot => { restoreGameSession(snapshot); },
+    applyNetworkSnapshot: snapshot => { applyGameNetworkSnapshot(snapshot); },
     setOnlineGuestControl: enabled => {
       onlineGuestControlsP2 = enabled;
       remoteJoystick = { dx: 0, dy: 0, active: false };
     },
     setOnlinePlayerSide: side => { onlinePlayerSide = side; },
+    setNetworkMirror: enabled => {
+      networkMirror = enabled;
+      networkInterpolationTargets.clear();
+      networkCameraTarget = null;
+      networkBallTarget = null;
+    },
     applyLocalInput: (dx, dy, active) => {
       joystick.active = active;
       joystick.pointerId = null;
@@ -3611,6 +3653,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     if (onlineGuestControlsP2 && kickoffKickingTeam !== onlinePlayerSide && !isRemoteGuestStart) return;
     if (onlineGuestControlsP2 && onlinePlayerSide === 'P2' && !isRemote) {
       callbacks.onOnlineAction?.({ type: 'START' });
+      if (networkMirror) return;
     }
     const kickoffPower = kickoffKickingTeam === 'P1'
       ? kickMeterPower
@@ -3629,6 +3672,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     if (activeOffense !== onlinePlayerSide && !isRemoteGuestStart) return;
     if (onlineGuestControlsP2 && onlinePlayerSide === 'P2' && !isRemote) {
       callbacks.onOnlineAction?.({ type: 'START' });
+      if (networkMirror) return;
     }
 
     const play = offensivePlaybook[activeOffense === 'P1' ? p1OffPlay : p2OffPlay];
@@ -3689,6 +3733,10 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   function activateTurbo(active: boolean): void {
     if (onlineGuestControlsP2 && onlinePlayerSide === 'P2' && !isLocalDefense()) return;
     const changed = userTurboActive !== active;
+    if (changed && networkMirror && onlineGuestControlsP2 && onlinePlayerSide === 'P2') {
+      callbacks.onOnlineAction?.({ type: 'TURBO', active });
+      return;
+    }
     userTurboActive = active;
     if (changed && onlineGuestControlsP2 && onlinePlayerSide === 'P2' && isLocalDefense()) {
       callbacks.onOnlineAction?.({ type: 'TURBO', active });
@@ -3779,6 +3827,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     if (!defender || (defender.diveCooldownTimer || 0) > 0) return;
     if (onlineGuestControlsP2 && onlinePlayerSide === 'P2') {
       callbacks.onOnlineAction?.({ type: 'DIVE' });
+      if (networkMirror) return;
     }
     defender.diveCooldownTimer = 45;
 
@@ -3850,6 +3899,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     if (!defender) return;
     if (onlineGuestControlsP2 && onlinePlayerSide === 'P2') {
       callbacks.onOnlineAction?.({ type: 'SWAT' });
+      if (networkMirror) return;
     }
 
     defender.swatAttemptTimer = 16;
@@ -3948,6 +3998,10 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     if ((key === 'j' || key === 'e' || key === ' ') && phase === 'RUNNING' && activeEntity && isLocalOffense()) {
       if ((activeEntity.jukeCooldownTimer || 0) <= 0) {
         const jukeSign = keysDown.left ? -1 : (keysDown.right ? 1 : (activeEntity.vx && activeEntity.vx < 0 ? -1 : 1));
+        if (networkMirror && onlineGuestControlsP2 && onlinePlayerSide === 'P2') {
+          callbacks.onOnlineAction?.({ type: 'JUKE', direction: jukeSign });
+          return;
+        }
         activeEntity.jukeTimer = 10;
         activeEntity.jukeVx = jukeSign * 1.35;
         activeEntity.jukeCooldownTimer = 35;
@@ -4004,8 +4058,11 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     );
   }
 
-  function getEffectiveJoystickInput(useRemoteInput = false): { x: number; y: number; active: boolean } {
-    const shouldUseRemote = useRemoteInput && onlinePlayerSide === 'P1';
+  function getEffectiveJoystickInput(controlledSide: 'P1' | 'P2' = onlinePlayerSide): { x: number; y: number; active: boolean } {
+    const isLocalSide = controlledSide === onlinePlayerSide;
+    const shouldUseRemote = onlineGuestControlsP2 && onlinePlayerSide === 'P1' && controlledSide === 'P2';
+    if (!isLocalSide && !shouldUseRemote) return { x: 0, y: 0, active: false };
+
     let x = shouldUseRemote
       ? remoteJoystick.active ? remoteJoystick.dx : 0
       : joystick.active ? joystick.inputX : 0;
@@ -4056,6 +4113,11 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   function activateJoystick(pointerId: number, origin: { x: number; y: number }): void {
     joystick.active = true;
     joystick.pointerId = pointerId;
+    try {
+      canvas.setPointerCapture(pointerId);
+    } catch {
+      // Pointer capture is unavailable in some test and embedded canvas hosts.
+    }
     joystick.baseX = origin.x;
     joystick.baseY = origin.y;
     joystick.currentX = origin.x;
@@ -4147,6 +4209,12 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           activeEntity.vx = 0;
         }
         break;
+      case 'BOOST':
+        if (phase === 'RUNNING' && activeOffense === 'P2' && activeEntity && !activeEntity.boostUsed) {
+          activeEntity.boostUsed = true;
+          activeEntity.powerBoostTimer = 60;
+        }
+        break;
       case 'DIVE':
         diveTackle();
         break;
@@ -4216,6 +4284,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         .filter((receiver): receiver is Entity => Boolean(receiver && !receiver.isBlocker && receiver.routeType !== 'BLOCK'))
         .indexOf(tappedReceiver);
       if (receiverIndex >= 0) callbacks.onOnlineAction?.({ type: 'THROW', target: receiverIndex });
+      if (networkMirror) return;
     }
 
     let projX = tappedReceiver.x;
@@ -4845,6 +4914,10 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         // Requires a deliberate, crisp, quick flick (not a steering drag)
         if (swipeTime < 240 && Math.abs(deltaScreenX) > 55 && swipeSpeed > 0.38 && Math.abs(deltaScreenX) > Math.abs(deltaScreenY) * 1.6) {
           const jukeSign = deltaScreenX > 0 ? 1 : -1;
+          if (networkMirror && onlineGuestControlsP2 && onlinePlayerSide === 'P2') {
+            callbacks.onOnlineAction?.({ type: 'JUKE', direction: jukeSign });
+            return;
+          }
           activeEntity.jukeTimer = 10;
           activeEntity.jukeVx = jukeSign * 1.35;
           activeEntity.jukeCooldownTimer = 35;
@@ -4857,6 +4930,10 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           showAnnouncement(jukeSign > 0 ? "JUKE RIGHT! 💨" : "JUKE LEFT! 💨", "#00ffff");
         } else if (swipeTime < 350 && ((attackDirection === -1 && deltaScreenY < -35) || (attackDirection === 1 && deltaScreenY > 35)) && Math.abs(deltaScreenX) < 40) {
           if (!activeEntity.boostUsed) {
+            if (networkMirror && onlineGuestControlsP2 && onlinePlayerSide === 'P2') {
+              callbacks.onOnlineAction?.({ type: 'BOOST' });
+              return;
+            }
             activeEntity.boostUsed = true;
             activeEntity.powerBoostTimer = 60;
             screenShakeTimer = 20;
@@ -4890,6 +4967,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   canvas.addEventListener('pointerdown', handlePointerDown);
   canvas.addEventListener('pointermove', handlePointerMove);
   canvas.addEventListener('pointerup', handlePointerUp);
+  canvas.addEventListener('pointercancel', handlePointerUp);
 
   function triggerFumble(carrier: Entity) {
     phase = 'FUMBLE';
@@ -4935,6 +5013,33 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   }
 
   function update() {
+    if (networkMirror) {
+      for (const [entity, target] of networkInterpolationTargets) {
+        entity.x += (target.x - entity.x) * 0.35;
+        entity.y += (target.y - entity.y) * 0.35;
+        if (Math.hypot(target.x - entity.x, target.y - entity.y) < 0.2) {
+          entity.x = target.x;
+          entity.y = target.y;
+          networkInterpolationTargets.delete(entity);
+        }
+      }
+      if (ball && networkBallTarget) {
+        ball.x += (networkBallTarget.x - ball.x) * 0.35;
+        ball.y += (networkBallTarget.y - ball.y) * 0.35;
+        ball.z += (networkBallTarget.z - ball.z) * 0.35;
+      } else {
+        networkBallTarget = null;
+      }
+      if (networkCameraTarget !== null) {
+        cameraY += (networkCameraTarget - cameraY) * 0.35;
+        if (Math.abs(networkCameraTarget - cameraY) < 0.2) {
+          cameraY = networkCameraTarget;
+          networkCameraTarget = null;
+        }
+      }
+      return;
+    }
+
     const entities = getSessionEntities().map(([, entity]) => entity);
     const positions = entities.map(entity => ({ x: entity.x, y: entity.y }));
     const livePlay = !['PRE_SNAP', 'DEAD', 'KICKOFF'].includes(phase);
@@ -5762,7 +5867,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
         if (phase === 'QB_DROP') {
           if (isUserOffense()) {
-            const joy = getEffectiveJoystickInput(activeOffense === 'P2');
+            const joy = getEffectiveJoystickInput(activeOffense);
             if (joy.active && (joy.x !== 0 || joy.y !== 0)) {
               const qbSpeed = 1.30 * 0.78 * GAME_SPEED_SCALE * USER_CONTROL_SPEED_MULTIPLIER * (qb.speedMultiplier || 1) * getFatigueSpeedMultiplier(qb.stamina);
               const qbDirection = getDirectionalInput(joy.x, joy.y);
@@ -5880,12 +5985,19 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           const carrierMaxSpeed = baseRunSpeed * teammateSpeedScale * GAME_SPEED_SCALE * (activeEntity.speedMultiplier || 1) * getFatigueSpeedMultiplier(activeEntity.stamina) * contactSpeed * (isUserControlled ? USER_CONTROL_SPEED_MULTIPLIER : 1);
 
           if (isUserControlled) {
-            const joy = getEffectiveJoystickInput(activeEntity.team === 'P2');
+            const joy = getEffectiveJoystickInput(activeEntity.team ?? activeOffense);
             if ((activeEntity.jukeTimer || 0) > 0) {
               // During juke, forward momentum continues while lateral is driven exclusively by the plant-and-cut juke curve
               activeEntity.vx = 0; // Explicitly ensure lateral velocity is 0 during juke!
               activeEntity.vy = carrierMaxSpeed * attackDirection * 0.85;
               activeEntity.y += activeEntity.vy;
+            } else if (isReturn && (!joy.active || Math.abs(joy.y) < 0.2)) {
+              const direction = getDirectionalInput(joy.x, joy.y);
+              activeEntity.vx = direction.x * carrierMaxSpeed;
+              activeEntity.vy = carrierMaxSpeed * attackDirection * 0.85;
+              activeEntity.x += activeEntity.vx;
+              activeEntity.y += activeEntity.vy;
+              activeEntity.x = Math.max(30, Math.min(fieldWidth - 30, activeEntity.x));
             } else if (joy.active && (joy.x !== 0 || joy.y !== 0)) {
               // Tight direct control: velocity follows the stick/d-pad heading with no carried momentum.
               const runnerVelocity = getUserRunnerVelocity(joy.x, joy.y, carrierMaxSpeed, attackDirection);
@@ -6419,7 +6531,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
             d.x = Math.max(20, Math.min(fieldWidth - 20, d.x));
             d.y = Math.max(30, Math.min(fieldHeight - 30, d.y));
           } else {
-            const joy = getEffectiveJoystickInput(activeDefense === 'P2');
+            const joy = getEffectiveJoystickInput(activeDefense);
             if (joy.active && (joy.x !== 0 || joy.y !== 0)) {
               const defenseTeam = activeDefense === 'P1' ? p1Team : p2Team;
               const defenderSpeedRating = d.speedMultiplier || (d.passRusher
@@ -7851,7 +7963,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     }
 
     // Controlled player indicator halo (QB in pocket, Ball Carrier running, Edge Rusher on defense)
-    const userOnDefense = activeDefense === 'P1';
+    const userOnDefense = isLocalDefense();
     const controlledPlayer = userOnDefense
       ? getControlledDefender()
       : (phase === 'QB_DROP')
@@ -8839,6 +8951,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     canvas.removeEventListener('pointerdown', handlePointerDown);
     canvas.removeEventListener('pointermove', handlePointerMove);
     canvas.removeEventListener('pointerup', handlePointerUp);
+    canvas.removeEventListener('pointercancel', handlePointerUp);
   };
 
 }
