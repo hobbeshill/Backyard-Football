@@ -1091,6 +1091,66 @@ test('guest mirror interpolates host snapshots without simulating QB movement', 
   }
 });
 
+test('host remote defense input moves P2 defenders without changing the P1 QB path', () => {
+  const originalRequest = globalThis.requestAnimationFrame;
+  const originalCancel = globalThis.cancelAnimationFrame;
+  let nextFrame: FrameRequestCallback | null = null;
+  let timestamp = 0;
+  globalThis.requestAnimationFrame = callback => { nextFrame = callback; return 1; };
+  globalThis.cancelAnimationFrame = () => {};
+  const handle: { game?: GameEngineHandle } = {};
+  const cleanup = mountFootballGame(createMockCanvas(), {
+    setP2OffPlayState: () => {}, setP2DefPlayState: () => {},
+    setDownDistanceText: () => {}, setActiveOffenseState: () => {},
+    setUserScore: () => {}, setCpuScore: () => {}, setP1DefPlayState: () => {},
+    setMomentumState: () => {}, setGameClockState: () => {}, showAnnouncement: () => {},
+    onEngineReady: game => { handle.game = game ?? undefined; }
+  });
+  const advanceFrame = () => {
+    const frame = nextFrame;
+    assert.ok(frame);
+    timestamp += 1000 / 60;
+    frame(timestamp);
+  };
+  try {
+    const game = handle.game;
+    assert.ok(game);
+    game.setOnlineGuestControl?.(true);
+    game.setOnlinePlayerSide?.('P1');
+    game.setPossessionForTest?.('P1');
+    game.resetDrill();
+    const snapshot = game.getNetworkSnapshot?.();
+    assert.ok(snapshot?.entities.qb);
+    snapshot.phase = 'QB_DROP';
+    snapshot.activeEntityId = 'qb';
+    snapshot.entities.qb.data.hasBall = true;
+    snapshot.entities.qb.data.dropStepTimer = 28;
+    snapshot.userControlledDefenderIndex = 6;
+
+    game.applyNetworkSnapshot?.(snapshot);
+    for (let frame = 0; frame < 10; frame++) advanceFrame();
+    const baseline = game.getNetworkSnapshot?.();
+    assert.ok(baseline);
+    const qbPath = baseline.entities.qb.data;
+
+    game.applyNetworkSnapshot?.(snapshot);
+    const p2Defender = game.getDefenders?.()[6];
+    assert.ok(p2Defender);
+    const defenderX = p2Defender.x;
+    game.applyRemoteInput?.(1, 0, true);
+    for (let frame = 0; frame < 10; frame++) advanceFrame();
+    const defended = game.getNetworkSnapshot?.();
+    assert.ok(defended);
+    assert.ok(p2Defender.x > defenderX, 'Host applies invited P2 defensive direction to the P2 defender');
+    assert.equal(defended.entities.qb.data.x, qbPath.x, 'Remote defense input must not steer the P1 quarterback');
+    assert.ok(Math.abs(defended.entities.qb.data.y - qbPath.y) < 1.5, 'Remote defense input must not change QB dropback timing');
+  } finally {
+    cleanup?.();
+    globalThis.requestAnimationFrame = originalRequest;
+    globalThis.cancelAnimationFrame = originalCancel;
+  }
+});
+
 test('guest mirror relays native start and throw without simulating a second play', () => {
   const canvas = createMockCanvas();
   const handle: { game?: GameEngineHandle } = {};
