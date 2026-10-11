@@ -5015,8 +5015,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   function update() {
     if (networkMirror) {
       for (const [entity, target] of networkInterpolationTargets) {
-        entity.x += (target.x - entity.x) * 0.35;
-        entity.y += (target.y - entity.y) * 0.35;
+        entity.x += (target.x - entity.x) * 0.65;
+        entity.y += (target.y - entity.y) * 0.65;
         if (Math.hypot(target.x - entity.x, target.y - entity.y) < 0.2) {
           entity.x = target.x;
           entity.y = target.y;
@@ -5024,14 +5024,14 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         }
       }
       if (ball && networkBallTarget) {
-        ball.x += (networkBallTarget.x - ball.x) * 0.35;
-        ball.y += (networkBallTarget.y - ball.y) * 0.35;
-        ball.z += (networkBallTarget.z - ball.z) * 0.35;
+        ball.x += (networkBallTarget.x - ball.x) * 0.65;
+        ball.y += (networkBallTarget.y - ball.y) * 0.65;
+        ball.z += (networkBallTarget.z - ball.z) * 0.65;
       } else {
         networkBallTarget = null;
       }
       if (networkCameraTarget !== null) {
-        cameraY += (networkCameraTarget - cameraY) * 0.35;
+        cameraY += (networkCameraTarget - cameraY) * 0.65;
         if (Math.abs(networkCameraTarget - cameraY) < 0.2) {
           cameraY = networkCameraTarget;
           networkCameraTarget = null;

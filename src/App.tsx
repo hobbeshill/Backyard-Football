@@ -585,7 +585,7 @@ export default function App() {
         isKickoffActive,
         clock: gameClockState
       });
-    }, 100);
+    }, 33);
     return () => clearInterval(interval);
   }, [onlineRole, userScore, cpuScore, downDistanceText, phaseState, is4thDown, isKickoffActive, gameClockState]);
 

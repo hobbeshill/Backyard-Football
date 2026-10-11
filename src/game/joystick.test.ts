@@ -1223,6 +1223,7 @@ test('native edge target can throw to a Go-route receiver beyond the viewport', 
     game.setPossessionForTest?.('P1');
     game.resetDrill();
     game.selectOffense('BAMA_P2');
+    game.applyRemoteAction?.({ type: 'DEFENSE_PLAY', play: 'BAMA_P1' });
     game.startPlay?.();
     assert.equal(game.phase, 'QB_DROP');
     const routeReceiver = game.getReceivers()[0];
@@ -1233,8 +1234,11 @@ test('native edge target can throw to a Go-route receiver beyond the viewport', 
     manDefender.defenseAssignment = 'MAN';
     manDefender.assignedReceiver = routeReceiver;
 
-    for (let frame = 0; frame < 850; frame++) advanceFrame();
-    const receiver = game.getReceiverScreenPositionForTest?.(0);
+    let receiver = game.getReceiverScreenPositionForTest?.(0);
+    for (let frame = 0; frame < 1600 && receiver && receiver.y >= 0 && receiver.y <= 450; frame++) {
+      advanceFrame();
+      receiver = game.getReceiverScreenPositionForTest?.(0);
+    }
     assert.ok(receiver);
     assert.ok(receiver.y < 0 || receiver.y > 450, 'Go-route receiver should continue beyond the visible field');
     assert.ok(Math.abs(manDefender.y - routeReceiver.y) < 50, 'Man coverage should stay with the receiver through the deep route');
