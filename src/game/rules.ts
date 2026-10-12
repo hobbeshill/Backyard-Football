@@ -146,16 +146,18 @@ export function canDefenderDeflectPass(input: PassDeflectionInput): boolean {
 }
 
 export function resolvePlayResult(input: PlayResultInput): PlayResult {
-  const yardsGained = Math.round(
-    (input.endingY - input.lineOfScrimmageY) * input.attackDirection / 10
+  const isIncomplete = ['INCOMPLETE', 'DEFLECT', 'BATTED_DOWN', 'BROKEN_UP'].includes(input.resultType);
+  const endingY = isIncomplete ? input.lineOfScrimmageY : input.endingY;
+  const yardsGained = isIncomplete ? 0 : Math.round(
+    (endingY - input.lineOfScrimmageY) * input.attackDirection / 10
   );
 
   const crossedGoalLine = input.attackDirection === -1
-    ? input.endingY <= input.endZoneHeight
-    : input.endingY >= input.fieldHeight - input.endZoneHeight;
+    ? endingY <= input.endZoneHeight
+    : endingY >= input.fieldHeight - input.endZoneHeight;
 
   return {
-    endingY: input.endingY,
+    endingY,
     yardsGained,
     isTouchdown: crossedGoalLine || input.resultType === 'TD'
   };

@@ -636,6 +636,110 @@ test('relative joystick controls QB in pocket and does not interfere with tappin
   }
 });
 
+for (const scale of [1, 2]) {
+  for (const touchMode of ['DURING_FLIGHT', 'STATIONARY_HOLD', 'HOLD_THROW_TOUCH', 'EXISTING_JOYSTICK', 'RELEASE_BEFORE_CATCH', 'CANCEL_BEFORE_CATCH'] as const) {
+    test(`held touch transfers directly to a caught receiver: ${touchMode} at ${scale}x`, context => {
+      context.mock.method(Math, 'random', () => 0.5);
+      const originalRequest = globalThis.requestAnimationFrame;
+      const originalCancel = globalThis.cancelAnimationFrame;
+      let nextFrame: FrameRequestCallback = () => {};
+      globalThis.requestAnimationFrame = callback => { nextFrame = callback; return 1; };
+      globalThis.cancelAnimationFrame = () => {};
+      context.after(() => {
+        globalThis.requestAnimationFrame = originalRequest;
+        globalThis.cancelAnimationFrame = originalCancel;
+      });
+      const canvas = createMockCanvas();
+      const rect = canvas.getBoundingClientRect();
+      canvas.getBoundingClientRect = () => ({ ...rect, width: 450 * scale, height: 340 * scale });
+      const holder: { game?: GameEngineHandle } = {};
+      const cleanup = mountFootballGame(canvas, {
+        setP2OffPlayState() {}, setP2DefPlayState() {}, setDownDistanceText() {},
+        setActiveOffenseState() {}, setUserScore() {}, setCpuScore() {}, setP1DefPlayState() {},
+        setMomentumState() {}, setGameClockState() {}, showAnnouncement() {},
+        onEngineReady: game => { holder.game = game ?? undefined; }
+      });
+      context.after(() => cleanup?.());
+      const game = holder.game;
+      assert.ok(game);
+      game.setPossessionForTest?.('P1');
+      game.selectOffense('SHORT_PASS');
+      game.resetDrill();
+      nextFrame(0);
+      const down = canvas._listeners.get('pointerdown');
+      const move = canvas._listeners.get('pointermove');
+      const up = canvas._listeners.get('pointerup');
+      const cancel = canvas._listeners.get('pointercancel');
+      assert.ok(down && move && up && cancel);
+      const pointer = (x: number, y: number, pointerId = 10, type = 'pointerdown') =>
+        ({ clientX: x * scale, clientY: y * scale, pointerId, type } as PointerEvent);
+      if (touchMode === 'EXISTING_JOYSTICK') {
+        down(pointer(90, 264));
+        const receiverPosition = game.getReceiverScreenPositionForTest?.(0);
+        assert.ok(receiverPosition);
+        down(pointer(receiverPosition.x, receiverPosition.y, 20));
+        up(pointer(receiverPosition.x, receiverPosition.y, 20, 'pointerup'));
+      } else {
+        game.startPlay?.();
+      }
+      if (touchMode === 'HOLD_THROW_TOUCH') {
+        const receiverPosition = game.getReceiverScreenPositionForTest?.(0);
+        assert.ok(receiverPosition);
+        down(pointer(receiverPosition.x, receiverPosition.y));
+        assert.equal(game.phase, 'THROWN');
+        assert.equal(game.isJoystickActiveForTest?.(), true, 'The throwing finger becomes the movement touch');
+        move(pointer(receiverPosition.x + 40, receiverPosition.y, 10, 'pointermove'));
+      }
+      const snapshot = game.getNetworkSnapshot!();
+      const receiverId = snapshot.receiverIds[0];
+      for (const record of Object.values(snapshot.entities) as Array<{ data: { x: number; y: number } }>) {
+        record.data.x = 270;
+        record.data.y = 900;
+      }
+      Object.assign(snapshot.entities[receiverId].data, {
+        x: 100, y: 600, startX: 100, startY: 600,
+        vx: 0, vy: 0, routeType: 'HITCH', isBlocker: false, caught: false, stamina: 100
+      });
+      snapshot.phase = 'THROWN';
+      snapshot.playEnding = false;
+      snapshot.formationTransitions = [];
+      snapshot.ball = {
+        x: 100, y: 600, z: 14, startX: 100, startY: 600,
+        vx: 0, vy: 0, maxZ: 38, flightFrames: 30, currentFrame: 29,
+        targetX: 100, targetY: 600, intendedTargetId: receiverId
+      };
+      game.applyNetworkSnapshot!(snapshot);
+      if (touchMode !== 'HOLD_THROW_TOUCH') {
+        if (touchMode !== 'EXISTING_JOYSTICK') down(pointer(230, 220));
+        if (touchMode !== 'STATIONARY_HOLD') move(pointer(touchMode === 'EXISTING_JOYSTICK' ? 130 : 270, touchMode === 'EXISTING_JOYSTICK' ? 264 : 220, 10, 'pointermove'));
+      }
+      assert.equal(game.isJoystickActiveForTest?.(), true, 'Touch is already live while the pass is airborne');
+      const released = touchMode === 'RELEASE_BEFORE_CATCH' || touchMode === 'CANCEL_BEFORE_CATCH';
+      if (released) (touchMode === 'CANCEL_BEFORE_CATCH' ? cancel : up)(pointer(270, 220, 10, touchMode === 'CANCEL_BEFORE_CATCH' ? 'pointercancel' : 'pointerup'));
+      nextFrame(1000 / 60);
+      assert.equal(game.phase, 'RUNNING', 'The pass actually resolves as a catch');
+      assert.equal(game.isJoystickActiveForTest?.(), !released);
+      const caught = game.getNetworkSnapshot!();
+      assert.equal(caught.activeEntityId, receiverId);
+      assert.equal(caught.entities[receiverId].data.caught, true);
+      const catchY = caught.entities[receiverId].data.y;
+      nextFrame(2000 / 60);
+      const moved = game.getNetworkSnapshot!().entities[receiverId].data;
+      if (released || touchMode === 'STATIONARY_HOLD') {
+        assert.equal(moved.y, catchY, 'A neutral, released or cancelled finger cannot move the receiver');
+      } else {
+        assert.ok(moved.y < catchY, 'Existing input moves the receiver on the first frame after the catch without a new touch');
+        // Releasing a different finger must not disable the held movement touch.
+        up(pointer(100, 100, 30, 'pointerup'));
+        assert.equal(game.isJoystickActiveForTest?.(), true);
+        game.setPaused(true);
+        up(pointer(270, 220, 10, 'pointerup'));
+        assert.equal(game.isJoystickActiveForTest?.(), false, 'Lifting during pause also releases the movement touch');
+      }
+    });
+  }
+}
+
 test('joystick floats at the touch origin and steers relative to it on scaled displays', () => {
   const originalRequest = globalThis.requestAnimationFrame;
   const originalCancel = globalThis.cancelAnimationFrame;
@@ -713,7 +817,7 @@ test('joystick floats at the touch origin and steers relative to it on scaled di
   }
 });
 
-test('tapping a receiver to pass does not activate the joystick by itself', () => {
+test('a held receiver tap prepares the joystick and releasing it clears movement control', () => {
   const canvas = createMockCanvas();
   let engine: GameEngineHandle | null = null;
   const cleanup = mountFootballGame(canvas, {
@@ -728,13 +832,16 @@ test('tapping a receiver to pass does not activate the joystick by itself', () =
     const game = engine as GameEngineHandle;
     game.setPossessionForTest?.('P1');
     game.resetDrill();
-    const pointerDown = (canvas as any)._listeners.get('pointerdown');
-    const pointerUp = (canvas as any)._listeners.get('pointerup');
+    const pointerDown = canvas._listeners.get('pointerdown');
+    const pointerUp = canvas._listeners.get('pointerup');
+    assert.ok(pointerDown && pointerUp);
     game.startPlay?.();
     const receiverPosition = game.getReceiverScreenPositionForTest?.(0);
     assert.ok(receiverPosition);
     pointerDown({ clientX: receiverPosition.x, clientY: receiverPosition.y, pointerId: 2 } as PointerEvent);
     assert.equal(game.phase, 'THROWN');
+    assert.equal(game.isJoystickActiveForTest?.(), true);
+    pointerUp({ clientX: receiverPosition.x, clientY: receiverPosition.y, pointerId: 2 } as PointerEvent);
     assert.equal(game.isJoystickActiveForTest?.(), false);
   } finally {
     cleanup?.();
@@ -2274,4 +2381,3 @@ test('line of scrimmage is centered and snap starts right there without pulling 
   const targetCameraY = Math.min(cameraY, backfieldCameraY);
   assert.equal(targetCameraY, cameraY, 'Camera does not pull back into the backfield behind the snap anchor');
 });
-

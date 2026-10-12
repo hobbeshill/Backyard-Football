@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Volume2, VolumeX, RefreshCw, HelpCircle, X, Users, Shield, ArrowRight, Search, Pause, Play, Home, Hand, Crosshair, Trophy, Award, RotateCcw, Zap, BookOpen, SlidersHorizontal, Info, Settings, ArrowLeft, Copy, Check } from 'lucide-react';
 import { offensivePlaybook, defensivePlaybook } from './game/playbook';
 import { sounds } from './game/sound';
+import { isLiveBallAnnouncement, shouldShowAnnouncement } from './game/announcements';
 import { createEmptyTeamGameStats, hasSavedGameSession, mountFootballGame, type GameBoxScore, type GameEngineHandle } from './game/engine';
 import { HelmetSpritePreview } from './game/HelmetSpritePreview';
 import { RealPlayTutorial } from './game/RealPlayTutorial';
@@ -189,43 +190,7 @@ export default function App() {
   ) => {
     const upper = text.toUpperCase();
 
-    // 1. Remove the announcement of what play is called
-    if (
-      upper.includes('DEFENDING:') ||
-      upper.includes('PLAY NOT IN TEAM PLAYBOOK') ||
-      upper.includes('SCHEME NOT IN TEAM PLAYBOOK') ||
-      upper.includes('DEFENSE CALLED') ||
-      upper.includes('DEFENSE ANTICIPATED') ||
-      upper.includes('SPECIAL TEAMS:') ||
-      upper.includes('PASS ROUTE:') ||
-      upper.includes('PASS PROTECTION:') ||
-      upper.includes('RUN PLAY:') ||
-      upper.includes('AUDIBLE') ||
-      upper.includes('TEAM PLAYBOOK UPDATED')
-    ) {
-      return;
-    }
-
-    // 2. Change the announcements of the results to only announce first downs and touchdowns
-    const isResultAnnouncement =
-      meta?.category === 'SACK' ||
-      meta?.category === 'SAFETY' ||
-      meta?.category === 'TURNOVER' ||
-      meta?.category === 'FUMBLE' ||
-      upper.includes('SACK!') ||
-      upper.includes('PASS INCOMPLETE') ||
-      upper.includes('GAIN OF ') ||
-      upper.includes('TURNOVER ON DOWNS') ||
-      upper.includes('INTERCEPTION') ||
-      upper.includes('RETURN FOR ') ||
-      upper.includes('TOUCHBACK!') ||
-      upper.includes('PUNT COMPLETE') ||
-      upper.includes('FUMBLE OUT OF BOUNDS') ||
-      upper.includes('RECOVERS OWN FUMBLE');
-
-    if (isResultAnnouncement && !upper.includes('FIRST DOWN') && !upper.includes('TOUCHDOWN')) {
-      return;
-    }
+    if (!shouldShowAnnouncement(text, meta?.category)) return;
 
     let category = meta?.category;
     let priority = 1;
@@ -276,7 +241,7 @@ export default function App() {
       key: 0
     };
 
-    if (phaseStateRef.current !== 'PRE_SNAP' && phaseStateRef.current !== 'DEAD') {
+    if (!isLiveBallAnnouncement(text, category) && phaseStateRef.current !== 'PRE_SNAP' && phaseStateRef.current !== 'DEAD') {
       const queuedAnnouncement = queuedAnnouncementRef.current;
       if (!queuedAnnouncement || announcement.priority >= queuedAnnouncement.priority) {
         queuedAnnouncementRef.current = announcement;
@@ -284,6 +249,7 @@ export default function App() {
       return;
     }
 
+    if (isLiveBallAnnouncement(text, category)) queuedAnnouncementRef.current = null;
     displayAnnouncement(announcement);
   };
 

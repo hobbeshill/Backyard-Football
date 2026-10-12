@@ -1,11 +1,21 @@
 import type { DefensiveAssignment, Entity } from './types';
 import { outsideRoutes, middleRoutes, runningBackRoutes, offensivePlaybook, allDefensivePlaybook } from './playbook';
 import type { TeamProfile } from './teams';
+import { PRO_OFFENSE_PLAYS } from './proMode';
+
+export interface CpuOffensiveCallSituation {
+  down: number;
+  yardsToGo: number;
+  distanceToEndzoneYards: number;
+  recentDefenses: readonly string[];
+  recentPlays: readonly { play: string }[];
+}
 
 export function chooseTeamOffensivePlay(
   plays: readonly string[],
   team: TeamProfile,
-  random: () => number = Math.random
+  random: () => number = Math.random,
+  situation?: CpuOffensiveCallSituation
 ): string {
   if (plays.length === 0) throw new Error('Cannot choose an offensive play from an empty playbook');
   const weighted = plays.map(play => {
@@ -21,6 +31,31 @@ export function chooseTeamOffensivePlay(
       weight *= rating / 70;
     }
     if (isDeep) weight *= team.roster['wr-0'].ratings.speed / 80;
+    if (situation) {
+      const needsDistance = situation.down >= 3 && situation.yardsToGo > 7;
+      if (needsDistance) weight *= isRun ? 0.15 : definition.routeType === 'SHORT' ? 0.5 : 2;
+      if (situation.yardsToGo <= 3) weight *= isRun || definition.routeType === 'SHORT' ? 2 : 0.6;
+      if (situation.distanceToEndzoneYards <= 20 && isDeep) weight *= 0.25;
+      const repetitions = situation.recentPlays.slice(-4).filter(entry => entry.play === play).length;
+      weight /= 1 + repetitions * 1.5;
+      const recentDefenses = situation.recentDefenses.slice(-4);
+      const repeatedDefense = [...recentDefenses].reverse().find(key => recentDefenses.filter(defense => defense === key).length >= 2);
+      if (repeatedDefense) {
+        const proPlay = Object.values(PRO_OFFENSE_PLAYS).find(entry => entry.id === play);
+        const proMatchup = proPlay && Object.entries(proPlay.matchups).find(([key]) => key === repeatedDefense)?.[1];
+        if (proMatchup) {
+          weight *= proMatchup === 'SHUTDOWN' ? 0.1 : proMatchup === 'BIG_GAIN' ? 3 : proMatchup === 'EFFECTIVE' ? 0.6 : 1;
+        } else if (offensivePlaybook[repeatedDefense]) {
+          const defenseIsRun = offensivePlaybook[repeatedDefense].type !== 'PASS';
+          weight *= play === repeatedDefense ? 0.1 : defenseIsRun === isRun ? 0.6 : 2.5;
+        } else {
+          if (definition.bestVs?.includes(repeatedDefense)) weight *= 3;
+          if (definition.weakVs?.includes(repeatedDefense)) weight *= 0.2;
+          const defense = allDefensivePlaybook[repeatedDefense];
+          if (defense?.vulnerableRouteType === definition.routeType && !isRun) weight *= 2;
+        }
+      }
+    }
     return { play, weight };
   });
   let selection = random() * weighted.reduce((sum, entry) => sum + entry.weight, 0);
@@ -57,11 +92,43 @@ export interface CpuOffensiveTendencyPlay {
   routes?: Record<string, string | undefined>;
 }
 
+export function getRepeatedOffensivePlay(
+  recentPlays: readonly { play: string; isSuccessful?: boolean }[],
+  successfulOnly = false
+): string | null {
+  const recent = recentPlays.slice(-4);
+  const latest = recent[recent.length - 1];
+  if (!latest) return null;
+  const attempts = recent.filter(entry => entry.play === latest.play);
+  return attempts.filter(entry => !successfulOnly || entry.isSuccessful).length >= 2 ? latest.play : null;
+}
+
+export function chooseAvailableDefensiveCounter(
+  recentPlays: readonly CpuOffensiveTendencyPlay[],
+  available: readonly string[],
+  preferred: string
+): string {
+  if (available.length === 0) throw new Error('Cannot choose a defense from an empty playbook');
+  if (available.includes(preferred)) return preferred;
+  const sample = recentPlays.slice(-4);
+  const score = (defense: string) => sample.reduce((sum, entry) => {
+    const play = offensivePlaybook[entry.play];
+    const proPlay = Object.values(PRO_OFFENSE_PLAYS).find(play => play.id === entry.play);
+    const proMatchup = proPlay && Object.entries(proPlay.matchups).find(([key]) => key === defense)?.[1];
+    let value = proMatchup === 'SHUTDOWN' ? 5 : proMatchup === 'EFFECTIVE' ? 2 : proMatchup === 'BIG_GAIN' ? -4 : 0;
+    if (play?.weakVs?.includes(defense)) value += 4;
+    if (play?.bestVs?.includes(defense)) value -= 4;
+    if (play?.type === 'PASS' && allDefensivePlaybook[defense]?.vulnerableRouteType === play.routeType) value -= 2;
+    return sum + value * (entry.isSuccessful ? 2 : 1);
+  }, 0);
+  return [...available].sort((left, right) => score(right) - score(left))[0];
+}
+
 export function getSuccessfulPlayCounter(recentPlays: readonly CpuOffensiveTendencyPlay[]): string | null {
   const sample = recentPlays.slice(-6);
   const isDeepPass = (play: CpuOffensiveTendencyPlay) => play.isPass && (
-    ['DEEP_SHOT', 'POST_WHEEL'].includes(play.play) ||
-    Object.values(play.routes ?? {}).some(route => ['GO', 'POST-L', 'POST-R', 'FLAG-L', 'FLAG-R', 'WHEEL'].includes(route || ''))
+    offensivePlaybook[play.play]?.routeType === 'VERTICAL' ||
+    Object.values(play.routes ?? {}).filter(route => ['GO', 'POST-L', 'POST-R', 'FLAG-L', 'FLAG-R', 'WHEEL'].includes(route || '')).length >= 2
   );
   const tendencies: Array<{ defense: string; matches: (play: CpuOffensiveTendencyPlay) => boolean }> = [
     { defense: 'ZONE34', matches: play => Boolean(play.isQbRun) },
@@ -91,6 +158,9 @@ export function getCpuCounterReason(
   }
 
   const recent = recentPlays.slice(-4);
+  const repeatedSuccessfulPlay = getRepeatedOffensivePlay(recent, true);
+  const exactCounter = Object.values(PRO_OFFENSE_PLAYS).find(play => play.id === repeatedSuccessfulPlay)?.counterDefenseId;
+  if (exactCounter === defenseKey) return 'repeated successful plays';
   const count = (plays: string[]) => recent.filter(play => plays.includes(play.play)).length;
   if (count(['PRO_SCREEN']) >= 2 && defenseKey === 'PRO_BLITZ_ZERO') return 'repeated screens';
   if (count(['PRO_JET_SWEEP', 'PRO_DRAW']) >= 2 && ['PRO_RUN_STOP_BOX', 'PRO_COVER1_MAN'].includes(defenseKey)) return 'repeated runs';
@@ -119,7 +189,7 @@ export function shouldCpuGoForItOnFourthDown(situation: CpuFourthDownSituation):
 }
 
 export interface ProDefensiveCallSituation {
-  recentPlays: readonly { play: string }[];
+  recentPlays: readonly { play: string; isSuccessful?: boolean; isQbRun?: boolean; targetWasRb?: boolean }[];
   down: number;
   yardsToGo: number;
   previousCall: string;
@@ -135,7 +205,16 @@ export function chooseProDefensiveCall(
   random: () => number = Math.random
 ): string {
   const recentPlays = situation.recentPlays.slice(-4);
+  if (recentPlays.filter(play => play.isQbRun && play.isSuccessful).length >= 2) return 'PRO_COVER1_MAN';
+  if (recentPlays.filter(play => play.targetWasRb && play.isSuccessful && offensivePlaybook[play.play]?.type === 'PASS').length >= 2) return 'PRO_COVER2_HARD_FLAT';
+  const repeatedSuccessfulPlay = getRepeatedOffensivePlay(recentPlays, true);
+  const exactCounter = Object.values(PRO_OFFENSE_PLAYS).find(play => play.id === repeatedSuccessfulPlay)?.counterDefenseId;
+  if (exactCounter) return exactCounter;
   const recentDefinitions = recentPlays.map(play => offensivePlaybook[play.play]);
+  const successfulDefinitions = recentPlays.filter(play => play.isSuccessful).map(play => offensivePlaybook[play.play]);
+  if (successfulDefinitions.filter(play => play?.type === 'PASS' && (play.left === 'BLOCK' || play.right === 'BLOCK')).length >= 2) return 'PRO_BLITZ_ZERO';
+  if (successfulDefinitions.filter(play => play && ['ISO', 'POWER', 'SWEEP'].includes(play.type)).length >= 2) return 'PRO_RUN_STOP_BOX';
+  if (successfulDefinitions.filter(play => play?.type === 'PASS' && play.routeType === 'VERTICAL').length >= 2) return 'PRO_COVER4_QUARTERS';
   const recentDeepCount = recentDefinitions.filter(play => play?.type === 'PASS' && play.routeType === 'VERTICAL').length;
   const recentRunCount = recentDefinitions.filter(play => play && ['ISO', 'POWER', 'SWEEP'].includes(play.type)).length;
   const recentSlantsCount = recentDefinitions.filter(play => play?.type === 'PASS' &&
