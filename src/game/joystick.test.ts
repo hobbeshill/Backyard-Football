@@ -765,11 +765,11 @@ test('relative joystick controls the unassigned defender when user is on defense
     assert.ok((game.phase as string) === 'QB_DROP' || (game.phase as string) === 'HANDOFF');
 
     // Defense uses the same lower-left touch area as offense.
-    downHandler({ clientX: 90, clientY: 364, pointerId: 5 } as PointerEvent);
+    downHandler({ clientX: 90, clientY: 264, pointerId: 5 } as PointerEvent);
     assert.equal(game.isJoystickActiveForTest?.(), true);
-    moveHandler({ clientX: 110, clientY: 364, pointerId: 5 } as PointerEvent);
+    moveHandler({ clientX: 110, clientY: 264, pointerId: 5 } as PointerEvent);
 
-    upHandler({ clientX: 110, clientY: 364, pointerId: 5 } as PointerEvent);
+    upHandler({ clientX: 110, clientY: 264, pointerId: 5 } as PointerEvent);
   } finally {
     cleanup?.();
   }
@@ -1607,15 +1607,15 @@ test('joystick release does not trigger accidental swipe juke during ball carrie
     const moveHandler = (canvas as any)._listeners.get('pointermove');
     const upHandler = (canvas as any)._listeners.get('pointerup');
     // Snap to handoff from the joystick marker over the 12-yard line.
-    downHandler({ clientX: 90, clientY: 364, pointerId: 1 } as PointerEvent);
-    upHandler({ clientX: 90, clientY: 364, pointerId: 1 } as PointerEvent);
+    downHandler({ clientX: 90, clientY: 264, pointerId: 1 } as PointerEvent);
+    upHandler({ clientX: 90, clientY: 264, pointerId: 1 } as PointerEvent);
 
     // Touch joystick to steer
-    downHandler({ clientX: 110, clientY: 364, pointerId: 5 } as PointerEvent);
-    moveHandler({ clientX: 140, clientY: 364, pointerId: 5 } as PointerEvent);
+    downHandler({ clientX: 110, clientY: 264, pointerId: 5 } as PointerEvent);
+    moveHandler({ clientX: 140, clientY: 264, pointerId: 5 } as PointerEvent);
 
     // Lift joystick finger: releasing the joystick must NEVER trigger a swipe juke
-    upHandler({ clientX: 140, clientY: 364, pointerId: 5 } as PointerEvent);
+    upHandler({ clientX: 140, clientY: 264, pointerId: 5 } as PointerEvent);
 
     const defenders = game.getDefenders();
     assert.ok(defenders);
@@ -1881,15 +1881,15 @@ test('ball carrier lateral speed is controlled and does not combine with juke by
     const upHandler = (canvas as any)._listeners.get('pointerup');
 
     // Snap to handoff from the joystick marker over the 12-yard line.
-    downHandler({ clientX: 90, clientY: 364, pointerId: 1 } as PointerEvent);
-    upHandler({ clientX: 90, clientY: 364, pointerId: 1 } as PointerEvent);
+    downHandler({ clientX: 90, clientY: 264, pointerId: 1 } as PointerEvent);
+    upHandler({ clientX: 90, clientY: 264, pointerId: 1 } as PointerEvent);
 
     // Simulate steering lateral movement
-    downHandler({ clientX: 110, clientY: 364, pointerId: 2 } as PointerEvent);
-    moveHandler({ clientX: 140, clientY: 364, pointerId: 2 } as PointerEvent);
+    downHandler({ clientX: 110, clientY: 264, pointerId: 2 } as PointerEvent);
+    moveHandler({ clientX: 140, clientY: 264, pointerId: 2 } as PointerEvent);
 
     // Releasing after steering must not have triggered a wild juke
-    upHandler({ clientX: 140, clientY: 364, pointerId: 2 } as PointerEvent);
+    upHandler({ clientX: 140, clientY: 264, pointerId: 2 } as PointerEvent);
 
     // Lateral speed should remain calibrated without wild sideways sliding
     assert.ok(true);
@@ -1947,7 +1947,7 @@ test('defender under user control does not move unless the user moves them', () 
     moveHandler({ clientX: 130, clientY: 264, pointerId: 6 } as PointerEvent);
 
     assert.equal(game.isJoystickActiveForTest?.(), true);
-    upHandler({ clientX: 130, clientY: 364, pointerId: 6 } as PointerEvent);
+    upHandler({ clientX: 130, clientY: 264, pointerId: 6 } as PointerEvent);
     assert.equal(game.isJoystickActiveForTest?.(), false);
     assert.equal(controlledDefender.vx, 0);
     assert.equal(controlledDefender.vy, 0);

@@ -231,7 +231,7 @@ test(`Pro tutorial follows play cards, joystick snaps, passing, scheme cards, de
     game.selectDefense('PRO_COVER3_DEEP');
     assert.equal(step, 5);
     settle();
-    tap(90, 264);
+    tap(10, 320);
     assert.equal(step, 6);
     for (let count = 0; count < 2000 && step === 6; count++) {
       timestamp += 16;
@@ -723,14 +723,14 @@ test('swiping left or right on the RB calls a running play while tapping toggles
     assert.equal(engine.p1OffPlay, 'POWER', 'Swiping left uses the team run package');
     assert.ok(announcement.includes('RUN PLAY'), 'Announcement indicates running play');
 
-    // Swipe right retains the same available team run.
+    // Swipe across the opposite sideline after the RB changes sides.
     simulatedTime += 500;
-    pointerDown({ clientX: 90, clientY: 220, pointerId: 1 });
+    pointerDown({ clientX: 90, clientY: 120, pointerId: 1 });
     if (typeof pointerMove === 'function') {
-      pointerMove({ clientX: 90, clientY: 275, pointerId: 1 });
+      pointerMove({ clientX: 90, clientY: 175, pointerId: 1 });
     }
     simulatedTime += 100;
-    pointerUp({ clientX: 90, clientY: 275, pointerId: 1 });
+    pointerUp({ clientX: 90, clientY: 175, pointerId: 1 });
 
     assert.equal(engine.p1OffPlay, 'POWER', 'Swiping right uses the team run package');
     assert.ok(announcement.includes('RUN PLAY'), 'Announcement indicates running play');
