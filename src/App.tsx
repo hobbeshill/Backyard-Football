@@ -1453,7 +1453,7 @@ export default function App() {
               >
                 <div className="flex items-center justify-between">
                   <span className="block text-xs sm:text-base font-black text-white">Online Versus</span>
-                  <span className="rounded bg-cyan-400/20 px-1 py-0.2 text-[8px] font-black uppercase text-cyan-300">Live</span>
+                  <span className="rounded bg-cyan-400/20 px-1 py-0.2 text-[8px] font-black uppercase text-cyan-300">Coming Soon</span>
                 </div>
                 <span className="mobile-mode-description mt-0.5 sm:mt-1 block text-[10px] sm:text-[11px] leading-3.5 sm:leading-4 text-neutral-300">Create an invite code or join a friend for a live head-to-head game.</span>
               </button>
