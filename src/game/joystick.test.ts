@@ -1047,6 +1047,70 @@ test('a safety awards two points to the defense and sends the conceding team to 
   }
 });
 
+test('the offensive line engages a user-controlled A-gap defender during the handoff', () => {
+  const originalRequest = globalThis.requestAnimationFrame;
+  const originalCancel = globalThis.cancelAnimationFrame;
+  let nextFrame: FrameRequestCallback = () => {};
+  globalThis.requestAnimationFrame = callback => { nextFrame = callback; return 1; };
+  globalThis.cancelAnimationFrame = () => {};
+  const handle: { game?: GameEngineHandle } = {};
+  const cleanup = mountFootballGame(createMockCanvas(), {
+    setP2OffPlayState: () => {}, setP2DefPlayState: () => {},
+    setDownDistanceText: () => {}, setActiveOffenseState: () => {},
+    setUserScore: () => {}, setCpuScore: () => {}, setP1DefPlayState: () => {},
+    setMomentumState: () => {}, setGameClockState: () => {}, showAnnouncement: () => {},
+    onEngineReady: game => { handle.game = game ?? undefined; }
+  });
+
+  try {
+    const game = handle.game;
+    assert.ok(game);
+    game.setPossessionForTest?.('P2');
+    game.resetDrill();
+    const snapshot = game.getNetworkSnapshot?.();
+    assert.ok(snapshot);
+    snapshot.phase = 'HANDOFF';
+    snapshot.activeEntityId = 'qb';
+    snapshot.p2OffPlay = 'UGA_R1';
+    snapshot.lineOfScrimmageY = 250;
+    snapshot.attackDirection = 1;
+    snapshot.formationTransitions = [];
+    snapshot.entities.qb.data.x = 170;
+    snapshot.entities.qb.data.y = 202;
+    snapshot.entities.qb.data.hasBall = true;
+    snapshot.entities[snapshot.rbId].data.handoffTimer = 0;
+
+    const centerLinemanId = snapshot.linemanIds[0];
+    Object.assign(snapshot.entities[centerLinemanId].data, { x: 170, y: 250, startX: 170, startY: 250, radius: 12 });
+    snapshot.linemanIds.slice(1).forEach((id: string, index: number) => {
+      Object.assign(snapshot.entities[id].data, { x: 140 + index * 60, y: 250, startX: 140 + index * 60, startY: 250, radius: 12 });
+    });
+    const controlledDefenderId = snapshot.defenderIds[0];
+    Object.assign(snapshot.entities[controlledDefenderId].data, {
+      x: 170, y: 274, startX: 170, startY: 274, vx: 0, vy: 0,
+      defenseAssignment: 'BLITZ', passRusher: true, isEngagedWithBlocker: false
+    });
+    snapshot.defenderIds.slice(1).forEach((id: string, index: number) => {
+      Object.assign(snapshot.entities[id].data, { x: 30 + index * 35, y: 430, startX: 30 + index * 35, startY: 430 });
+    });
+    snapshot.userControlledDefenderIndex = 0;
+    game.applyNetworkSnapshot?.(snapshot);
+    game.applyLocalInput?.(0, 1, true);
+    nextFrame(0);
+    nextFrame(1000 / 60);
+
+    const updated = game.getNetworkSnapshot?.();
+    assert.ok(updated);
+    assert.equal(updated.entities[controlledDefenderId].data.isEngagedWithBlocker, true);
+    assert.equal(updated.entities[controlledDefenderId].blockingDefender, centerLinemanId);
+    assert.ok(Math.abs(updated.entities[controlledDefenderId].data.y - 274) < 1, 'Joystick movement cannot pass through the occupied block');
+  } finally {
+    cleanup?.();
+    globalThis.requestAnimationFrame = originalRequest;
+    globalThis.cancelAnimationFrame = originalCancel;
+  }
+});
+
 test('relative joystick controls the unassigned defender when user is on defense', () => {
   const canvas = createMockCanvas();
   let engine: GameEngineHandle | null = null;

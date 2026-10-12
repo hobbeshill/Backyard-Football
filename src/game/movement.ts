@@ -154,6 +154,15 @@ export function shouldApplyRunBlockStun(blocker: Entity, target: Entity): boolea
   return !blocker.isEngagedWithBlocker || blocker.blockingDefender !== target;
 }
 
+export function engageRunBlocker(blocker: Entity, target: Entity): boolean {
+  const isNewEngagement = shouldApplyRunBlockStun(blocker, target);
+  blocker.isEngagedWithBlocker = true;
+  blocker.blockingDefender = target;
+  target.isEngagedWithBlocker = true;
+  target.blockingDefender = blocker;
+  return isNewEngagement;
+}
+
 export function getReturnTeamBlockers(players: Entity[], returner: Entity | null): Entity[] {
   return players.filter(player => player !== returner);
 }
@@ -186,10 +195,10 @@ export function getPursuitTarget(defender: Entity, runner: Entity, attackDirecti
   };
 }
 
-export function getRunBlockEffect(blocker: Entity, defender: Entity): number {
+export function getRunBlockEffect(blocker: Entity, defender: Entity, laneSpacing = 1): number {
   const blocking = blocker.player?.ratings.blocking ?? 65;
   const resistance = defender.player?.ratings.power ?? 65;
-  return Math.max(0.12, Math.min(0.85, 0.48 + (blocking - resistance) * 0.012));
+  return Math.max(0.12, Math.min(0.85, (0.48 + (blocking - resistance) * 0.012) * laneSpacing));
 }
 
 export function canEngagePassBlock(blocker: Entity, rusher: Entity): boolean {

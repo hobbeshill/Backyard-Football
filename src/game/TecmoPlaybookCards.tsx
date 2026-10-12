@@ -11,7 +11,7 @@ interface TecmoPlaybookCardsProps {
   attackDirection: number;
   activeOffensePlay?: string;
   activeDefensePlay?: string;
-  downDistanceText?: string;
+  scoreboard?: React.ReactNode;
   canPunt?: boolean;
   fieldGoalDistance?: number;
   onSelectPlay: (playId: string) => void;
@@ -172,7 +172,7 @@ export const TecmoPlaybookCards: React.FC<TecmoPlaybookCardsProps> = ({
   attackDirection,
   activeOffensePlay,
   activeDefensePlay,
-  downDistanceText,
+  scoreboard,
   canPunt = false,
   fieldGoalDistance,
   onSelectPlay,
@@ -191,6 +191,7 @@ export const TecmoPlaybookCards: React.FC<TecmoPlaybookCardsProps> = ({
   return (
     <div className="fixed inset-0 z-[150] flex items-center justify-center bg-black/92 p-2 sm:p-4 backdrop-blur-md">
       <div className="flex max-h-[96dvh] w-full max-w-4xl flex-col overflow-hidden rounded-xl border border-neutral-700 bg-[#0a1117] text-neutral-200 shadow-2xl">
+        {scoreboard}
         {/* Header Bar */}
         <div
           className={`shrink-0 border-b px-4 py-3 sm:px-6 ${
@@ -236,19 +237,7 @@ export const TecmoPlaybookCards: React.FC<TecmoPlaybookCardsProps> = ({
                 </p>
               </div>
             </div>
-            {downDistanceText && (
-              <span className="hidden sm:inline-block rounded-md border border-amber-400/30 bg-black/60 px-3 py-1 font-mono text-xs font-black uppercase text-amber-300">
-                {downDistanceText}
-              </span>
-            )}
           </div>
-          {downDistanceText && (
-            <div className="mt-2 sm:hidden text-center">
-              <span className="rounded-md border border-amber-400/30 bg-black/60 px-3 py-1 font-mono text-xs font-black uppercase text-amber-300">
-                {downDistanceText}
-              </span>
-            </div>
-          )}
         </div>
 
         {/* 6 Unique Plays Grid (4 Passes, 2 Runs) */}

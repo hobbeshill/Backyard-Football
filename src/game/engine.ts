@@ -5,7 +5,7 @@ import { getRouteWaypoints, getScreenEdgeTargetPosition } from './movement';
 import { alignDefenderAcrossFromReceiver, alignDefenderAcrossFromRunningBack, alignDefenderToZone, alignDefenders, chooseCpuDefensiveAssignments, constrainDefendersToFieldSide, getBlitzAlignmentY, getBracketCoverageTarget, getDefensiveLineAlignmentY, matchCpuDefendersToReceivers, separateDefenderAlignments } from './defense';
 import { chooseAvailableDefensiveCounter, chooseProDefensiveCall, chooseTeamOffensivePlay, evaluateCpuOffensiveAudibles, evaluateCpuBallCarrierMoves, getCoverageMistakeChance, getRepeatedOffensivePlay, getSuccessfulPlayCounter, isCpuPressureRecognized, shouldCpuGoForItOnFourthDown, shouldCpuReleasePass, shouldCpuScramble, scoreRunBlockTarget } from './ai';
 import { createFumbleBall, getCarrierFumbleChance } from './fumbles';
-import { canEngagePassBlock, checkOffensiveLineWall, clampPlayerToFieldY, createSimulationClock, distToSegment, GAME_SPEED_SCALE, getBallCarrierRunSpeed, getFatigueSpeedMultiplier, getPassBlockBaseHoldFrames, getPassBlockHoldFrames, getDirectionalInput, getReturnPursuitSpeed, getReturnTeamBlockers, getRunLaneOptions, getUserRunnerVelocity, getRunPursuitMovement, getUserDefenderSpeed, isRusherActivelyBlocked, moveToward, resolveCollisions, shouldApplyRunBlockStun, shouldHoldPassBlock, updatePlayerStamina, updateReceiverTargetStamina, updateRunningBackStamina, updateRouteMovement, USER_CONTROL_SPEED_MULTIPLIER } from './movement';
+import { canEngagePassBlock, checkOffensiveLineWall, clampPlayerToFieldY, createSimulationClock, distToSegment, engageRunBlocker, GAME_SPEED_SCALE, getBallCarrierRunSpeed, getFatigueSpeedMultiplier, getPassBlockBaseHoldFrames, getPassBlockHoldFrames, getDirectionalInput, getReturnPursuitSpeed, getReturnTeamBlockers, getRunLaneOptions, getUserRunnerVelocity, getRunPursuitMovement, getUserDefenderSpeed, isRusherActivelyBlocked, moveToward, resolveCollisions, shouldApplyRunBlockStun, shouldHoldPassBlock, updatePlayerStamina, updateReceiverTargetStamina, updateRunningBackStamina, updateRouteMovement, USER_CONTROL_SPEED_MULTIPLIER } from './movement';
 import { resolvePlayResult, isSafety, calculateBrokenTackleChance, calculateYardsToGo, getDriveStartY, getSnapBallPosition, getPassArcHeight, getPassArcScreenPoint, getFieldGoalBallHeight, getPassArcMaxHeight, getPassFlightFrames, findTappedPassReceiver, shouldReleaseUserPass, getPassLeadTarget, getRoutePassLeadTarget, canDefenderDeflectPass, canTackleQuarterback, resolveCatchContestOutcome, evaluateQbThrowAccuracy, getCpuThrowAimVariance, calculateKickoffFlight, calculatePuntFlight, getTouchbackYardLineY, getInterceptionTouchbackY, getKickoffLineY, getDefenderPassReachHeight, isPlayerOutOfBounds, calculateFieldGoalFlight, getFieldGoalDistanceYards, GOALPOST_CENTER_X, GOALPOST_LEFT_UPRIGHT_X, GOALPOST_RIGHT_UPRIGHT_X, GOALPOST_CROSSBAR_HEIGHT_Z } from './rules';
 import { sounds } from './sound';
 import { evaluateDirtSwipeGesture, drawDirtSwipeGesture } from './chalkMenu';
@@ -6436,7 +6436,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     }
 
     const playObj = offensivePlaybook[activeOffName];
-    if (phase === 'RUNNING' && !isInterceptionReturn) {
+    if ((phase === 'RUNNING' || phase === 'HANDOFF') && !isInterceptionReturn) {
       const runner = activeEntity || qb;
       if (isSpecialTeamsReturn) {
         // Special Teams Run Blocking: The receiving team blockers run block just like on a normal running play!
@@ -6468,14 +6468,13 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           const target = targetTackler as Entity | null;
           if (target) {
             assignedTacklers.add(target);
-            const isNewEngagement = shouldApplyRunBlockStun(blocker, target);
-            blocker.blockingDefender = target;
             const blockSpeed = 2.4;
             const blockAccel = 0.40;
             moveToward(blocker, target.x, target.y, blockAccel, blockSpeed);
 
             const contactDist = Math.hypot(blocker.x - target.x, blocker.y - target.y);
             if (contactDist < (blocker.radius || 10) + (target.radius || 10) + 6) {
+              const isNewEngagement = engageRunBlocker(blocker, target);
               const blockEffect = getRunBlockEffect(blocker, target);
               target.pursuitTimer = Math.max(0, (target.pursuitTimer || 0) - blockEffect * 4);
               target.vx = ((target.vx || 0) * (1 - blockEffect));
@@ -6511,18 +6510,36 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       } else {
         // All offensive players (receivers, centerReceiver, rb, linemen) engage in blocking
         const blockers: Entity[] = [
-          ...receivers,
+          ...linemen,
           centerReceiver,
-          (rb !== runner ? rb : null),
-          ...linemen
+          (phase === 'RUNNING' && rb !== runner ? rb : null),
+          ...receivers
         ].filter((e): e is Entity => e !== null && e !== undefined && e !== runner);
+        const assignedRunBlockTargets = new Set<Entity>();
+        const activeOffenseCall = activeOffense === 'P1' ? p1OffPlay : p2OffPlay;
+        const activeDefenseCall = activeOffense === 'P1' ? p2DefPlay : p1DefPlay;
+        const proRunMatchup = tacticalMode === 'PRO' && PRO_OFFENSE_PLAYS[activeOffenseCall as ProOffensePlayId]?.isRun && allDefensivePlaybook[activeDefenseCall]
+          ? evaluateProMatchup(activeOffenseCall as ProOffensePlayId, activeDefenseCall as ProDefensePlayId)
+          : null;
+        const runLaneSpacing = currentTecmoMatchup
+          ? currentTecmoMatchup.isExact ? 0.4 : 1.35
+          : proRunMatchup?.isExactCounter ? 0.4 : 1.35;
 
         blockers.forEach(blocker => {
+          const previousTarget = blocker.blockingDefender;
+          if (previousTarget && previousTarget.blockingDefender === blocker) {
+            previousTarget.isEngagedWithBlocker = false;
+            previousTarget.blockingDefender = null;
+          }
+          blocker.blockingDefender = null;
+          blocker.isEngagedWithBlocker = false;
+
           let targetDefender: Entity | null = null;
           let minThreatDist = Infinity;
 
           defenders.forEach(d => {
             if (!d) return;
+            if (assignedRunBlockTargets.has(d)) return;
             const defToRunner = Math.hypot(d.x - runner.x, d.y - runner.y);
             const threatScore = scoreRunBlockTarget(blocker, runner, d, attackDirection, runner === qb);
             if (threatScore < minThreatDist && defToRunner < 220) {
@@ -6532,6 +6549,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           });
 
           if (targetDefender) {
+            assignedRunBlockTargets.add(targetDefender);
             const isLeadRb = (blocker === rb);
             const blockSpeed = isLeadRb ? 2.3 : 1.8;
             const blockAccel = isLeadRb ? 0.38 : 0.32;
@@ -6539,10 +6557,14 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
             const contactDist = Math.hypot(blocker.x - (targetDefender as Entity).x, blocker.y - (targetDefender as Entity).y);
             if (contactDist < (blocker.radius || 10) + ((targetDefender as Entity).radius || 10) + 6) {
-              const blockEffect = getRunBlockEffect(blocker, targetDefender);
+              const isNewEngagement = engageRunBlocker(blocker, targetDefender);
+              const blockEffect = getRunBlockEffect(blocker, targetDefender, runLaneSpacing);
               (targetDefender as Entity).pursuitTimer = Math.max(0, ((targetDefender as Entity).pursuitTimer || 0) - blockEffect * 4);
               (targetDefender as Entity).vx = ((targetDefender as Entity).vx || 0) * (1 - blockEffect);
               (targetDefender as Entity).vy = ((targetDefender as Entity).vy || 0) * (1 - blockEffect);
+              if (isNewEngagement) {
+                (targetDefender as Entity).brokenTackleStun = Math.max((targetDefender as Entity).brokenTackleStun || 0, Math.round(18 * blockEffect));
+              }
               // Shield runner by nudging defender away
               const pushDirX = (targetDefender as Entity).x > runner.x ? 0.7 : -0.7;
               (targetDefender as Entity).x += pushDirX * blockEffect;
@@ -6556,20 +6578,6 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           blocker.x = Math.max(25, Math.min(fieldWidth - 25, blocker.x));
         });
       }
-    } else if (playObj.type !== 'PASS' && phase === 'HANDOFF') {
-      receivers.forEach(r => {
-        let nearestDef: Entity | null = null;
-        let minD = Infinity;
-        defenders.forEach(d => {
-          const dist = Math.hypot(d.x - r.x, d.y - r.y);
-          if (dist < minD) { minD = dist; nearestDef = d; }
-        });
-        if (nearestDef && minD < 70) {
-          moveToward(r, (nearestDef as Entity).x, (nearestDef as Entity).y, 0.3, 1.6);
-        } else if (rb) {
-          moveToward(r, r.x, rb.y + (15 * attackDirection), 0.2, 1.44);
-        }
-      });
     } else if (!isInterceptionReturn) {
       receivers.forEach(r => {
         if (!r.isBlocker && r.routeType !== 'BLOCK') {

@@ -4,7 +4,7 @@ import { chooseProDefensiveCall, getCoverageMistakeChance, getCpuCounterReason, 
 import { alignDefenderAcrossFromReceiver, alignDefenderAcrossFromRunningBack, alignDefenderToZone, alignDefenders, chooseCpuDefensiveAssignments, constrainDefendersToFieldSide, getBlitzAlignmentY, getBracketCoverageTarget, getDefensiveLineAlignmentY, matchCpuDefendersToReceivers, separateDefenderAlignments } from './defense';
 import { getCarrierFumbleChance } from './fumbles';
 import { calculateYardsToGo, canApplyProMatchupAdjustment, canDefenderDeflectPass, canTackleQuarterback, findTappedPassReceiver, getCatchCompletionChance, getDefenderPassReachHeight, getDriveStartY, getSnapBallPosition, getPassArcHeight, getPassArcMaxHeight, getPassArcScreenPoint, getPassFlightFrames, getPassLeadTarget, getRoutePassLeadTarget, isSafety, resolveCatchContestOutcome, resolvePlayResult } from './rules';
-import { canEngagePassBlock, checkOffensiveLineWall, clampPlayerToFieldY, GAME_SPEED_SCALE, getBallCarrierRunSpeed, getFatigueSpeedMultiplier, getPassBlockBaseHoldFrames, getPassBlockHoldFrames, getRunDirectionSpeedFactor, getRunPursuitMovement, getUserDefenderSpeed, isRusherActivelyBlocked, moveToward, resolveCollisions, shouldHoldPassBlock, updatePlayerStamina, updateReceiverTargetStamina, updateRunningBackStamina, updateRouteMovement, USER_CONTROL_SPEED_MULTIPLIER } from './movement';
+import { canEngagePassBlock, checkOffensiveLineWall, clampPlayerToFieldY, engageRunBlocker, GAME_SPEED_SCALE, getBallCarrierRunSpeed, getFatigueSpeedMultiplier, getPassBlockBaseHoldFrames, getPassBlockHoldFrames, getRunBlockEffect, getRunDirectionSpeedFactor, getRunPursuitMovement, getUserDefenderSpeed, isRusherActivelyBlocked, moveToward, resolveCollisions, shouldHoldPassBlock, updatePlayerStamina, updateReceiverTargetStamina, updateRunningBackStamina, updateRouteMovement, USER_CONTROL_SPEED_MULTIPLIER } from './movement';
 import type { Entity } from './types';
 
 test('coverage reduces catches smoothly and touching players are not wide open', () => {
@@ -583,6 +583,18 @@ test('QB run blockers prioritize the defender upfield', () => {
 
   assert.ok(aheadScore < behindScore);
   assert.ok(scoreRunBlockTarget(blocker, runner, defenderAhead, -1, true) < scoreRunBlockTarget(blocker, runner, defenderAhead, -1, false));
+});
+
+test('run blocks engage one defender and create stronger non-exact matchup leverage', () => {
+  const blocker: Entity = { x: 170, y: 500, radius: 10 };
+  const defender: Entity = { x: 170, y: 520, radius: 10, vx: 1, vy: 2 };
+
+  assert.equal(engageRunBlocker(blocker, defender), true);
+  assert.equal(blocker.blockingDefender, defender);
+  assert.equal(defender.blockingDefender, blocker);
+  assert.equal(defender.isEngagedWithBlocker, true);
+  assert.equal(engageRunBlocker(blocker, defender), false);
+  assert.ok(getRunBlockEffect(blocker, defender, 1.35) > getRunBlockEffect(blocker, defender, 0.4));
 });
 
 function createAlignedDefense(playKey: string, formation: 'SPREAD' | 'STACK' | 'TRIPS' = 'SPREAD') {

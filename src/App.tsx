@@ -960,6 +960,22 @@ export default function App() {
   const isUserPreSnapPhase = hasKickedOff && phaseState === 'PRE_SNAP' && !isKickoffActive;
   const isTacticalModeLocked = hasKickedOff;
   const userTeamPlaybook = getTeamPlaybook(p1TeamState.id);
+  const playbookScoreboard = (
+    <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 border-b border-white/10 bg-black/35 px-3 py-2 font-mono text-[10px] sm:text-xs">
+      <div className="flex min-w-0 items-center gap-1.5">
+        <span className="truncate font-bold" style={getTeamTextStyle(p2TeamState.primaryColor)}>{p2TeamState.nickname}</span>
+        <span className="rounded-sm border border-red-500/50 bg-red-950/80 px-1.5 py-0.5 font-black tabular-nums text-white">{cpuScore}</span>
+      </div>
+      <div className="text-center leading-tight">
+        <div className="font-black text-amber-300">Q{gameClockState.quarter} · {Math.floor(gameClockState.seconds / 60)}:{String(gameClockState.seconds % 60).padStart(2, '0')}</div>
+        <div className="max-w-[130px] truncate text-[9px] font-bold uppercase text-cyan-300 sm:max-w-none">{downDistanceText}</div>
+      </div>
+      <div className="flex min-w-0 items-center justify-end gap-1.5">
+        <span className="rounded-sm border border-emerald-500/50 bg-emerald-950/80 px-1.5 py-0.5 font-black tabular-nums text-white">{userScore}</span>
+        <span className="truncate text-right font-bold" style={getTeamTextStyle(p1TeamState.primaryColor)}>{p1TeamState.nickname}</span>
+      </div>
+    </div>
+  );
   const onlinePlayerSide = onlineRole === 'host' ? 'P1' : 'P2';
   const isOnlinePlayerOnOffense = activeOffenseState === onlinePlayerSide;
   const onlinePlayerTeam = onlinePlayerSide === 'P1' ? p1TeamState : p2TeamState;
@@ -2294,7 +2310,7 @@ export default function App() {
           activeOffensePlay={onlineRole && isOnlinePlayerOnOffense ? onlineSelectedPlay : p1OffPlayState}
           activeDefensePlay={onlineRole && !isOnlinePlayerOnOffense ? onlineSelectedPlay : p1DefPlayState}
           attackDirection={engineRef.current?.attackDirection ?? -1}
-          downDistanceText={downDistanceText}
+          scoreboard={playbookScoreboard}
           canPunt={is4thDown}
           fieldGoalDistance={engineRef.current?.getFieldGoalDistance?.()}
           onSelectPlay={(playId) => {
@@ -2318,11 +2334,11 @@ export default function App() {
       {showElitePlaybook && isUserPreSnapPhase && tacticalMode === 'ELITE' && (
         <div className="fixed inset-0 z-[150] flex items-center justify-center bg-black/85 p-4">
           <section role="dialog" aria-modal="true" aria-labelledby="elite-playbook-title" className="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-lg border border-neutral-700 bg-[#0d131a] p-4">
+            {playbookScoreboard}
             <div className="flex items-center justify-between gap-3">
               <h2 id="elite-playbook-title" className="font-bold">{p1TeamState.nickname} team playbook</h2>
               <button type="button" onClick={() => setShowElitePlaybook(false)} aria-label="Close team playbook"><X size={20} /></button>
             </div>
-            <p className="mt-2 text-sm text-amber-300">{downDistanceText}</p>
             <p className="mt-2 text-sm text-neutral-300">{activeOffenseState === 'P1' ? userTeamPlaybook.offenseIdentity : userTeamPlaybook.defenseIdentity}</p>
             <div className="mt-4 space-y-2">
               {(activeOffenseState === 'P1'
