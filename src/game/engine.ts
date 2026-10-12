@@ -1949,6 +1949,9 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   }
 
   function applyDefensiveAlignment(preservePositions = false, assignRBDefender = true, animate = false) {
+    const activePlayName = activeOffense === 'P1' ? p1OffPlay : p2OffPlay;
+    if (activePlayName === 'PUNT') return;
+
     const activeDefKey = (activeDefense === 'P1') ? p1DefPlay : p2DefPlay;
     const previousPositions = preservePositions
       ? defenders.map(defender => {
@@ -3675,7 +3678,12 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     // Tecmo Super Bowl Matchup Evaluation
     const offKey = activeOffense === 'P1' ? p1OffPlay : p2OffPlay;
     const defKey = activeOffense === 'P1' ? p2DefPlay : p1DefPlay;
-    currentTecmoMatchup = evaluateTecmoMatchup(offKey, defKey, offensivePlaybook);
+    const proMatchup = tacticalMode === 'PRO' && PRO_OFFENSE_PLAYS[offKey as ProOffensePlayId] && allDefensivePlaybook[defKey]
+      ? evaluateProMatchup(offKey as ProOffensePlayId, defKey as ProDefensePlayId)
+      : null;
+    currentTecmoMatchup = isTecmoCall(offKey) && isTecmoCall(defKey)
+      ? evaluateTecmoMatchup(offKey, defKey, offensivePlaybook)
+      : null;
     if (currentTecmoMatchup) {
       if (currentTecmoMatchup.isExact) {
         sounds.playJuke();
@@ -3724,6 +3732,22 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
             d.runRecognitionTimer = currentTecmoMatchup!.runRecognitionFrames;
           }
         });
+      }
+    }
+
+    if (proMatchup && !proMatchup.isExactCounter && !PRO_OFFENSE_PLAYS[offKey as ProOffensePlayId].isRun) {
+      const vulnerableDefender = defenders.find(d => d && !d.passRusher && d.defenseAssignment !== 'BLITZ' && d.defenseAssignment !== 'QB_SPY');
+      const eligibleReceivers = [...receivers, centerReceiver]
+        .filter((receiver): receiver is Entity => Boolean(receiver && !receiver.isBlocker && receiver.routeType !== 'BLOCK'));
+      if (vulnerableDefender && eligibleReceivers.length > 0) {
+        const receiver = vulnerableDefender.assignedReceiver || eligibleReceivers.slice().sort((first, second) =>
+          Math.hypot(first.x - vulnerableDefender.x, first.y - vulnerableDefender.y) -
+          Math.hypot(second.x - vulnerableDefender.x, second.y - vulnerableDefender.y)
+        )[0];
+        vulnerableDefender.coverageMistake = 'STUMBLE';
+        vulnerableDefender.mistakeTimer = 45;
+        receiver.flash = 60;
+        receiver.isOpenDeep = true;
       }
     }
   }
@@ -6308,7 +6332,13 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         d.defenseAssignment === 'BLITZ' ||
         (d === userDef && isUserAdvancing)
       ));
-      const exactPassCounter = Boolean(currentTecmoMatchup?.isExact && !currentTecmoMatchup.offenseIsRun);
+      const currentProMatchup = tacticalMode === 'PRO' && PRO_OFFENSE_PLAYS[activeOffName as ProOffensePlayId] && allDefensivePlaybook[activeDefKey]
+        ? evaluateProMatchup(activeOffName as ProOffensePlayId, activeDefKey as ProDefensePlayId)
+        : null;
+      const exactPassCounter = Boolean(
+        (currentTecmoMatchup?.isExact && !currentTecmoMatchup.offenseIsRun) ||
+        (currentProMatchup?.isExactCounter && !PRO_OFFENSE_PLAYS[activeOffName as ProOffensePlayId].isRun)
+      );
       const hasExtraBlitzer = passRushers.length >= 2;
       const baseBlockHoldFrames = getPassBlockBaseHoldFrames();
       const extraPassBlockers = [rb, centerReceiver].filter((b): b is Entity => Boolean(b && (b.isBlocker || b.routeType === 'BLOCK')));
@@ -6377,6 +6407,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
                 holdFrames = Math.min(holdFrames, currentTecmoMatchup.blockShedFrames);
               }
             }
+            holdFrames = Math.min(holdFrames, baseBlockHoldFrames);
             if (shouldHoldPassBlock(engagingBlocker, rusher, holdFrames)) {
               rusher.isEngagedWithBlocker = true;
               rusher.vx = 0;

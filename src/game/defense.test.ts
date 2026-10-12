@@ -258,11 +258,12 @@ test('pass protection engagement checks real contact without moving either playe
 test('pass blockers can be shed and nearby unengaged blockers do not prevent sacks', () => {
   const blocker: Entity = { x: 170, y: 500, radius: 10 };
   const rusher: Entity = { x: 170, y: 526, radius: 10 };
-  assert.equal(getPassBlockBaseHoldFrames(), 155);
+  assert.equal(getPassBlockBaseHoldFrames(), 150);
   const sharedBlitzerHoldFrames = getPassBlockHoldFrames(getPassBlockBaseHoldFrames(), 1, 1);
-  assert.equal(sharedBlitzerHoldFrames, 155, 'Every blitzer uses the same blocker duration');
+  assert.equal(sharedBlitzerHoldFrames, 150, 'Pass protection should break down after 2.5 seconds');
   assert.equal(getPassBlockHoldFrames(100, 1.2, 1), 120);
   assert.equal(getPassBlockHoldFrames(100, 0.6, 1.5), 45);
+  assert.equal(getPassBlockHoldFrames(200, 2, 1), 150, 'Strong protection must not exceed 2.5 seconds');
 
   for (let frame = 0; frame < 3; frame++) {
     rusher.isEngagedWithBlocker = false;
@@ -480,9 +481,11 @@ test('CPU releases open, pressured, and overdue passes before scrambling', () =>
   };
 
   assert.equal(shouldCpuReleasePass({ ...situation, hasOpenBreak: true, playClock: 31 }), false);
-  assert.equal(shouldCpuReleasePass({ ...situation, hasOpenBreak: true, playClock: 32 }), true);
+  assert.equal(shouldCpuReleasePass({ ...situation, hasOpenBreak: true, playClock: 59 }), false);
+  assert.equal(shouldCpuReleasePass({ ...situation, hasOpenBreak: true, playClock: 60 }), true);
   assert.equal(shouldCpuReleasePass({ ...situation, isUnderHeavyPressure: true, playClock: 26, pressureFrames: 9 }), false);
-  assert.equal(shouldCpuReleasePass({ ...situation, isUnderHeavyPressure: true, playClock: 35, pressureFrames: 10 }), true);
+  assert.equal(shouldCpuReleasePass({ ...situation, isUnderHeavyPressure: true, playClock: 59, pressureFrames: 10 }), false);
+  assert.equal(shouldCpuReleasePass({ ...situation, isUnderHeavyPressure: true, playClock: 60, pressureFrames: 10 }), true);
   assert.equal(shouldCpuReleasePass({ ...situation, playClock: 65 }), false);
   assert.equal(shouldCpuReleasePass({ ...situation, playClock: 66 }), true);
   assert.equal(shouldCpuReleasePass({ ...situation, hasTarget: false, playClock: 66 }), false);
@@ -510,7 +513,8 @@ test('CPU vertical calls wait for downfield windows but escape pressure and even
   assert.equal(shouldCpuReleasePass({ ...situation, playClock: 59, targetDepthYards: 18 }), false);
   assert.equal(shouldCpuReleasePass({ ...situation, playClock: 60, targetDepthYards: 18 }), true);
   assert.equal(shouldCpuReleasePass({ ...situation, playClock: 60, targetDepthYards: 18, targetSeparation: 8 }), false);
-  assert.equal(shouldCpuReleasePass({ ...situation, isUnderHeavyPressure: true, playClock: 35, pressureFrames: 10 }), true);
+  assert.equal(shouldCpuReleasePass({ ...situation, isUnderHeavyPressure: true, playClock: 59, pressureFrames: 10 }), false);
+  assert.equal(shouldCpuReleasePass({ ...situation, isUnderHeavyPressure: true, playClock: 60, pressureFrames: 10 }), true);
   assert.equal(shouldCpuReleasePass({ ...situation, playClock: 100 }), false);
   assert.equal(shouldCpuReleasePass({ ...situation, playClock: 200 }), false);
   assert.equal(shouldCpuReleasePass({ ...situation, playClock: 240 }), true);
@@ -1380,7 +1384,7 @@ test('CPU releases the deep read after sustained pressure instead of waiting for
     hasOpenBreak: false,
     isUnderHeavyPressure: true,
     pressureFrames: 10,
-    playClock: 18,
+    playClock: 60,
     bestScore: 10,
     isVerticalPlay: true,
     targetDepthYards: 5,
@@ -2413,10 +2417,18 @@ test('AI QB throws decisively on rhythm and under pressure without freezing in t
     isDeepShotOpportunity: false,
     hasOpenBreak: true,
     isUnderHeavyPressure: false,
-    playClock: 32,
+    playClock: 59,
     bestScore: 25
   });
-  assert.equal(breakRelease, true, 'AI QB releases on a developed receiver break');
+  assert.equal(breakRelease, false, 'AI QB does not release before one second');
+  assert.equal(shouldCpuReleasePass({
+    hasTarget: true,
+    isDeepShotOpportunity: false,
+    hasOpenBreak: true,
+    isUnderHeavyPressure: false,
+    playClock: 60,
+    bestScore: 25
+  }), true, 'AI QB releases after the minimum read time');
 
   // Situation 2: Under heavy pressure, AI QB gets pass off before being sacked
   const pressureRelease = shouldCpuReleasePass({
@@ -2424,11 +2436,20 @@ test('AI QB throws decisively on rhythm and under pressure without freezing in t
     isDeepShotOpportunity: false,
     hasOpenBreak: false,
     isUnderHeavyPressure: true,
-    playClock: 35,
+    playClock: 59,
     pressureFrames: 10,
     bestScore: 10
   });
-  assert.equal(pressureRelease, true, 'AI QB releases pass to escape sack under heavy pressure');
+  assert.equal(pressureRelease, false, 'AI QB still needs a brief read under pressure');
+  assert.equal(shouldCpuReleasePass({
+    hasTarget: true,
+    isDeepShotOpportunity: false,
+    hasOpenBreak: false,
+    isUnderHeavyPressure: true,
+    playClock: 60,
+    pressureFrames: 10,
+    bestScore: 10
+  }), true, 'AI QB releases once the minimum reaction window passes');
 
   // Situation 3: Rhythm release after the route has had time to develop
   const rhythmRelease = shouldCpuReleasePass({
@@ -2436,10 +2457,18 @@ test('AI QB throws decisively on rhythm and under pressure without freezing in t
     isDeepShotOpportunity: false,
     hasOpenBreak: false,
     isUnderHeavyPressure: false,
-    playClock: 44,
+    playClock: 59,
     bestScore: 20
   });
-  assert.equal(rhythmRelease, true, 'AI QB releases a strong read after the route has developed');
+  assert.equal(rhythmRelease, false, 'A strong read does not bypass the minimum reaction window');
+  assert.equal(shouldCpuReleasePass({
+    hasTarget: true,
+    isDeepShotOpportunity: false,
+    hasOpenBreak: false,
+    isUnderHeavyPressure: false,
+    playClock: 60,
+    bestScore: 20
+  }), true, 'AI QB can release once a second of the play has elapsed');
 
   // Situation 4: Quick release under rush pressure at frame 10
   const earlyPressureRelease = shouldCpuReleasePass({

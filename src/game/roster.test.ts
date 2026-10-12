@@ -100,9 +100,10 @@ test('strong blockers hold rushers longer and weak receiver blocks do not erase 
   applyPlayerProfile(blocker, TEAMS.GEORGIA.roster['line-0']);
   assert.ok(getRunBlockEffect(blocker, defender) >= weakEffect * 3);
   assert.ok(weakEffect < 0.2);
-  const goodProtection = getPassBlockHoldFrames(155, TEAMS.GEORGIA.roster['line-0'].ratings.blocking / 70, 95 / 70);
-  const weakProtection = getPassBlockHoldFrames(155, TEAMS.FLORIDA.roster['line-0'].ratings.blocking / 70, 95 / 70);
-  assert.ok(goodProtection - weakProtection >= 35);
+  const goodProtection = getPassBlockHoldFrames(150, TEAMS.GEORGIA.roster['line-0'].ratings.blocking / 70, 95 / 70);
+  const weakProtection = getPassBlockHoldFrames(150, TEAMS.FLORIDA.roster['line-0'].ratings.blocking / 70, 95 / 70);
+  assert.ok(goodProtection > weakProtection);
+  assert.ok(goodProtection <= 150);
 });
 
 test('pursuit cuts off the actual heading on either side rather than running past the carrier', () => {

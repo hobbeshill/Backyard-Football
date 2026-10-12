@@ -197,11 +197,11 @@ export function canEngagePassBlock(blocker: Entity, rusher: Entity): boolean {
 }
 
 export function getPassBlockHoldFrames(baseHoldFrames: number, passProtection: number, passRush: number): number {
-  return Math.max(45, Math.min(210, Math.round(baseHoldFrames * passProtection / passRush)));
+  return Math.max(45, Math.min(150, Math.round(baseHoldFrames * passProtection / passRush)));
 }
 
 export function getPassBlockBaseHoldFrames(): number {
-  return 155;
+  return 150;
 }
 
 export function shouldHoldPassBlock(blocker: Entity, rusher: Entity, holdFrames: number): boolean {

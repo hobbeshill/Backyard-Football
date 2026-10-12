@@ -1,6 +1,27 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { mountFootballGame, type GameEngineHandle } from './engine';
+import { shouldShowAnnouncement } from './announcements';
+
+test('routine route and defender changes stay quiet while turnovers remain announced', () => {
+  const informationalCalls = [
+    'PASS ROUTE: RB RUNNING FLAT! 🎯',
+    'PASS PROTECTION: RB BLOCKING! 🛡️',
+    'DEFENSE: BLITZ / RUSH QB! 💥',
+    'DEFENSE: MAN COVERAGE! 👤'
+  ];
+  informationalCalls.forEach(text => assert.equal(shouldShowAnnouncement(text), false, text));
+
+  const majorEvents = [
+    ['BALL STRIPPED! FUMBLE ON THE PLAY! 🏈💥', 'FUMBLE'],
+    ['FUMBLE RECOVERED BY DEFENSE! TURNOVER!', 'TURNOVER'],
+    ['INTERCEPTION! TURNOVER!', 'TURNOVER'],
+    ['TURNOVER ON DOWNS!', 'TURNOVER']
+  ] as const;
+  majorEvents.forEach(([text, category]) => {
+    assert.equal(shouldShowAnnouncement(text, category), true, text);
+  });
+});
 
 test('play results only announce first downs and touchdowns, and are delayed 2 seconds', () => {
   const holder: { game?: GameEngineHandle } = {};

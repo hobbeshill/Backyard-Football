@@ -347,6 +347,40 @@ test('Tecmo coverage mismatch affects defenders only after the offensive snap', 
   }
 });
 
+test('Pro coverage leaves a receiver open on a non-exact call but not on the exact counter', () => {
+  for (const [defensePlay, shouldStumble] of [
+    ['PRO_COVER2_HARD_FLAT', true],
+    ['PRO_COVER1_MAN', false]
+  ] as const) {
+    const handle: { game?: GameEngineHandle } = {};
+    const cleanup = mountFootballGame(createMockCanvas(), {
+      setP2OffPlayState: () => {}, setP2DefPlayState: () => {},
+      setDownDistanceText: () => {}, setActiveOffenseState: () => {},
+      setUserScore: () => {}, setCpuScore: () => {}, setP1DefPlayState: () => {},
+      setMomentumState: () => {}, setGameClockState: () => {}, showAnnouncement: () => {},
+      onEngineReady: game => { handle.game = game ?? undefined; }
+    });
+    try {
+      const game = handle.game;
+      assert.ok(game);
+      game.setTacticalMode?.('PRO');
+      game.setPossessionForTest?.('P1');
+      game.resetDrill();
+      game.selectOffense('PRO_QUICK_SLANTS');
+      game.selectDefense(defensePlay);
+      game.startPlay?.();
+
+      const stumbledDefender = game.getDefenders?.().find(defender => defender.coverageMistake === 'STUMBLE');
+      assert.equal(Boolean(stumbledDefender), shouldStumble, defensePlay);
+      if (stumbledDefender) {
+        assert.equal(stumbledDefender.mistakeTimer, 45);
+      }
+    } finally {
+      cleanup?.();
+    }
+  }
+});
+
 test('field is free of player badges while Pro pre-snap scouting preserves controls', () => {
   const originalRequest = globalThis.requestAnimationFrame;
   const originalCancel = globalThis.cancelAnimationFrame;
@@ -1805,6 +1839,14 @@ test('punt receiving team blockers are positioned in a horizontal line in front 
     });
     // Verify blockers are in front of returner towards the line of scrimmage
     assert.equal(Math.abs(firstBlockerY - returner.y), 55, 'Punt blockers must be positioned in front of returner');
+
+    const returnFormation = defenders.map((d: any) => ({ x: d.x, y: d.y, isReturner: d.isReturner }));
+    game.selectDefense('COVER2');
+    assert.deepEqual(
+      defenders.map((d: any) => ({ x: d.x, y: d.y, isReturner: d.isReturner })),
+      returnFormation,
+      'Changing the defensive scheme must not replace the punt return formation'
+    );
   } finally {
     cleanup?.();
   }
