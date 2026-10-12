@@ -573,6 +573,112 @@ test('punt setup shows the receiving returner and punter before launch', () => {
   }
 });
 
+test('penalty-prone road offenses can false start while the down is replayed', () => {
+  const originalRandom = Math.random;
+  const handle: { game?: GameEngineHandle } = {};
+  const announcements: string[] = [];
+  const cleanup = mountFootballGame(createMockCanvas(), {
+    setP2OffPlayState: () => {}, setP2DefPlayState: () => {},
+    setDownDistanceText: () => {}, setActiveOffenseState: () => {},
+    setUserScore: () => {}, setCpuScore: () => {}, setP1DefPlayState: () => {},
+    setMomentumState: () => {}, setGameClockState: () => {},
+    showAnnouncement: message => { announcements.push(message); },
+    onEngineReady: game => { handle.game = game ?? undefined; }
+  });
+
+  try {
+    const game = handle.game;
+    assert.ok(game);
+    game.selectP1Team('AUBURN');
+    game.selectP2Team('FLORIDA');
+    game.setPossessionForTest?.('P2');
+    game.resetDrill();
+    const before = game.getNetworkSnapshot?.();
+    assert.ok(before);
+
+    Math.random = () => 0;
+    game.startPlay?.();
+    const penalty = game.getNetworkSnapshot?.();
+    assert.ok(penalty);
+    assert.equal(game.phase, 'PRE_SNAP');
+    assert.equal(penalty.currentDown, before.currentDown);
+    assert.equal(penalty.lineOfScrimmageY, before.lineOfScrimmageY - 50);
+    assert.ok(announcements.some(message => message.includes('FALSE START')));
+
+    game.startPlay?.();
+    assert.notEqual(game.phase, 'PRE_SNAP', 'The flagged down is replayed without a second penalty roll');
+  } finally {
+    Math.random = originalRandom;
+    cleanup?.();
+  }
+});
+
+test('punt returner follows the landing point and fields the ball without teleporting', () => {
+  const originalRequest = globalThis.requestAnimationFrame;
+  const originalCancel = globalThis.cancelAnimationFrame;
+  let nextFrame: FrameRequestCallback = () => {};
+  let timestamp = 0;
+  globalThis.requestAnimationFrame = callback => { nextFrame = callback; return 1; };
+  globalThis.cancelAnimationFrame = () => {};
+  const handle: { game?: GameEngineHandle } = {};
+  const cleanup = mountFootballGame(createMockCanvas(), {
+    setP2OffPlayState: () => {}, setP2DefPlayState: () => {},
+    setDownDistanceText: () => {}, setActiveOffenseState: () => {},
+    setUserScore: () => {}, setCpuScore: () => {}, setP1DefPlayState: () => {},
+    setMomentumState: () => {}, setGameClockState: () => {}, showAnnouncement: () => {},
+    onEngineReady: game => { handle.game = game ?? undefined; }
+  });
+
+  try {
+    const game = handle.game;
+    assert.ok(game);
+    game.setPossessionForTest?.('P1');
+    game.set4thDownForTest?.();
+    game.callPunt();
+    game.punt(0.8);
+    assert.equal(game.phase, 'THROWN');
+
+    const initial = game.getNetworkSnapshot?.();
+    assert.ok(initial?.ball?.isPunt);
+    const returnerId = initial.defenderIds.find((id: string) => initial.entities[id].data.isReturner);
+    assert.ok(returnerId);
+    const targetY = initial.ball.targetY;
+    const initialY = initial.entities[returnerId].data.y;
+    const advanceFrame = () => {
+      timestamp += 1000 / 60;
+      nextFrame(timestamp);
+    };
+
+    nextFrame(0);
+    advanceFrame();
+    const pursuing = game.getNetworkSnapshot?.();
+    assert.ok(pursuing);
+    const returnerY = pursuing.entities[returnerId].data.y;
+    assert.ok(Math.abs(returnerY - targetY) < Math.abs(initialY - targetY), 'The returner moves toward the punt landing point');
+
+    let previousPosition = { x: pursuing.entities[returnerId].data.x, y: returnerY };
+    let maxFrameDisplacement = 0;
+    for (let frame = 0; frame < 100 && game.phase === 'THROWN'; frame++) {
+      advanceFrame();
+      const current = game.getNetworkSnapshot?.();
+      assert.ok(current);
+      const returner = current.entities[returnerId].data;
+      maxFrameDisplacement = Math.max(maxFrameDisplacement, Math.hypot(returner.x - previousPosition.x, returner.y - previousPosition.y));
+      previousPosition = { x: returner.x, y: returner.y };
+    }
+
+    const caught = game.getNetworkSnapshot?.();
+    assert.ok(caught);
+    assert.equal(game.phase, 'RUNNING');
+    assert.equal(caught.entities[returnerId].data.hasBall, true);
+    assert.ok(maxFrameDisplacement < 5, `Returner should move continuously, max frame displacement was ${maxFrameDisplacement}`);
+  } finally {
+    cleanup?.();
+    globalThis.requestAnimationFrame = originalRequest;
+    globalThis.cancelAnimationFrame = originalCancel;
+  }
+});
+
 test('skill meter power controls punt distance and allows returns when not a touchback', () => {
   // Low skill meter punt: ~32 yards (e.g. pooch punt pinning inside the 20)
   const lowPunt = calculatePuntFlight(0.25, 1.0);

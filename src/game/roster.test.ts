@@ -22,6 +22,24 @@ test('all teams have unique, bounded rosters and persistent jersey identities', 
     rosters.add(JSON.stringify(team.roster));
   }
   assert.equal(rosters.size, getAllTeams().length);
+  assert.ok(TEAMS.GEORGIA.overallRating > TEAMS.VANDERBILT.overallRating);
+  assert.ok(TEAMS.ALABAMA.overallRating > TEAMS.MISSISSIPPI_STATE.overallRating);
+  assert.ok(TEAMS.ARKANSAS.roster.rb.ratings.power > TEAMS.OLE_MISS.roster.rb.ratings.power);
+  assert.ok(TEAMS.TEXAS.roster.qb.ratings.consistency > TEAMS.AUBURN.roster.qb.ratings.consistency);
+  assert.ok(TEAMS.KENTUCKY.roster.qb.ratings.discipline > TEAMS.FLORIDA.roster.qb.ratings.discipline);
+});
+
+test('high-tempo teams call quick concepts more often than patient power teams', () => {
+  const quickCalls = (teamId: 'TENNESSEE' | 'KENTUCKY') => {
+    let index = 0;
+    let quick = 0;
+    for (let sample = 0; sample < 1000; sample++) {
+      const call = chooseTeamOffensivePlay(['SHORT_PASS', 'DEEP_SHOT'], TEAMS[teamId], () => (index++ % 1000) / 1000);
+      if (call === 'SHORT_PASS') quick++;
+    }
+    return quick;
+  };
+  assert.ok(quickCalls('TENNESSEE') > quickCalls('KENTUCKY'));
 });
 
 test('returner roster selection always chooses the team player with the highest speed rating', () => {

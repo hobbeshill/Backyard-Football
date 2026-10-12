@@ -6,7 +6,7 @@ import { alignDefenderAcrossFromReceiver, alignDefenderAcrossFromRunningBack, al
 import { chooseAvailableDefensiveCounter, chooseProDefensiveCall, chooseTeamOffensivePlay, evaluateCpuOffensiveAudibles, evaluateCpuBallCarrierMoves, getCoverageMistakeChance, getRepeatedOffensivePlay, getSuccessfulPlayCounter, isCpuPressureRecognized, shouldCpuGoForItOnFourthDown, shouldCpuReleasePass, shouldCpuScramble, scoreRunBlockTarget } from './ai';
 import { createFumbleBall, getCarrierFumbleChance } from './fumbles';
 import { canEngagePassBlock, checkOffensiveLineWall, clampPlayerToFieldY, createSimulationClock, distToSegment, engageRunBlocker, GAME_SPEED_SCALE, getBallCarrierRunSpeed, getFatigueSpeedMultiplier, getPassBlockBaseHoldFrames, getPassBlockHoldFrames, getDirectionalInput, getReturnPursuitSpeed, getReturnTeamBlockers, getRunLaneOptions, getUserRunnerVelocity, getRunPursuitMovement, getUserDefenderSpeed, isRusherActivelyBlocked, moveToward, resolveCollisions, shouldApplyRunBlockStun, shouldHoldPassBlock, updatePlayerStamina, updateReceiverTargetStamina, updateRunningBackStamina, updateRouteMovement, USER_CONTROL_SPEED_MULTIPLIER } from './movement';
-import { resolvePlayResult, isSafety, calculateBrokenTackleChance, calculateYardsToGo, getDriveStartY, getSnapBallPosition, getPassArcHeight, getPassArcScreenPoint, getFieldGoalBallHeight, getPassArcMaxHeight, getPassFlightFrames, findTappedPassReceiver, shouldReleaseUserPass, getPassLeadTarget, getRoutePassLeadTarget, canDefenderDeflectPass, canTackleQuarterback, resolveCatchContestOutcome, evaluateQbThrowAccuracy, getCpuThrowAimVariance, calculateKickoffFlight, calculatePuntFlight, getTouchbackYardLineY, getInterceptionTouchbackY, getKickoffLineY, getDefenderPassReachHeight, isPlayerOutOfBounds, calculateFieldGoalFlight, getFieldGoalDistanceYards, GOALPOST_CENTER_X, GOALPOST_LEFT_UPRIGHT_X, GOALPOST_RIGHT_UPRIGHT_X, GOALPOST_CROSSBAR_HEIGHT_Z } from './rules';
+import { resolvePlayResult, isSafety, calculateBrokenTackleChance, calculateYardsToGo, getDriveStartY, getSnapBallPosition, getPassArcHeight, getPassArcScreenPoint, getFieldGoalBallHeight, getPassArcMaxHeight, getPassFlightFrames, findTappedPassReceiver, shouldReleaseUserPass, getPassLeadTarget, getRoutePassLeadTarget, canDefenderDeflectPass, canTackleQuarterback, resolveCatchContestOutcome, evaluateQbThrowAccuracy, getCpuThrowAimVariance, calculateKickoffFlight, calculatePuntFlight, getTouchbackYardLineY, getInterceptionTouchbackY, getKickoffLineY, getDefenderPassReachHeight, isPlayerOutOfBounds, calculateFieldGoalFlight, getFieldGoalDistanceYards, getPreSnapPenaltyChances, GOALPOST_CENTER_X, GOALPOST_LEFT_UPRIGHT_X, GOALPOST_RIGHT_UPRIGHT_X, GOALPOST_CROSSBAR_HEIGHT_Z } from './rules';
 import { sounds } from './sound';
 import { evaluateDirtSwipeGesture, drawDirtSwipeGesture } from './chalkMenu';
 import { getHelmetDesign, type HelmetDesign } from './helmetDesigns';
@@ -596,6 +596,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   let formationTransitionFrame = 0;
   let lastTargetWasRb = false;
   let aiPreSnapShiftTimer = 0;
+  let skipNextPreSnapPenalty = false;
   let formationTransitions: Array<{
     entity: Entity;
     fromX: number;
@@ -2100,8 +2101,9 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     isAiming = false;
     ball = null;
     playClock = 0;
+    const takeawayTeam = activeOffense === 'P1' ? p1Team : p2Team;
     announceTurnover(
-      'INTERCEPTION! TURNOVER!',
+      `INTERCEPTION! TURNOVER! ${takeawayTeam.nickname.toUpperCase()} BALL!`,
       activeOffense,
       touchbackY !== null ? 'PICK IN THE END ZONE - TOUCHBACK, 1ST & 10' : 'PASS PICKED OFF - RETURN IN PROGRESS'
     );
@@ -3664,6 +3666,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   }
 
   function snapToQuarterback(): void {
+    skipNextPreSnapPenalty = false;
     setIs4thDownState?.(false);
     snapBall = linemen[0] ? { center: { ...linemen[0] }, frame: 0 } : null;
     sounds.playSnap();
@@ -3672,7 +3675,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     tutorialAimFrames = 0;
     completeTutorialAction(1);
     completeTutorialAction(5);
-    playSnapCameraY = getSideScrollCameraYForLineOfScrimmage(lineOfScrimmageY, logicalCanvasWidth, getCameraPitchFactor(), activeOffense === 'P1');
+    playSnapCameraY = getPreSnapCameraY();
     cameraY = playSnapCameraY;
 
     // Tecmo Super Bowl Matchup Evaluation
@@ -3752,6 +3755,40 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     }
   }
 
+  function maybeApplyPreSnapPenalty(): boolean {
+    if (skipNextPreSnapPenalty) {
+      skipNextPreSnapPenalty = false;
+      return false;
+    }
+    const offenseTeam = activeOffense === 'P1' ? p1Team : p2Team;
+    const defenseTeam = activeDefense === 'P1' ? p1Team : p2Team;
+    const averageDiscipline = (team: TeamProfile) =>
+      Object.values(team.roster).reduce((sum, player) => sum + player.ratings.discipline, 0) / Object.keys(team.roster).length;
+    const chances = getPreSnapPenaltyChances(
+      averageDiscipline(offenseTeam),
+      averageDiscipline(defenseTeam),
+      activeOffense === 'P2' ? p1Team.ratings.homeField : 1,
+      activeOffense === 'P2'
+    );
+    if (chances.falseStart === 0 && chances.offside === 0) return false;
+    const roll = Math.random();
+    if (roll < chances.falseStart) {
+      lineOfScrimmageY = clamp(lineOfScrimmageY - 50 * attackDirection, endZoneHeight + 10, fieldHeight - endZoneHeight - 10);
+      yardsToGo = calculateYardsToGo(lineOfScrimmageY, firstDownMarkerY, attackDirection);
+      showAnnouncement('FALSE START! 5-YARD PENALTY, DOWN REPLAYED', '#ffcc00', true);
+    } else if (roll < chances.falseStart + chances.offside) {
+      lineOfScrimmageY = clamp(lineOfScrimmageY + 50 * attackDirection, endZoneHeight + 10, fieldHeight - endZoneHeight - 10);
+      yardsToGo = calculateYardsToGo(lineOfScrimmageY, firstDownMarkerY, attackDirection);
+      showAnnouncement('OFFSIDE! 5-YARD PENALTY, DOWN REPLAYED', '#ffcc00', true);
+    } else {
+      return false;
+    }
+    skipNextPreSnapPenalty = true;
+    sounds.playWhistle();
+    updateDownDisplay();
+    return true;
+  }
+
   function startCpuPlay(): void {
     userDefenseHistory.push(p1DefPlay);
     if (userDefenseHistory.length > 12) userDefenseHistory.shift();
@@ -3786,6 +3823,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       cpuPlay = offensivePlaybook[p2OffPlay];
       callbacks.setP2OffPlayState(p2OffPlay);
     }
+    if (maybeApplyPreSnapPenalty()) return;
     snapToQuarterback();
     isAiming = false;
     cpuPreSnapTimer = 0;
@@ -3861,6 +3899,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       return;
     }
 
+    if (maybeApplyPreSnapPenalty()) return;
     snapToQuarterback();
     const isDesignedRun = (play?.type !== 'PASS' && play?.type !== 'PUNT' && play?.type !== 'FIELD_GOAL') || rb?.routeType === 'RUN';
     if (isDesignedRun) {
@@ -4437,6 +4476,21 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     )?.receiver ?? null;
   }
 
+  function getOffensiveQbConsistency(team: TeamProfile): number {
+    let consistency = Math.sqrt(team.ratings.qbConsistency * (qb.player?.ratings.consistency ?? 70) / 70);
+    const offenseHistory = activeOffense === 'P1' ? userPlayHistory : cpuPlayHistory;
+    const opponent = activeOffense === 'P1' ? p2Team : p1Team;
+    if (quarter === 1 && offenseHistory.length < 2 && team.overallRating >= opponent.overallRating + 5) {
+      consistency *= team.ratings.earlyGameFocus ?? 1;
+    }
+    const offenseScore = activeOffense === 'P1' ? p1Score : p2Score;
+    const defenseScore = activeOffense === 'P1' ? p2Score : p1Score;
+    if (quarter === 1 && offenseScore < defenseScore) {
+      consistency *= team.ratings.trailingComposure ?? 1;
+    }
+    return consistency;
+  }
+
   function executeUserPass(tappedReceiver: Entity) {
     if (phase !== 'QB_DROP' || !isUserOffense() || !qb.hasBall) return;
     if (onlineGuestControlsP2 && onlinePlayerSide === 'P2') {
@@ -4469,6 +4523,9 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     const rusherThreat = defenders.some(d => d && (d.passRusher || d.defenseAssignment === 'BLITZ') && Math.hypot(d.x - qb.x, d.y - qb.y) < 55);
     const isHitAsThrown = defenders.some(d => d && (d.passRusher || d.defenseAssignment === 'BLITZ') && Math.hypot(d.x - qb.x, d.y - qb.y) < 32);
     const offTeam = activeOffense === 'P1' ? p1Team : p2Team;
+    const yardsToEndzone = attackDirection === -1
+      ? lineOfScrimmageY - endZoneHeight
+      : fieldHeight - endZoneHeight - lineOfScrimmageY;
     const accCheck = evaluateQbThrowAccuracy({
       throwDist,
       isUnderPressure: rusherThreat,
@@ -4476,6 +4533,10 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       isHitAsThrown,
       isMoving: Math.hypot(qb.vx || 0, qb.vy || 0) > 0.6,
       passProtectionRating: offTeam.ratings.passProtection,
+      qbConsistency: getOffensiveQbConsistency(offTeam),
+      chemistry: offTeam.ratings.chemistry,
+      redZoneEfficiency: offTeam.ratings.redZoneEfficiency,
+      isRedZone: yardsToEndzone <= 200,
       isProMode: tacticalMode === 'PRO'
     }, attackDirection);
 
@@ -4590,7 +4651,6 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         // RB tap / line gesture: checked before the snap zone so tapping the RB never starts the play.
         if (rb && Math.hypot(rb.x - px, rb.y - py) < rb.radius + receiverHitPadding + 40) {
           gestureEntity = rb;
-          showPlayerScout(rb);
           gestureRole = 'RB';
           gestureStartX = rb.x;
           gestureStartY = rb.y;
@@ -4605,7 +4665,6 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         // Center tap / line gesture
         if (centerReceiver && Math.hypot(centerReceiver.x - px, centerReceiver.y - py) < centerReceiver.radius + receiverHitPadding) {
           gestureEntity = centerReceiver;
-          showPlayerScout(centerReceiver);
           gestureRole = 'WR';
           gestureStartX = centerReceiver.x;
           gestureStartY = centerReceiver.y;
@@ -4621,7 +4680,6 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         const eligibleWr = receivers.find(r => r && Math.hypot(r.x - px, r.y - py) < r.radius + receiverHitPadding);
         if (eligibleWr) {
           gestureEntity = eligibleWr;
-          showPlayerScout(eligibleWr);
           gestureRole = 'WR';
           gestureStartX = eligibleWr.x;
           gestureStartY = eligibleWr.y;
@@ -4647,7 +4705,6 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           player => player && Math.hypot(player.x - px, player.y - py) < player.radius + receiverHitPadding
         );
         if (scoutedPlayer) {
-          showPlayerScout(scoutedPlayer);
           gestureEntity = scoutedPlayer;
           gestureRole = scoutedPlayer === rb ? 'RB' : 'WR';
           gestureStartX = scoutedPlayer.x;
@@ -5791,6 +5848,9 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         const cpuRusherThreat = defenders.some(d => d && (d.passRusher || d.defenseAssignment === 'BLITZ') && Math.hypot(d.x - qb.x, d.y - qb.y) < 55);
         const cpuHitAsThrown = defenders.some(d => d && (d.passRusher || d.defenseAssignment === 'BLITZ') && Math.hypot(d.x - qb.x, d.y - qb.y) < 32);
         const cpuOffTeam = p2Team;
+        const cpuYardsToEndzone = attackDirection === -1
+          ? lineOfScrimmageY - endZoneHeight
+          : fieldHeight - endZoneHeight - lineOfScrimmageY;
         const cpuAccCheck = evaluateQbThrowAccuracy({
           throwDist: targetDist,
           isUnderPressure: cpuRusherThreat,
@@ -5799,6 +5859,10 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           isCpuThrow: true,
           isMoving: Math.hypot(qb.vx || 0, qb.vy || 0) > 0.6,
           passProtectionRating: cpuOffTeam.ratings.passProtection,
+          qbConsistency: getOffensiveQbConsistency(cpuOffTeam),
+          chemistry: cpuOffTeam.ratings.chemistry,
+          redZoneEfficiency: cpuOffTeam.ratings.redZoneEfficiency,
+          isRedZone: cpuYardsToEndzone <= 200,
           isProMode: tacticalMode === 'PRO'
         }, attackDirection);
 
@@ -6178,7 +6242,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
             }
           }
         } else if (phase === 'RUNNING') {
-          const isReturn = Boolean(isSpecialTeamsReturn || activeEntity.isReturner);
+          const isReturn = Boolean(isInterceptionReturn || isSpecialTeamsReturn || activeEntity.isReturner);
           const isUserControlled = isReturn
             ? isUserOffense()
             : isUserTeam(activeEntity.team ?? activeOffense);
@@ -6751,6 +6815,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
       defenders.forEach((d, idx) => {
         if (!d) return;
+        if (d.isReturner && ball?.isPunt) return;
         if (phase === 'RUNNING' && d === activeEntity) return;
         if ((d.brokenTackleStun || 0) > 0) {
           d.brokenTackleStun!--;
@@ -7286,7 +7351,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
             isBlitzer,
             isBigHit,
             isFatiguedReceiver: receivers.includes(activeEntity),
-            stamina: activeEntity.stamina ?? 100
+            stamina: activeEntity.stamina ?? 100,
+            turnoverSecurity: (activeEntity.team === 'P1' ? p1Team : p2Team).ratings.turnoverSecurity
           });
           if (fumbleRoll < fumbleChance) {
             triggerFumble(activeEntity);
@@ -7412,7 +7478,9 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         });
 
         if (returner) {
-          moveToward(returner, ball.targetX || 170, ball.targetY || returner.y, 0.20, 1.65, 0);
+          const pursuitSpeed = ball.isPunt ? 4.8 : 1.65;
+          const pursuitAcceleration = ball.isPunt ? 0.24 : 0.20;
+          moveToward(returner, ball.targetX || 170, ball.targetY || returner.y, pursuitAcceleration, pursuitSpeed, 0);
         }
 
         // Arrival / Landing Window
@@ -7454,8 +7522,10 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
           if (returner) {
             returner.hasBall = true;
-            returner.x = ball.x;
-            returner.y = ball.y;
+            if (!ball.isPunt) {
+              returner.x = ball.x;
+              returner.y = ball.y;
+            }
             returner.vx = 0;
             returner.vy = 0;
             returner.tackleImmunity = 0;
@@ -7593,6 +7663,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
             let defenderCount = 0;
             let ballSideDefender = false;
             let coverageRating = 70;
+            let defenderHandsRating = 70;
 
             defenders.forEach(d => {
               if (!d || d.isEngagedWithBlocker) return;
@@ -7611,6 +7682,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
                 minDefDist = effDist;
                 defDistToBall = distToB;
                 coverageRating = d.player?.ratings.coverage ?? 70;
+                defenderHandsRating = d.player?.ratings.hands ?? 70;
               }
             });
 
@@ -7664,7 +7736,10 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
               ballSideDefender,
               archetype: c.archetype,
               handsRating: c.player?.ratings.hands,
+              receiverConsistency: c.player?.ratings.consistency,
+              isClutchSituation: quarter === 4 && gameClockSeconds <= 90 && Math.abs(p1Score - p2Score) <= 8,
               coverageRating,
+              defenderHandsRating,
               stamina: c.stamina,
               distanceToCatch: Math.hypot(c.x - activeBall.x, c.y - activeBall.y),
               fieldWidth,

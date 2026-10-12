@@ -381,7 +381,7 @@ test('Pro coverage leaves a receiver open on a non-exact call but not on the exa
   }
 });
 
-test('field is free of player badges while Pro pre-snap scouting preserves controls', () => {
+test('field stays clear of player stat banners while tapping route-edit targets', () => {
   const originalRequest = globalThis.requestAnimationFrame;
   const originalCancel = globalThis.cancelAnimationFrame;
   let nextFrame: FrameRequestCallback = () => {};
@@ -417,7 +417,7 @@ test('field is free of player badges while Pro pre-snap scouting preserves contr
       preventDefault: () => {}
     } as PointerEvent);
     assert.equal(game.phase, 'PRE_SNAP');
-    assert.match(announcements.at(-1) ?? '', /#11 Deep threat.*SPD 95 PWR 38 HANDS 61/);
+    assert.ok(!announcements.some(text => /#11 Deep threat.*SPD/.test(text)), 'Route edits do not cover the field with player stat banners');
     game.startPlay?.();
     assert.equal(game.phase, 'QB_DROP');
     canvas._text.length = 0;

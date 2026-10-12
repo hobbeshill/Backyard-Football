@@ -3,7 +3,8 @@ import test from 'node:test';
 import { chooseProDefensiveCall, getCoverageMistakeChance, getCpuCounterReason, getSuccessfulPlayCounter, isCpuPressureRecognized, scoreRunBlockTarget, shouldCpuReleasePass, shouldCpuScramble } from './ai';
 import { alignDefenderAcrossFromReceiver, alignDefenderAcrossFromRunningBack, alignDefenderToZone, alignDefenders, chooseCpuDefensiveAssignments, constrainDefendersToFieldSide, getBlitzAlignmentY, getBracketCoverageTarget, getDefensiveLineAlignmentY, matchCpuDefendersToReceivers, separateDefenderAlignments } from './defense';
 import { getCarrierFumbleChance } from './fumbles';
-import { calculateYardsToGo, canApplyProMatchupAdjustment, canDefenderDeflectPass, canTackleQuarterback, findTappedPassReceiver, getCatchCompletionChance, getDefenderPassReachHeight, getDriveStartY, getSnapBallPosition, getPassArcHeight, getPassArcMaxHeight, getPassArcScreenPoint, getPassFlightFrames, getPassLeadTarget, getRoutePassLeadTarget, isSafety, resolveCatchContestOutcome, resolvePlayResult } from './rules';
+import { TEAMS } from './teams';
+import { calculateYardsToGo, canApplyProMatchupAdjustment, canDefenderDeflectPass, canTackleQuarterback, evaluateQbThrowAccuracy, findTappedPassReceiver, getCatchCompletionChance, getDefenderPassReachHeight, getDriveStartY, getPreSnapPenaltyChances, getSnapBallPosition, getPassArcHeight, getPassArcMaxHeight, getPassArcScreenPoint, getPassFlightFrames, getPassLeadTarget, getRoutePassLeadTarget, isSafety, resolveCatchContestOutcome, resolvePlayResult } from './rules';
 import { canEngagePassBlock, checkOffensiveLineWall, clampPlayerToFieldY, engageRunBlocker, GAME_SPEED_SCALE, getBallCarrierRunSpeed, getFatigueSpeedMultiplier, getPassBlockBaseHoldFrames, getPassBlockHoldFrames, getRunBlockEffect, getRunDirectionSpeedFactor, getRunPursuitMovement, getUserDefenderSpeed, isRusherActivelyBlocked, moveToward, resolveCollisions, shouldHoldPassBlock, updatePlayerStamina, updateReceiverTargetStamina, updateRunningBackStamina, updateRouteMovement, USER_CONTROL_SPEED_MULTIPLIER } from './movement';
 import type { Entity } from './types';
 
@@ -32,6 +33,16 @@ test('double coverage, ball-side positioning, receiver hands and fatigue affect 
   assert.ok(getCatchCompletionChance({ ...contest, isTargetSpammed: true }) < baseline);
   assert.ok(getCatchCompletionChance({ ...contest, isRbFlatSpammed: true }) < getCatchCompletionChance({ ...contest, isTargetSpammed: true }));
   assert.equal(getCatchCompletionChance({ ...contest, effectiveDefDist: 80, effectiveBallDist: 80, stamina: 0 }), 0.905);
+});
+
+test('receiver consistency matters late and ball-hawk hands create more interceptions', () => {
+  const catchWindow = { effectiveDefDist: 80, effectiveBallDist: 80, isTargetSpammed: false, isRbFlatSpammed: false, isRb: false };
+  assert.ok(getCatchCompletionChance({ ...catchWindow, receiverConsistency: 54, isClutchSituation: true }) <
+    getCatchCompletionChance({ ...catchWindow, receiverConsistency: 90, isClutchSituation: true }));
+
+  const contested = { effectiveDefDist: 20, effectiveBallDist: 20, isTargetSpammed: false, isRbFlatSpammed: false, isRb: false, ballSideDefender: true, roll: 0.195 };
+  assert.equal(resolveCatchContestOutcome({ ...contested, defenderHandsRating: TEAMS.MISSOURI.roster['def-6'].ratings.hands }).type, 'INTERCEPTED');
+  assert.notEqual(resolveCatchContestOutcome({ ...contested, defenderHandsRating: TEAMS.VANDERBILT.roster['def-6'].ratings.hands }).type, 'INTERCEPTED');
 });
 
 test('Pro defensive AI uses heavy fronts situationally and alternates away from repeated pressure', () => {
@@ -222,6 +233,15 @@ test('an exhausted WR has increased hit-triggered fumble risk, unlike other carr
   assert.ok(Math.abs(getCarrierFumbleChance({ ...contact, isFatiguedReceiver: true, stamina: 0 }) - 0.23) < 0.000001);
   assert.equal(getCarrierFumbleChance({ ...contact, isFatiguedReceiver: false, stamina: 0 }), 0.08);
   assert.ok(Math.abs(getCarrierFumbleChance({ isBlitzer: true, isBigHit: true, isFatiguedReceiver: true, stamina: 0 }) - 0.32) < 0.000001);
+  assert.ok(getCarrierFumbleChance({ ...contact, isFatiguedReceiver: false, stamina: 100, turnoverSecurity: 1.2 }) <
+    getCarrierFumbleChance({ ...contact, isFatiguedReceiver: false, stamina: 100, turnoverSecurity: 0.8 }));
+});
+
+test('disciplined teams limit pre-snap penalties and loud home fields pressure road offenses', () => {
+  const disciplined = getPreSnapPenaltyChances(95, 95, 1, false);
+  const penaltyProne = getPreSnapPenaltyChances(40, 45, 1.24, true);
+  assert.ok(penaltyProne.falseStart > disciplined.falseStart * 4);
+  assert.ok(penaltyProne.offside > disciplined.offside);
 });
 
 test('deep blitzers must run to a blocker before pass protection can engage them', () => {
@@ -2180,16 +2200,19 @@ test('2 RB spies counters RUN play: audibles out of run into passing concept and
 
 test('team identities amplify both strengths and weaknesses while preserving neutral ratings', async () => {
   const { TEAMS } = await import('./teams');
-  assert.equal(TEAMS.FLORIDA.ratings.wrSpeed, 1.42);
-  assert.equal(TEAMS.FLORIDA.ratings.passProtection, 0.825);
-  assert.equal(TEAMS.FLORIDA.ratings.runPower, 0.79);
-  assert.equal(TEAMS.ARKANSAS.ratings.runPower, 1.525);
-  assert.equal(TEAMS.KENTUCKY.ratings.wrSpeed, 0.825);
-  assert.equal(TEAMS.GEORGIA.ratings.passRush, 1.525);
-  assert.equal(TEAMS.GEORGIA.ratings.mistakeChance, 0.51);
+  assert.equal(TEAMS.FLORIDA.ratings.wrSpeed, 1.385);
+  assert.equal(TEAMS.FLORIDA.ratings.passProtection, 0.72);
+  assert.equal(TEAMS.FLORIDA.ratings.runPower, 1.315);
+  assert.equal(TEAMS.ARKANSAS.ratings.runPower, 1.7);
+  assert.equal(TEAMS.KENTUCKY.ratings.wrSpeed, 0.685);
+  assert.equal(TEAMS.GEORGIA.ratings.passRush, 1.595);
+  assert.equal(TEAMS.GEORGIA.ratings.mistakeChance, 0.5);
   assert.equal(TEAMS.AUBURN.ratings.mistakeChance, 1.315);
-  assert.equal(TEAMS.VANDERBILT.ratings.passRush, 0.79);
-  assert.equal(TEAMS.LSU.ratings.passProtection, 1);
+  assert.equal(TEAMS.VANDERBILT.ratings.passRush, 0.58);
+  assert.equal(TEAMS.LSU.ratings.passProtection, 0.93);
+  assert.equal(TEAMS.FLORIDA.ratings.penaltyDiscipline, 0.75);
+  assert.equal(TEAMS.AUBURN.ratings.homeField, 1.23);
+  assert.equal(TEAMS.VANDERBILT.ratings.depth, 0.74);
   for (const team of Object.values(TEAMS)) {
     for (const rating of Object.values(team.ratings)) {
       assert.ok(rating >= 0.5 && rating <= 1.7);
@@ -2372,6 +2395,14 @@ test('Pro QB accuracy mistakes respond to protection ratings', async () => {
 
   assert.equal(protectedThrow.isOffTarget, false);
   assert.equal(vulnerableThrow.isOffTarget, true);
+});
+
+test('QB consistency, chemistry, and red-zone efficiency improve throw accuracy', () => {
+  const base = { throwDist: 100, isUnderPressure: false, isDeepShot: false, roll: 0.075 };
+  assert.equal(evaluateQbThrowAccuracy({ ...base, qbConsistency: 0.8 }, -1).isOffTarget, true);
+  assert.equal(evaluateQbThrowAccuracy({ ...base, qbConsistency: 1.2 }, -1).isOffTarget, false);
+  assert.equal(evaluateQbThrowAccuracy({ ...base, isRedZone: true, redZoneEfficiency: 0.8 }, -1).isOffTarget, true);
+  assert.equal(evaluateQbThrowAccuracy({ ...base, isRedZone: true, redZoneEfficiency: 1.2 }, -1).isOffTarget, false);
 });
 
 test('CPU aim uncertainty increases with throw distance and pressure', async () => {

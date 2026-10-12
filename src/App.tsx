@@ -1868,8 +1868,24 @@ export default function App() {
                 aria-labelledby="team-confirmation-title"
                 className="max-h-[85vh] w-full max-w-md overflow-y-auto rounded-lg border border-[#d5ded7] bg-[#f2f5f2] p-5 text-left text-[#1b3026] shadow-2xl sm:p-6"
               >
-                <h2 id="team-confirmation-title" className="text-xl font-extrabold">{pendingTeam.name}</h2>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h2 id="team-confirmation-title" className="text-xl font-extrabold">{pendingTeam.name}</h2>
+                    <p className="mt-1 text-xs text-[#405047]">Roster-based team rating across all 16 players</p>
+                  </div>
+                  <span className="rounded border border-[#246344]/30 bg-[#e2eee4] px-2 py-1 text-sm font-black tabular-nums text-[#246344]">OVR {pendingTeam.overallRating}</span>
+                </div>
                 <div className="mt-5">
+                  <dl className="grid grid-cols-4 gap-2 rounded border border-[#cbd6cd] bg-white p-2 text-center text-[10px] text-[#405047]">
+                    {([
+                      ['QB', Math.round(pendingTeam.ratings.qbConsistency * 70)],
+                      ['DISC', Math.round(pendingTeam.ratings.penaltyDiscipline * 70)],
+                      ['DEPTH', Math.round(pendingTeam.ratings.depth * 70)],
+                      ['TEMPO', Math.round(pendingTeam.ratings.tempo * 70)]
+                    ] as const).map(([label, rating]) => (
+                      <div key={label}><dt>{label}</dt><dd className="text-sm font-bold text-[#1b3026]">{rating}</dd></div>
+                    ))}
+                  </dl>
                   <h3 className="text-xs font-bold uppercase text-[#246344]">Strengths</h3>
                   <p className="mt-1 text-sm leading-5 text-[#405047]">{pendingTeam.strengths}</p>
                   <h3 className="mt-4 text-xs font-bold uppercase text-[#a34d32]">Weaknesses</h3>
@@ -1897,6 +1913,7 @@ export default function App() {
                             ['Hands', player.ratings.hands], ['Cover', player.ratings.coverage],
                             ['Tackle', player.ratings.tackling], ['Block', player.ratings.blocking],
                             ['Rush', player.ratings.rush], ['Stamina', player.ratings.endurance]
+                            , ['Consistency', player.ratings.consistency], ['Discipline', player.ratings.discipline]
                           ] as const).map(([label, rating]) => (
                             <div key={label}><dt>{label}</dt><dd className="text-sm font-bold text-[#1b3026]">{rating}</dd></div>
                           ))}

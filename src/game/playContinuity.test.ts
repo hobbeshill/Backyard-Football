@@ -13,7 +13,9 @@ function createGame(context: TestContext) {
   context.mock.method(globalThis, 'cancelAnimationFrame', () => {});
   const drawing = new Proxy({
     measureText: () => ({ width: 40 }),
-    canvas: { width: 450, height: 340 }
+    canvas: { width: 450, height: 340 },
+    createLinearGradient: () => ({ addColorStop() {} }),
+    createRadialGradient: () => ({ addColorStop() {} })
   }, { get: (target, key) => Reflect.get(target, key) ?? (() => {}) });
   const canvas = {
     width: 450, height: 340,
@@ -76,6 +78,27 @@ test('all modes preserve fractional dead-ball spots through the next formation a
       }
     }
   }
+});
+
+test('snap near the goal line retains the clamped pre-snap camera position', context => {
+  const { game } = createGame(context);
+  game.setPossessionForTest?.('P1');
+  game.resetDrill();
+  const snapshot = game.getNetworkSnapshot!();
+  snapshot.lineOfScrimmageY = 130;
+  snapshot.firstDownMarkerY = 30;
+  snapshot.attackDirection = -1;
+  snapshot.currentDown = 1;
+  snapshot.yardsToGo = 10;
+  game.applyNetworkSnapshot!(snapshot);
+  game.resetDrill();
+
+  const beforeSnap = game.getNetworkSnapshot!();
+  game.startPlay?.();
+  const afterSnap = game.getNetworkSnapshot!();
+  assert.equal(afterSnap.phase, 'QB_DROP');
+  assert.equal(afterSnap.cameraY, beforeSnap.cameraY);
+  assert.equal(afterSnap.playSnapCameraY, beforeSnap.cameraY);
 });
 
 test('incompletions keep the previous spot, record zero yards and cannot score at the target', context => {
@@ -202,7 +225,7 @@ test('defensive fumble recoveries announce turnovers and preserve the recovery s
 });
 
 test('live interceptions and end-zone picks announce the new offense immediately in both directions', context => {
-  const { game, announcements } = createGame(context);
+  const { game, announcements, advance } = createGame(context);
   game.setOnlineGuestControl?.(true);
   for (const side of ['P1', 'P2'] as const) {
     for (const isTouchback of [false, true]) {
@@ -231,13 +254,23 @@ test('live interceptions and end-zone picks announce the new offense immediately
       const turnover = announcements.find(entry => entry.meta?.category === 'TURNOVER');
       assert.ok(turnover);
       assert.match(turnover.text, /INTERCEPTION.*TURNOVER/);
+      assert.match(turnover.text, new RegExp(`${TEAMS[newOffense === 'P1' ? 'ALABAMA' : 'GEORGIA'].nickname.toUpperCase()} BALL`));
       assert.equal(turnover.meta?.possessionTeam, newOffense);
       assert.ok((turnover.meta?.durationMs ?? 0) >= 5000);
       if (isTouchback) {
         game.resetDrill();
         assert.equal(game.getNetworkSnapshot!().lineOfScrimmageY, side === 'P1' ? 300 : 900);
       } else {
-        const endingY = pickY + 32.125 * game.attackDirection;
+        const returnStart = game.getNetworkSnapshot!();
+        const returnerY = returnStart.entities[defenderId].data.y;
+        for (let frame = 0; frame < 12; frame++) advance();
+        const returnProgress = game.getNetworkSnapshot!();
+        assert.equal(returnProgress.phase, 'RUNNING', 'The interception stays live until the carrier is tackled');
+        assert.equal(returnProgress.activeEntityId, defenderId);
+        assert.ok((returnProgress.entities[defenderId].data.y - returnerY) * returnProgress.attackDirection > 2,
+          `The returner advances downfield (${returnerY} -> ${returnProgress.entities[defenderId].data.y}, vy ${returnProgress.entities[defenderId].data.vy}, clock ${returnProgress.playClock}, dir ${returnProgress.attackDirection})`);
+
+        const endingY = returnProgress.entities[defenderId].data.y + 32.125 * game.attackDirection;
         game.triggerPlayEnd?.(endingY, 'TACKLE');
         game.resetDrill();
         assert.equal(game.getNetworkSnapshot!().lineOfScrimmageY, endingY);

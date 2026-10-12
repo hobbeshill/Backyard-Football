@@ -30,6 +30,8 @@ export function chooseTeamOffensivePlay(
       const rating = isOutsideRun ? team.roster.rb.ratings.speed : team.roster.rb.ratings.power;
       weight *= rating / 70;
     }
+    if (definition.routeType === 'SHORT') weight *= Math.max(0.25, 1 + (team.ratings.tempo - 1) * 2.5);
+    if (definition.routeType === 'MEDIUM') weight *= Math.max(0.35, 1 + (team.ratings.tempo - 1) * 1.5);
     if (isDeep) weight *= team.roster['wr-0'].ratings.speed / 80;
     if (situation) {
       const needsDistance = situation.down >= 3 && situation.yardsToGo > 7;

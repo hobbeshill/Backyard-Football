@@ -247,6 +247,9 @@ export interface CatchContestParams {
   isProMode?: boolean;
   handsRating?: number;
   coverageRating?: number;
+  receiverConsistency?: number;
+  isClutchSituation?: boolean;
+  defenderHandsRating?: number;
 }
 
 export interface CatchContestResult {
@@ -267,11 +270,12 @@ export function getCatchCompletionChance(params: CatchContestParams): number {
   const positionPenalty = params.ballSideDefender ? 0.08 : 0;
   const reachPenalty = Math.max(0, (params.distanceToCatch ?? 0) - 12) * 0.008;
   const playerMatchup = ((params.handsRating ?? 70) - (params.coverageRating ?? 70)) * 0.003 * (1 - coverageCurve);
+  const consistencyPenalty = Math.max(0, 70 - (params.receiverConsistency ?? 70)) * 0.003 * (params.isClutchSituation ? 1 : 0.2);
   const proBonus = params.isProMode ? 0.04 : 0;
   const targetSpamPenalty = params.isRbFlatSpammed ? 0.12 : params.isTargetSpammed ? 0.06 : 0;
 
   return Math.max(0.10, Math.min(0.94,
-    0.30 + 0.605 * coverageCurve + playerMatchup +
+    0.30 + 0.605 * coverageCurve + playerMatchup - consistencyPenalty +
     (handsBonus - fatiguePenalty - doubleCoveragePenalty - positionPenalty) * (1 - coverageCurve) -
     reachPenalty + proBonus - targetSpamPenalty
   ));
@@ -294,7 +298,9 @@ export function resolveCatchContestOutcome(params: CatchContestParams): CatchCon
   const contested = separation < 45;
   const completionChance = getCatchCompletionChance(params);
   if (roll < 1 - completionChance) {
-    const interceptionChance = contested ? (params.ballSideDefender ? 0.18 : 0.08) : 0;
+    const interceptionChance = contested
+      ? Math.min(0.30, (params.ballSideDefender ? 0.18 : 0.08) * (0.65 + (params.defenderHandsRating ?? 70) / 200))
+      : 0;
     if (roll < interceptionChance) {
       return { type: 'INTERCEPTED', caught: false, announcement: 'INTERCEPTED AT THE CATCH POINT!', color: '#ff3333', resultType: 'INT' };
     }
@@ -321,6 +327,10 @@ export interface QbAccuracyInput {
   isCpuThrow?: boolean;
   isMoving?: boolean;
   passProtectionRating?: number;
+  qbConsistency?: number;
+  chemistry?: number;
+  redZoneEfficiency?: number;
+  isRedZone?: boolean;
   roll?: number;
   isProMode?: boolean;
 }
@@ -336,6 +346,9 @@ export interface QbAccuracyResult {
 export function evaluateQbThrowAccuracy(input: QbAccuracyInput, attackDirection: number): QbAccuracyResult {
   const roll = input.roll !== undefined ? input.roll : Math.random();
   const proMod = input.passProtectionRating ? (2 - input.passProtectionRating) : 1.0;
+  const consistencyMod = Math.max(0.75, Math.min(1.25, 2 - (input.qbConsistency ?? 1)));
+  const chemistryMod = Math.max(0.90, Math.min(1.10, 2 - (input.chemistry ?? 1)));
+  const redZoneMod = input.isRedZone ? Math.max(0.85, Math.min(1.15, 2 - (input.redZoneEfficiency ?? 1))) : 1;
 
   // Real-life NFL QB football mistakes:
   // - If QB is hit as he throws:
@@ -354,7 +367,7 @@ export function evaluateQbThrowAccuracy(input: QbAccuracyInput, attackDirection:
   }
 
   // Baseline inaccuracy: clean short/medium passes (~8%), deep balls (~16%), under heavy rusher pressure (~28%)
-  let baseRate = Math.min(0.45, ((input.isUnderPressure ? 0.28 : input.isDeepShot ? 0.16 : 0.08) + (input.isMoving ? 0.07 : 0)) * proMod);
+  let baseRate = Math.min(0.45, ((input.isUnderPressure ? 0.28 : input.isDeepShot ? 0.16 : 0.08) + (input.isMoving ? 0.07 : 0)) * proMod * consistencyMod * chemistryMod * redZoneMod);
   if (input.isProMode) {
     baseRate = baseRate * 0.70;
   }
@@ -390,6 +403,26 @@ export function evaluateQbThrowAccuracy(input: QbAccuracyInput, attackDirection:
       announcement: 'OFF-TARGET THROW! ❌ Thrown behind receiver!'
     };
   }
+}
+
+export function getPreSnapPenaltyChances(
+  offenseDiscipline: number,
+  defenseDiscipline: number,
+  homeFieldAdvantage: number,
+  offenseIsAway: boolean
+): { falseStart: number; offside: number } {
+  const isPenaltyProneOffense = offenseDiscipline < 48;
+  const isPenaltyProneDefense = defenseDiscipline < 48;
+  const falseStart = (isPenaltyProneOffense
+    ? 0.002 + Math.max(0, 85 - offenseDiscipline) * 0.00012
+    : 0) + (offenseIsAway && homeFieldAdvantage > 1.12 ? (homeFieldAdvantage - 1) * 0.018 : 0);
+  const offside = isPenaltyProneDefense
+    ? 0.0015 + Math.max(0, 80 - defenseDiscipline) * 0.00008
+    : 0;
+  return {
+    falseStart: Math.max(0, Math.min(0.025, falseStart)),
+    offside: Math.max(0, Math.min(0.015, offside))
+  };
 }
 
 export function getCpuThrowAimVariance(throwDist: number, isUnderPressure: boolean): number {

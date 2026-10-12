@@ -13,6 +13,8 @@ export interface PlayerRatings {
   blocking: number;
   rush: number;
   endurance: number;
+  consistency: number;
+  discipline: number;
 }
 
 export interface PlayerProfile {
@@ -38,6 +40,10 @@ interface RosterTeamRatings {
   dbClosingSpeed: number;
   passRush: number;
   mistakeChance: number;
+  qbConsistency: number;
+  penaltyDiscipline: number;
+  chemistry: number;
+  depth: number;
 }
 
 const boundedRating = (rating: number) => Math.max(30, Math.min(95, Math.round(rating)));
@@ -47,7 +53,7 @@ function player(
 ): PlayerProfile {
   return {
     number, label, trait, archetype,
-    ratings: { speed: 65, power: 55, hands: 50, coverage: 40, tackling: 50, blocking: 45, rush: 40, endurance: 75, ...ratings }
+    ratings: { speed: 65, power: 55, hands: 50, coverage: 40, tackling: 50, blocking: 45, rush: 40, endurance: 75, consistency: 65, discipline: 70, ...ratings }
   };
 }
 
@@ -65,9 +71,12 @@ export function createTeamRoster(
   const power = (team.runPower - 1) * 26;
   const rush = (team.passRush - 1) * 30;
   const coverage = (1 - team.mistakeChance) * 25;
+  const depthEndurance = (team.depth - 1) * 38;
+  const teamDiscipline = 65 + (team.penaltyDiscipline - 1) * 100;
+  const chemistryConsistency = 65 + (team.chemistry - 1) * 80;
   const roster: TeamRoster = {
     qb: player(7, blitzTeam ? 'Mobile quarterback' : 'Pocket quarterback', blitzTeam ? 'SPD' : 'QB', 'QUARTERBACK',
-      { speed: blitzTeam ? 86 : powerTeam ? 52 : 65, power: 50, hands: 70 }),
+      { speed: blitzTeam ? 86 : powerTeam ? 52 : 65, power: 50, hands: 70, consistency: 70 + (team.qbConsistency - 1) * 100, discipline: teamDiscipline }),
     'wr-0': player(11, 'Deep threat', 'SPD', 'SPEEDSTER',
       { speed: 84 + receiverSpeed, power: 38, hands: 64, blocking: 32, endurance: 62 }),
     'wr-1': player(18, 'Slot technician', 'HANDS', 'SLOT',
@@ -101,31 +110,85 @@ export function createTeamRoster(
       { speed: 78 + defensiveSpeed, power: 74, tackling: 81, coverage: 75 + coverage, hands: 70 })
   };
 
-  // Signature players distinguish teams even within the same scheme.
-  const signatures: Record<string, [RosterSlot, Partial<PlayerRatings>, RosterSlot, Partial<PlayerRatings>]> = {
-    ALABAMA: ['wr-2', { speed: 78, hands: 94 }, 'def-0', { rush: 94 }],
-    ARKANSAS: ['rb', { power: 95, speed: 55 }, 'def-1', { tackling: 94, coverage: 38 }],
-    AUBURN: ['qb', { speed: 92 }, 'def-0', { speed: 84, rush: 92 }],
-    FLORIDA: ['wr-0', { speed: 95, hands: 61 }, 'def-4', { speed: 94, tackling: 45 }],
-    GEORGIA: ['line-0', { blocking: 95 }, 'def-5', { tackling: 95, coverage: 72 }],
-    KENTUCKY: ['rb', { power: 91, endurance: 95 }, 'def-1', { tackling: 93 }],
-    LSU: ['wr-0', { speed: 94, hands: 76 }, 'def-6', { hands: 92, tackling: 58 }],
-    MISSISSIPPI_STATE: ['wr-1', { hands: 94 }, 'def-2', { coverage: 82 }],
-    MISSOURI: ['rb', { power: 86, speed: 76 }, 'def-1', { tackling: 92 }],
-    OKLAHOMA: ['wr-1', { speed: 87, hands: 89 }, 'def-0', { rush: 93 }],
-    OLE_MISS: ['rb', { speed: 95, power: 55 }, 'def-4', { speed: 93, coverage: 57 }],
-    SOUTH_CAROLINA: ['center', { hands: 89 }, 'def-0', { rush: 95, speed: 82 }],
-    TENNESSEE: ['wr-0', { speed: 95, endurance: 83 }, 'def-4', { speed: 93, coverage: 60 }],
-    TEXAS: ['center', { hands: 92, blocking: 89 }, 'def-3', { coverage: 93 }],
-    TEXAS_AM: ['rb', { power: 94, blocking: 86 }, 'def-0', { power: 93, rush: 90 }],
-    VANDERBILT: ['wr-2', { hands: 95, speed: 62 }, 'def-6', { coverage: 95, speed: 78 }]
+  // Distinct starters and depth profiles make each playbook's identity visible on the field.
+  const signatures: Record<string, Partial<Record<RosterSlot, Partial<PlayerRatings>>>> = {
+    ALABAMA: {
+      qb: { consistency: 92, discipline: 91 }, 'wr-0': { speed: 94, hands: 82 }, 'wr-1': { speed: 84, hands: 92 }, 'wr-2': { speed: 78, hands: 94 },
+      'line-0': { blocking: 73 }, 'line-1': { blocking: 75 }, 'def-0': { rush: 94 }, 'def-3': { coverage: 94, discipline: 92 }, 'def-6': { coverage: 93, hands: 90 }
+    },
+    ARKANSAS: {
+      qb: { consistency: 60 }, rb: { power: 96, speed: 55 }, 'line-0': { blocking: 84 }, 'line-1': { blocking: 82 },
+      'def-0': { rush: 95, power: 86 }, 'def-1': { tackling: 94, coverage: 38 }, 'def-3': { coverage: 57 }, 'def-4': { coverage: 55 }, 'def-6': { coverage: 62 }
+    },
+    AUBURN: {
+      qb: { speed: 92, consistency: 54 }, 'wr-0': { speed: 89 }, rb: { speed: 85 }, 'def-0': { speed: 84, rush: 93 },
+      'def-1': { power: 62, endurance: 58 }, 'def-5': { power: 61, endurance: 56 }
+    },
+    FLORIDA: {
+      qb: { consistency: 62 }, rb: { speed: 86, power: 80, endurance: 92 }, 'wr-0': { speed: 95, hands: 61, consistency: 54 },
+      'wr-1': { speed: 87, hands: 74, consistency: 62 }, 'def-1': { tackling: 93, power: 89 }, 'def-5': { tackling: 92, power: 90 }, 'def-4': { speed: 94, tackling: 45 }
+    },
+    GEORGIA: {
+      qb: { consistency: 86, discipline: 90 }, 'line-0': { blocking: 96 }, 'line-1': { blocking: 95 }, center: { blocking: 92 },
+      'def-0': { rush: 94, power: 91 }, 'def-1': { tackling: 94, coverage: 79 }, 'def-3': { coverage: 92 }, 'def-5': { tackling: 95, coverage: 82 }, 'def-6': { coverage: 91 }
+    },
+    KENTUCKY: {
+      qb: { consistency: 73, discipline: 91 }, rb: { power: 92, endurance: 96, discipline: 92 }, 'wr-0': { speed: 72 },
+      'wr-1': { hands: 88, discipline: 90 }, 'def-1': { tackling: 94, discipline: 93 }, 'def-3': { coverage: 88, discipline: 92 }, 'def-6': { coverage: 89, discipline: 94 }
+    },
+    LSU: {
+      qb: { consistency: 77 }, 'wr-0': { speed: 96, hands: 78 }, 'wr-1': { speed: 90, hands: 91 }, 'wr-2': { speed: 86, hands: 89 },
+      'def-3': { speed: 89, coverage: 76, discipline: 56 }, 'def-4': { speed: 91, coverage: 72, discipline: 54 }, 'def-6': { hands: 94, coverage: 87, discipline: 65 }
+    },
+    MISSISSIPPI_STATE: {
+      qb: { consistency: 78, hands: 84 }, 'wr-0': { speed: 90 }, 'wr-1': { hands: 96, speed: 84 }, 'wr-2': { hands: 91 },
+      'def-0': { power: 59, endurance: 55, rush: 61 }, 'def-1': { power: 63, endurance: 57 }, 'def-5': { power: 61, endurance: 55 }
+    },
+    MISSOURI: {
+      qb: { consistency: 83, discipline: 88 }, 'wr-1': { hands: 94, consistency: 88 }, 'wr-2': { hands: 95, consistency: 87 },
+      'def-3': { hands: 91, discipline: 90 }, 'def-6': { hands: 95, coverage: 90, discipline: 92 }, 'def-7': { hands: 88, discipline: 91 },
+      'wr-0': { speed: 78 }, 'def-4': { speed: 75 }
+    },
+    OKLAHOMA: {
+      qb: { speed: 88, consistency: 81 }, 'wr-1': { speed: 89, hands: 91 }, 'def-0': { rush: 95, speed: 82 }, 'def-1': { rush: 86 },
+      'line-0': { blocking: 68 }, 'line-1': { blocking: 66 }, center: { blocking: 70, power: 72 }
+    },
+    OLE_MISS: {
+      qb: { consistency: 81 }, rb: { speed: 96, power: 55 }, 'wr-0': { speed: 95 }, 'wr-1': { speed: 92 }, 'wr-2': { speed: 89 },
+      'def-3': { speed: 85, coverage: 60 }, 'def-4': { speed: 93, coverage: 57 }, 'def-6': { coverage: 66, discipline: 58 }
+    },
+    SOUTH_CAROLINA: {
+      qb: { speed: 90, consistency: 73 }, center: { hands: 90 }, 'def-0': { rush: 96, speed: 84 }, 'def-1': { rush: 87 },
+      'line-0': { blocking: 66 }, 'line-1': { blocking: 64 }, 'def-3': { coverage: 79 }
+    },
+    TENNESSEE: {
+      qb: { consistency: 81 }, 'wr-0': { speed: 96, endurance: 86 }, 'wr-1': { speed: 90 }, 'wr-2': { speed: 87 },
+      'def-2': { coverage: 58 }, 'def-3': { coverage: 67 }, 'def-4': { speed: 93, coverage: 60 }
+    },
+    TEXAS: {
+      qb: { consistency: 96, hands: 88 }, 'wr-0': { speed: 93, hands: 87 }, 'wr-1': { speed: 91, hands: 94 }, 'wr-2': { speed: 88, hands: 92 },
+      'def-0': { rush: 93 }, 'def-3': { coverage: 94 }, 'line-0': { blocking: 91 }
+    },
+    TEXAS_AM: {
+      qb: { consistency: 62 }, rb: { power: 95, blocking: 87 }, 'def-0': { power: 95, rush: 93, endurance: 90 },
+      'def-1': { power: 94, tackling: 92, endurance: 92 }, 'def-5': { power: 93, tackling: 90, endurance: 91 }, 'def-3': { speed: 70 }
+    },
+    VANDERBILT: {
+      qb: { consistency: 82, discipline: 95 }, 'wr-2': { hands: 96, speed: 62, consistency: 88 },
+      'def-6': { coverage: 96, speed: 78, discipline: 94 }, 'def-3': { coverage: 92, discipline: 93 },
+      'wr-0': { speed: 67 }, 'def-0': { speed: 55, rush: 62 }, 'def-1': { endurance: 54 }, 'line-0': { endurance: 57 }
+    }
   };
   const signature = signatures[id];
   if (signature) {
-    Object.assign(roster[signature[0]].ratings, signature[1]);
-    Object.assign(roster[signature[2]].ratings, signature[3]);
+    Object.entries(signature).forEach(([slot, ratings]) => {
+      Object.assign(roster[slot as RosterSlot].ratings, ratings);
+    });
   }
   for (const profile of Object.values(roster)) {
+    profile.ratings.endurance += depthEndurance;
+    profile.ratings.discipline = profile.ratings.discipline === 70 ? teamDiscipline : profile.ratings.discipline;
+    profile.ratings.consistency = profile.ratings.consistency === 65 ? chemistryConsistency : profile.ratings.consistency;
     for (const key of Object.keys(profile.ratings) as (keyof PlayerRatings)[]) {
       profile.ratings[key] = boundedRating(profile.ratings[key]);
     }
@@ -148,7 +211,8 @@ export function getPlayerSummary(profile: PlayerProfile): string {
   const r = profile.ratings;
   const specialty = profile.trait === 'BLK' ? `BLK ${r.blocking}` : profile.trait === 'RUSH' ? `RUSH ${r.rush}` :
     profile.trait === 'HIT' ? `HIT ${r.tackling}` : profile.trait === 'COV' ? `COV ${r.coverage}` : `HANDS ${r.hands}`;
-  return `#${profile.number} ${profile.label} | SPD ${r.speed} PWR ${r.power} ${specialty}`;
+  const qbConsistency = profile.archetype === 'QUARTERBACK' ? ` QB ${r.consistency}` : '';
+  return `#${profile.number} ${profile.label} | SPD ${r.speed} PWR ${r.power} ${specialty}${qbConsistency} DISC ${r.discipline}`;
 }
 
 export const PLAYER_TRAIT_COLORS: Record<PlayerTrait, string> = {
