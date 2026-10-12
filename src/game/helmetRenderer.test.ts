@@ -188,6 +188,17 @@ test('3/4 view helmet sprites render cleanly for all teams with balanced canvas 
   }
 });
 
+test('3/4 helmet profiles reverse when the player changes horizontal direction', () => {
+  const design = getHelmetDesign(TEAMS.AUBURN);
+  const movingRight = createRecordingContext();
+  drawHelmetSprite(movingRight.ctx, { x: 0, y: 0, radius: 10, vx: 2, vy: 0 }, design, -1, 1, 'THREE_QUARTER');
+  const movingLeft = createRecordingContext();
+  drawHelmetSprite(movingLeft.ctx, { x: 0, y: 0, radius: 10, vx: -2, vy: 0 }, design, -1, 1, 'THREE_QUARTER');
+
+  assert.ok(movingRight.movePoints[0][0] < 0, 'Rightward movement points the facemask right');
+  assert.ok(movingLeft.movePoints[0][0] > 0, 'Leftward movement points the facemask left');
+});
+
 test('rear 3/4 helmet uses a custom shell silhouette', () => {
   const { ctx, ellipses } = createRecordingContext();
   drawHelmetSprite(ctx, { x: 0, y: 0, radius: 10 }, getHelmetDesign(TEAMS.AUBURN), -1, 1, 'THREE_QUARTER');
@@ -278,6 +289,19 @@ test('3/4 profile facing stays stable through small end-of-play velocity changes
     drawHelmetSprite(ctx, entity, design, -1, 1, 'THREE_QUARTER');
     assert.ok(scales.some(([x, y]) => x === 1.22 && y === 1.28), 'Small velocity changes do not switch out of profile');
   }
+});
+
+test('screen-down movement turns a rear-facing helmet to the front at low speed', () => {
+  const entity = { x: 0, y: 0, radius: 10, vx: 0, vy: -2 };
+  const design = getHelmetDesign(TEAMS.AUBURN);
+  const rear = createRecordingContext();
+  drawHelmetSprite(rear.ctx, entity, design, 1, 1, 'THREE_QUARTER');
+  assert.equal(rear.text.length, 0);
+
+  entity.vy = 0.5;
+  const front = createRecordingContext();
+  drawHelmetSprite(front.ctx, entity, design, 1, 1, 'THREE_QUARTER');
+  assert.equal(front.text.length, 2, 'Downward movement should show the helmet front');
 });
 
 test('helmet decal sheet indexes match its four-by-four team order', () => {

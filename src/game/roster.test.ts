@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { chooseProDefensiveCall, chooseTeamOffensivePlay } from './ai';
 import { getPursuitTarget, getRunBlockEffect, getPassBlockHoldFrames, moveToward, updateRouteMovement } from './movement';
-import { applyPlayerProfile, getPlayerSpeedMultiplier, getPlayerSummary } from './roster';
+import { applyPlayerProfile, getFastestRosterSlot, getPlayerSpeedMultiplier, getPlayerSummary } from './roster';
 import { calculateBrokenTackleChance, getCatchCompletionChance, getContactGainYards } from './rules';
 import { TEAMS, getAllTeams } from './teams';
 import type { Entity } from './types';
@@ -22,6 +22,14 @@ test('all teams have unique, bounded rosters and persistent jersey identities', 
     rosters.add(JSON.stringify(team.roster));
   }
   assert.equal(rosters.size, getAllTeams().length);
+});
+
+test('returner roster selection always chooses the team player with the highest speed rating', () => {
+  for (const team of getAllTeams()) {
+    const fastestSlot = getFastestRosterSlot(team.roster);
+    const fastestSpeed = team.roster[fastestSlot].ratings.speed;
+    assert.ok(Object.values(team.roster).every(player => player.ratings.speed <= fastestSpeed), team.id);
+  }
 });
 
 test('power backs are stronger but at least 20 percent slower than elite space backs', () => {

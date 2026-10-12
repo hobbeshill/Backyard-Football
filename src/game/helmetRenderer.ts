@@ -72,11 +72,11 @@ function getThreeQuarterFacing(
   if (previous?.forwardDirection === forwardDirection) {
     profileDirection = previous.profileDirection;
     facingAway = previous.facingAway;
-    if (speed > 0.65) {
-      if (Math.abs(velocityX) > Math.abs(velocityY) * 1.15 && Math.abs(velocityX) > 0.75) {
+    if (speed > 0.4) {
+      if (Math.abs(velocityX) > Math.abs(velocityY) * 1.15 && Math.abs(velocityX) > 0.3) {
         profileDirection = Math.sign(velocityX);
         facingAway = false;
-      } else if (Math.abs(velocityY) > Math.abs(velocityX) * 1.15 && Math.abs(velocityY) > 0.75) {
+      } else if (Math.abs(velocityY) > Math.abs(velocityX) * 1.15 && Math.abs(velocityY) > 0.3) {
         profileDirection = 0;
         facingAway = velocityY < 0;
       }

@@ -6,13 +6,13 @@ import { alignDefenderAcrossFromReceiver, alignDefenderAcrossFromRunningBack, al
 import { chooseProDefensiveCall, chooseTeamOffensivePlay, evaluateCpuOffensiveAudibles, evaluateCpuBallCarrierMoves, getCoverageMistakeChance, getSuccessfulPlayCounter, isCpuPressureRecognized, shouldCpuGoForItOnFourthDown, shouldCpuReleasePass, shouldCpuScramble, scoreRunBlockTarget } from './ai';
 import { createFumbleBall, getCarrierFumbleChance } from './fumbles';
 import { canEngagePassBlock, checkOffensiveLineWall, clampPlayerToFieldY, createSimulationClock, distToSegment, GAME_SPEED_SCALE, getBallCarrierRunSpeed, getFatigueSpeedMultiplier, getPassBlockBaseHoldFrames, getPassBlockHoldFrames, getDirectionalInput, getReturnPursuitSpeed, getReturnTeamBlockers, getRunLaneOptions, getUserRunnerVelocity, getRunPursuitMovement, getUserDefenderSpeed, isRusherActivelyBlocked, moveToward, resolveCollisions, shouldApplyRunBlockStun, shouldHoldPassBlock, updatePlayerStamina, updateReceiverTargetStamina, updateRunningBackStamina, updateRouteMovement, USER_CONTROL_SPEED_MULTIPLIER } from './movement';
-import { resolvePlayResult, isSafety, calculateBrokenTackleChance, calculateYardsToGo, getDriveStartY, getSnapBallPosition, getPassArcHeight, getFieldGoalBallHeight, getPassArcMaxHeight, getPassFlightFrames, findTappedPassReceiver, shouldReleaseUserPass, getPassLeadTarget, getRoutePassLeadTarget, canDefenderDeflectPass, canTackleQuarterback, resolveCatchContestOutcome, evaluateQbThrowAccuracy, getCpuThrowAimVariance, calculateKickoffFlight, calculatePuntFlight, getTouchbackYardLineY, getInterceptionTouchbackY, getKickoffLineY, getDefenderPassReachHeight, isPlayerOutOfBounds, calculateFieldGoalFlight, getFieldGoalDistanceYards, canApplyProMatchupAdjustment, GOALPOST_CENTER_X, GOALPOST_LEFT_UPRIGHT_X, GOALPOST_RIGHT_UPRIGHT_X, GOALPOST_CROSSBAR_HEIGHT_Z } from './rules';
+import { resolvePlayResult, isSafety, calculateBrokenTackleChance, calculateYardsToGo, getDriveStartY, getSnapBallPosition, getPassArcHeight, getPassArcScreenPoint, getFieldGoalBallHeight, getPassArcMaxHeight, getPassFlightFrames, findTappedPassReceiver, shouldReleaseUserPass, getPassLeadTarget, getRoutePassLeadTarget, canDefenderDeflectPass, canTackleQuarterback, resolveCatchContestOutcome, evaluateQbThrowAccuracy, getCpuThrowAimVariance, calculateKickoffFlight, calculatePuntFlight, getTouchbackYardLineY, getInterceptionTouchbackY, getKickoffLineY, getDefenderPassReachHeight, isPlayerOutOfBounds, calculateFieldGoalFlight, getFieldGoalDistanceYards, canApplyProMatchupAdjustment, GOALPOST_CENTER_X, GOALPOST_LEFT_UPRIGHT_X, GOALPOST_RIGHT_UPRIGHT_X, GOALPOST_CROSSBAR_HEIGHT_Z } from './rules';
 import { sounds } from './sound';
 import { evaluateDirtSwipeGesture, drawDirtSwipeGesture } from './chalkMenu';
 import { getHelmetDesign, type HelmetDesign } from './helmetDesigns';
 import { drawHelmetSprite } from './helmetRenderer';
 import { getTeam, TEAMS, TeamProfile } from './teams';
-import { applyPlayerProfile, getPlayerSummary, PLAYER_TRAIT_COLORS, type RosterSlot } from './roster';
+import { applyPlayerProfile, getFastestRosterSlot, getPlayerSummary, PLAYER_TRAIT_COLORS, type RosterSlot } from './roster';
 import { getPursuitTarget, getRunBlockEffect } from './movement';
 import { getContactGainYards } from './rules';
 import { getTeamDefensePlays, getTeamOffensePlays } from './teamPlaybooks';
@@ -110,6 +110,19 @@ export function getCanvasRenderScale(availableWidth: number, availableHeight: nu
   return Math.max(1, Math.min(3, layoutScale * deviceScale));
 }
 
+export function getResponsiveCanvasSize(availableWidth: number, availableHeight: number, baseWidth = 450, baseHeight = 340) {
+  const viewportRatio = availableWidth / availableHeight;
+  const logicalWidth = viewportRatio > baseWidth / baseHeight
+    ? baseHeight * viewportRatio
+    : baseWidth;
+  const scale = Math.min(availableWidth / logicalWidth, availableHeight / baseHeight);
+  return {
+    logicalWidth,
+    displayWidth: logicalWidth * scale,
+    displayHeight: baseHeight * scale
+  };
+}
+
 export function getCameraYForLineOfScrimmage(
   lineOfScrimmageY: number,
   viewHeight: number,
@@ -158,6 +171,11 @@ export function getPlayerForwardDirection(
 ): number {
   if (!playerTeam) return fallbackDirection;
   return playerTeam === activeOffense ? attackDirection : -attackDirection;
+}
+
+export function getLineOfScrimmageFacingDirection(playerY: number, lineOfScrimmageY: number, fallbackDirection: number): number {
+  const distanceToLine = lineOfScrimmageY - playerY;
+  return Math.abs(distanceToLine) > 1 ? Math.sign(distanceToLine) : fallbackDirection;
 }
 
 export function getCameraYForAction(focusY: number, viewHeight: number, pitch: number): number {
@@ -260,7 +278,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   const receiverHitPadding = touchOptimized ? 30 : 20;
 
   const fieldWidth = 340;
-  const logicalCanvasWidth = 450;
+  let logicalCanvasWidth = 450;
   const logicalCanvasHeight = 340;
   const fieldHeight = 1200;
   const endZoneHeight = 100;
@@ -1228,19 +1246,20 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
   function resizeGame() {
     if (!canvas) return;
-    const availableHeight = typeof window !== 'undefined' ? Math.max(340, window.innerHeight - 80) : 600;
-    const availableWidth = typeof window !== 'undefined' ? Math.max(320, window.innerWidth - 8) : 340;
-
-    const scale = Math.min(availableWidth / logicalCanvasWidth, availableHeight / logicalCanvasHeight);
+    const bounds = canvas.parentElement?.getBoundingClientRect();
+    const availableHeight = Math.max(240, bounds?.height || (typeof window !== 'undefined' ? window.innerHeight - 8 : 600));
+    const availableWidth = Math.max(320, bounds?.width || (typeof window !== 'undefined' ? window.innerWidth - 8 : 340));
+    const layout = getResponsiveCanvasSize(availableWidth, availableHeight, 450, logicalCanvasHeight);
+    logicalCanvasWidth = layout.logicalWidth;
     const devicePixelRatio = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
-    const renderScale = getCanvasRenderScale(availableWidth, availableHeight, devicePixelRatio);
+    const renderScale = getCanvasRenderScale(availableWidth, availableHeight, devicePixelRatio, logicalCanvasWidth, logicalCanvasHeight);
     canvas.width = Math.round(logicalCanvasWidth * renderScale);
     canvas.height = Math.round(logicalCanvasHeight * renderScale);
     ctx?.scale(renderScale, renderScale);
 
     if (canvas.style) {
-      canvas.style.width = (logicalCanvasWidth * scale) + 'px';
-      canvas.style.height = (logicalCanvasHeight * scale) + 'px';
+      canvas.style.width = layout.displayWidth + 'px';
+      canvas.style.height = layout.displayHeight + 'px';
     }
   }
 
@@ -3115,9 +3134,13 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     const receiverSlots = ['wr-0', 'wr-2'] as const;
     const linemanSlots = ['center', 'line-0', 'line-1'] as const;
     const defenderSlots = ['def-0', 'def-1', 'def-2', 'def-3', 'def-4', 'def-5', 'def-6', 'def-7'] as const;
-    const returnBlockerSlots = ['wr-1', 'rb', 'center', 'line-0', 'line-1', 'def-1', 'def-5'] as const;
+    const returnerEntity = defenders.find(entity => entity.isReturner);
+    const returnTeam = returnerEntity?.team === 'P1' ? p1Team : p2Team;
+    const returnerRosterSlot = getFastestRosterSlot(returnTeam.roster);
+    const returnBlockerSlots = (Object.keys(returnTeam.roster) as RosterSlot[])
+      .filter(slot => slot !== returnerRosterSlot);
     let returnBlockerIndex = 0;
-    const isReturnFormation = defenders.some(entity => entity.isReturner);
+    const isReturnFormation = Boolean(returnerEntity);
     const rosterEntities: Array<[RosterSlot, Entity]> = [
       ['qb', qb],
       ...receivers.map((entity, index): [RosterSlot, Entity] => [receiverSlots[index] || 'wr-0', entity]),
@@ -3128,7 +3151,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       ]),
       ...defenders.map((entity, index): [RosterSlot, Entity] => [
         isReturnFormation
-          ? entity.isReturner ? 'wr-0' : returnBlockerSlots[returnBlockerIndex++ % returnBlockerSlots.length]
+          ? entity.isReturner ? returnerRosterSlot : returnBlockerSlots[returnBlockerIndex++ % returnBlockerSlots.length]
           : defenderSlots[index] || 'def-0',
         entity
       ])
@@ -6010,8 +6033,10 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
             }
           }
         } else if (phase === 'RUNNING') {
-          const isUserControlled = isUserTeam(activeEntity.team ?? activeOffense);
           const isReturn = Boolean(isSpecialTeamsReturn || activeEntity.isReturner);
+          const isUserControlled = isReturn
+            ? isUserOffense()
+            : isUserTeam(activeEntity.team ?? activeOffense);
           const baseRunSpeed = getBallCarrierRunSpeed(isReturn, (activeEntity.powerBoostTimer || 0) > 0);
           const contactSpeed = (activeEntity.contactSlowTimer || 0) > 0 ? 0.75 : 1;
           if ((activeEntity.contactSlowTimer || 0) > 0) activeEntity.contactSlowTimer!--;
@@ -6020,13 +6045,21 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           const carrierMaxSpeed = baseRunSpeed * teammateSpeedScale * GAME_SPEED_SCALE * (activeEntity.speedMultiplier || 1) * getFatigueSpeedMultiplier(activeEntity.stamina) * contactSpeed * (isUserControlled ? USER_CONTROL_SPEED_MULTIPLIER : 1);
 
           if (isUserControlled) {
-            const joy = getEffectiveJoystickInput(activeEntity.team ?? activeOffense);
-            if ((activeEntity.jukeTimer || 0) > 0) {
+            const controlSide = isReturn ? activeOffense : activeEntity.team ?? activeOffense;
+            const joy = getEffectiveJoystickInput(controlSide);
+            if (isReturn && joy.active && (joy.x !== 0 || joy.y !== 0)) {
+              const runnerVelocity = getUserRunnerVelocity(joy.x, joy.y, carrierMaxSpeed, attackDirection);
+              activeEntity.vx = runnerVelocity.vx;
+              activeEntity.vy = runnerVelocity.vy;
+              activeEntity.x += activeEntity.vx;
+              activeEntity.y += activeEntity.vy;
+              activeEntity.x = Math.max(30, Math.min(fieldWidth - 30, activeEntity.x));
+            } else if ((activeEntity.jukeTimer || 0) > 0) {
               // During juke, forward momentum continues while lateral is driven exclusively by the plant-and-cut juke curve
               activeEntity.vx = 0; // Explicitly ensure lateral velocity is 0 during juke!
               activeEntity.vy = carrierMaxSpeed * attackDirection * 0.85;
               activeEntity.y += activeEntity.vy;
-            } else if (isReturn && (!joy.active || Math.abs(joy.y) < 0.2)) {
+            } else if (isReturn && !joy.active) {
               const direction = getDirectionalInput(joy.x, joy.y);
               activeEntity.vx = direction.x * carrierMaxSpeed;
               activeEntity.vy = carrierMaxSpeed * attackDirection * 0.85;
@@ -6549,6 +6582,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
       defenders.forEach((d, idx) => {
         if (!d) return;
+        if (phase === 'RUNNING' && d === activeEntity) return;
         if ((d.brokenTackleStun || 0) > 0) {
           d.brokenTackleStun!--;
           return;
@@ -7623,13 +7657,16 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     ctx!.restore();
   }
 
-  function drawHelmet(entity: Entity, design: HelmetDesign, forwardDirection: number, faceForwardDirection = false) {
+  function drawHelmet(entity: Entity, design: HelmetDesign, forwardDirection: number, faceForwardDirection = false, lockTeamDirection = false) {
     ctx!.save();
     const buildScale = entity.player ? 0.94 + (entity.player.ratings.power - 30) / 65 * 0.14 : 1;
     ctx!.translate(entity.x, entity.y);
     ctx!.rotate(-Math.PI / 2);
     ctx!.translate(-entity.x, -entity.y);
-    drawHelmetSprite(ctx!, { ...entity, vx: -forwardDirection, vy: 0 }, design, forwardDirection, (touchOptimized ? 1.23 : 1.08) * buildScale, 'THREE_QUARTER', faceForwardDirection);
+    const facingVelocity = lockTeamDirection
+      ? { vx: -forwardDirection, vy: 0 }
+      : { vx: -(entity.vy || 0), vy: entity.vx || 0 };
+    drawHelmetSprite(ctx!, { ...entity, ...facingVelocity }, design, forwardDirection, (touchOptimized ? 1.23 : 1.08) * buildScale, 'THREE_QUARTER', faceForwardDirection);
     ctx!.restore();
     ctx!.save();
     if (entity.stamina !== undefined) {
@@ -7959,13 +7996,17 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       const teamKey = entity.team || (defaultRole === 'offense' ? activeOffense : activeDefense);
       return teamKey === 'P1' ? p1Team.primaryColor : p2Team.primaryColor;
     };
-    const getEntityForwardDirection = (entity: Entity, defaultRole: 'offense' | 'defense') =>
-      getPlayerForwardDirection(
+    const getEntityForwardDirection = (entity: Entity, defaultRole: 'offense' | 'defense') => {
+      const teamDirection = getPlayerForwardDirection(
         entity.team,
         activeOffense,
         attackDirection,
         defaultRole === 'offense' ? attackDirection : -attackDirection
       );
+      return phase === 'PRE_SNAP'
+        ? getLineOfScrimmageFacingDirection(entity.y, lineOfScrimmageY, teamDirection)
+        : teamDirection;
+    };
 
     const playersByDepth: Array<{ entity: Entity; role: 'offense' | 'defense'; forwardDirection: number }> = [
       { entity: qb, role: 'offense', forwardDirection: getEntityForwardDirection(qb, 'offense') },
@@ -7994,10 +8035,13 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     }
 
     playersByDepth
-      .sort((first, second) => first.entity.y - second.entity.y)
+      .sort((first, second) =>
+        worldToCanvas(first.entity.x, first.entity.y).y - worldToCanvas(second.entity.x, second.entity.y).y
+      )
       .forEach(({ entity, role, forwardDirection }) => {
         drawPlayerBody(entity, getEntityUniformColor(entity, role));
-        drawHelmet(entity, getEntityHelmet(entity, role), forwardDirection, entity === qb && (phase === 'PRE_SNAP' || phase === 'QB_DROP'));
+        const faceTeamTravel = phase === 'PRE_SNAP' || (entity === qb && phase === 'QB_DROP');
+        drawHelmet(entity, getEntityHelmet(entity, role), forwardDirection, faceTeamTravel, phase === 'PRE_SNAP');
       });
 
     if (activeEntity === qb || (qb.powerBoostTimer || 0) > 0) {
@@ -8420,6 +8464,20 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     // Football & Realistic Turf Drop Shadow
     if (ball) {
       const bZ = ball.z || 0;
+      if (!ball.isFieldGoal && !ball.isKickoff && !ball.isPunt && ball.targetX !== undefined && ball.targetY !== undefined) {
+        ctx.save();
+        ctx.strokeStyle = 'rgba(255, 209, 102, 0.48)';
+        ctx.lineWidth = 1.8 / cameraScale;
+        ctx.setLineDash([4, 5]);
+        ctx.beginPath();
+        for (let step = 0; step <= 24; step++) {
+          const point = getPassArcScreenPoint(ball.startX, ball.startY, ball.targetX, ball.targetY, ball.maxZ, step / 24);
+          if (step === 0) ctx.moveTo(point.x, point.y);
+          else ctx.lineTo(point.x, point.y);
+        }
+        ctx.stroke();
+        ctx.restore();
+      }
       if (ball.intendedTarget) {
         ctx.save();
         ctx.strokeStyle = '#ffd166';
@@ -8441,8 +8499,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       ctx.fill();
       ctx.restore();
 
-      // 2. Football elevated by ball.z above the field
-      const ballDrawY = ball.y - bZ;
+      // 2. Football elevated on screen above the field
+      const ballDrawX = ball.x - bZ;
 
       ctx.save();
       ctx.strokeStyle = 'rgba(255, 244, 221, 0.3)';
@@ -8450,10 +8508,10 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       ctx.setLineDash([2, 3]);
       ctx.beginPath();
       ctx.moveTo(ball.x, ball.y);
-      ctx.lineTo(ball.x, ballDrawY);
+      ctx.lineTo(ballDrawX, ball.y);
       ctx.stroke();
       ctx.restore();
-      drawFootball(ball.x, ballDrawY, Math.atan2(ball.vy, ball.vx), 8.5);
+      drawFootball(ballDrawX, ball.y, Math.atan2(ball.vy, ball.vx), 8.5);
     }
 
     // Loose Fumble Football

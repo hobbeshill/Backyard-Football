@@ -10,7 +10,7 @@ import {
 } from './proMode';
 import { X, Shield, Zap, ChevronRight, Info } from 'lucide-react';
 import { getRouteWaypoints } from './movement';
-import { offensivePlaybook } from './playbook';
+import { getScreenTravelDirection, offensivePlaybook } from './playbook';
 import { alignDefenders } from './defense';
 import type { Entity } from './types';
 
@@ -20,6 +20,7 @@ interface ProPlaybookCardsProps {
   onSelectDefensePlay?: (playId: ProDefensePlayId) => void;
   activeOffensePlay?: string;
   activeDefensePlay?: string;
+  attackDirection?: number;
   initialTab?: 'OFFENSE' | 'DEFENSE' | 'MATRIX';
   selectionOnly?: boolean;
   downDistanceText?: string;
@@ -40,6 +41,7 @@ export const ProPlaybookCards: React.FC<ProPlaybookCardsProps> = ({
   onSelectDefensePlay,
   activeOffensePlay,
   activeDefensePlay,
+  attackDirection = -1,
   initialTab = 'OFFENSE',
   selectionOnly = false,
   downDistanceText,
@@ -134,7 +136,7 @@ export const ProPlaybookCards: React.FC<ProPlaybookCardsProps> = ({
                 aria-label={`Select ${play.name}`}
               >
                 <div className="h-44 w-full shrink-0 overflow-hidden bg-[#09150d] sm:h-52">
-                  <OffenseRouteDiagram play={play} />
+                  <OffenseRouteDiagram play={play} attackDirection={attackDirection} />
                 </div>
                 <span className="w-full shrink-0 border-t border-neutral-700 px-2 py-2 text-center text-[11px] font-black uppercase leading-tight text-white group-hover:text-amber-300 sm:text-xs">
                   {play.name}
@@ -288,7 +290,7 @@ export const ProPlaybookCards: React.FC<ProPlaybookCardsProps> = ({
 
                   {/* SVG Route Diagram */}
                   <div className="mt-4 overflow-hidden rounded-lg border border-neutral-700/60 bg-[#09150d] relative shadow-inner">
-                    <OffenseRouteDiagram play={currentOffense} />
+                    <OffenseRouteDiagram play={currentOffense} attackDirection={attackDirection} />
                   </div>
 
                   {/* Route & Concept Details */}
@@ -590,130 +592,56 @@ export const ProPlaybookCards: React.FC<ProPlaybookCardsProps> = ({
 /**
  * High quality SVG route diagram for 7-on-7 offense
  */
-const OffenseRouteDiagram: React.FC<{ play: ProOffensePlay }> = ({ play }) => {
-  if (!play.isRun || play.id.startsWith('PRO_TEAM_')) {
-    const positions = play.alignment === 'TRIPS'
-      ? [50, 290, 250, 215]
-      : play.alignment === 'STACK' ? [80, 275, 215, 105] : [45, 295, 225, 115];
-    const routes = [play.leftRoute, play.rightRoute, play.centerRoute, play.slotRoute];
-    const rbX = play.alignment === 'TRIPS' ? 90 : 220;
-    const runType = offensivePlaybook[play.id].type;
-    const runX = runType === 'SWEEP' ? (rbX < 170 ? 40 : 300) : runType === 'POWER' ? 205 : 170;
-    return (
-      <svg viewBox="0 0 340 430" className="h-full w-full select-none" aria-label={`${play.name} routes`}>
-        <defs>
-          <marker id={`routeArrow-${play.id}`} viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto">
-            <path d="M 0 1 L 10 5 L 0 9 z" fill="#fbbf24" />
-          </marker>
-        </defs>
-        <rect width="340" height="430" fill="#0d2616" />
+const OffenseRouteDiagram: React.FC<{ play: ProOffensePlay; attackDirection: number }> = ({ play, attackDirection }) => {
+  const screenDirection = getScreenTravelDirection(attackDirection);
+  const direction = -screenDirection;
+  const lineY = screenDirection === 1 ? 350 : 80;
+  const firstDownY = lineY + 100 * direction;
+  const quarterbackY = lineY - 45 * direction;
+  const runningBackY = lineY - 55 * direction;
+  const positions = play.alignment === 'TRIPS'
+    ? [50, 290, 250, 215]
+    : play.alignment === 'STACK' ? [80, 275, 215, 105] : [45, 295, 225, 115];
+  const routes = [play.leftRoute, play.rightRoute, play.centerRoute, play.slotRoute];
+  const rbX = play.alignment === 'TRIPS' ? 90 : 220;
+  const runType = offensivePlaybook[play.id]?.type ?? (play.isRun ? 'ISO' : 'PASS');
+  const runX = runType === 'SWEEP' ? (rbX < 170 ? 40 : 300) : runType === 'POWER' ? 205 : 170;
+  const screenTransform = 'matrix(0 1 -1 0 430 0)';
+  return (
+    <svg viewBox="0 0 430 340" className="h-full w-full select-none" aria-label={`${play.name} routes`}>
+      <defs>
+        <marker id={`routeArrow-${play.id}`} viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto">
+          <path d="M 0 1 L 10 5 L 0 9 z" fill="#fbbf24" />
+        </marker>
+      </defs>
+      <rect width="430" height="340" fill="#0d2616" />
+      <g transform={screenTransform}>
         {[50, 100, 150, 200, 250, 300].map(y => <line key={y} x1="0" y1={y} x2="340" y2={y} stroke="#ffffff18" />)}
-        <line x1="0" y1="350" x2="340" y2="350" stroke="#3b82f6" strokeWidth="2" />
-        <line x1="0" y1="250" x2="340" y2="250" stroke="#eab308" strokeDasharray="5 4" />
-        <text x="8" y="244" fill="#facc15" fontSize="10">10 YDS</text>
+        <line x1="0" y1={lineY} x2="340" y2={lineY} stroke="#3b82f6" strokeWidth="2" />
+        <line x1="0" y1={firstDownY} x2="340" y2={firstDownY} stroke="#eab308" strokeDasharray="5 4" />
+        <text x="8" y={firstDownY + 6 * direction} transform={`rotate(-90 8 ${firstDownY + 6 * direction})`} fill="#facc15" fontSize="10">10 YDS</text>
         {routes.map((routeType, index) => {
           const x = positions[index];
-          const points = getRouteWaypoints({ x, y: 350, routeType, radius: 10 }, -1, 340, 430);
+          const points = getRouteWaypoints({ x, y: lineY, routeType, radius: 10 }, direction, 340, 430);
+          const labelY = lineY - 20 * direction;
           return (
             <g key={index}>
               {routeType === 'BLOCK'
-                ? <path d={`M ${x} 350 L ${x} 328 M ${x - 9} 328 L ${x + 9} 328`} stroke="#34d399" strokeWidth="3" />
-                : <path d={`M ${x} 350 ${points.map(point => `L ${point.x} ${point.y}`).join(' ')}`} fill="none" stroke={routeType === 'HITCH' ? '#38bdf8' : '#fbbf24'} strokeWidth="3" markerEnd={`url(#routeArrow-${play.id})`} />}
-              <circle cx={x} cy="350" r="6" fill="#3b82f6" stroke="#fff" />
-              <text x={x} y="370" fill="#93c5fd" fontSize="10" textAnchor="middle">{['WR-L', 'WR-R', 'TE', 'SLOT'][index]}</text>
+                ? <path d={`M ${x} ${lineY} L ${x} ${lineY + 22 * direction} M ${x - 9} ${lineY + 22 * direction} L ${x + 9} ${lineY + 22 * direction}`} stroke="#34d399" strokeWidth="3" />
+                : <path d={`M ${x} ${lineY} ${points.map(point => `L ${point.x} ${point.y}`).join(' ')}`} fill="none" stroke={routeType === 'HITCH' ? '#38bdf8' : '#fbbf24'} strokeWidth="3" markerEnd={`url(#routeArrow-${play.id})`} />}
+              <circle cx={x} cy={lineY} r="6" fill="#3b82f6" stroke="#fff" />
+              <text x={x} y={labelY} transform={`rotate(-90 ${x} ${labelY})`} fill="#93c5fd" fontSize="10" textAnchor="middle">{['WR-L', 'WR-R', 'TE', 'SLOT'][index]}</text>
             </g>
           );
         })}
-        <circle cx="170" cy="395" r="7" fill="#eab308" stroke="#fff" />
-        <text x="170" y="415" fill="#fbbf24" fontSize="10" textAnchor="middle">QB</text>
-        <circle cx={rbX} cy="405" r="6" fill="#3b82f6" stroke="#fff" />
+        <circle cx="170" cy={quarterbackY} r="7" fill="#eab308" stroke="#fff" />
+        <text x="170" y={quarterbackY - 20 * direction} transform={`rotate(-90 170 ${quarterbackY - 20 * direction})`} fill="#fbbf24" fontSize="10" textAnchor="middle">QB</text>
+        <circle cx={rbX} cy={runningBackY} r="6" fill="#3b82f6" stroke="#fff" />
         {play.isRun
-          ? <path d={`M ${rbX} 399 Q ${runX} 380 ${runX} 335 L ${runX} 170`} fill="none" stroke="#fbbf24" strokeWidth="4" markerEnd={`url(#routeArrow-${play.id})`} />
-          : <path d={`M ${rbX} 399 v -16 m -9 0 h 18`} stroke="#34d399" strokeWidth="3" />}
-        <text x={rbX} y="425" fill="#93c5fd" fontSize="10" textAnchor="middle">{play.isRun ? 'RB RUN' : 'RB BLOCK'}</text>
-      </svg>
-    );
-  }
-  return (
-    <svg viewBox="0 0 340 200" className="w-full h-44 sm:h-52 select-none">
-      <defs>
-        {/* Field Grid Pattern */}
-        <pattern id="yardLines" width="340" height="40" patternUnits="userSpaceOnUse">
-          <line x1="0" y1="39" x2="340" y2="39" stroke="rgba(255,255,255,0.08)" strokeWidth="1" />
-          <line x1="110" y1="35" x2="110" y2="40" stroke="rgba(255,255,255,0.15)" strokeWidth="1" />
-          <line x1="230" y1="35" x2="230" y2="40" stroke="rgba(255,255,255,0.15)" strokeWidth="1" />
-        </pattern>
-        {/* Markers */}
-        <marker id="arrowAmber" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-          <path d="M 0 1 L 10 5 L 0 9 z" fill="#fbbf24" />
-        </marker>
-        <marker id="arrowEmerald" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-          <path d="M 0 1 L 10 5 L 0 9 z" fill="#34d399" />
-        </marker>
-        <marker id="arrowCyan" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-          <path d="M 0 1 L 10 5 L 0 9 z" fill="#38bdf8" />
-        </marker>
-      </defs>
-
-      {/* Field Background */}
-      <rect width="340" height="200" fill="#0d2616" />
-      <rect width="340" height="200" fill="url(#yardLines)" />
-
-      {/* Line of Scrimmage */}
-      <line x1="0" y1="130" x2="340" y2="130" stroke="#3b82f6" strokeWidth="2" strokeDasharray="4 3" />
-      <text x="8" y="126" fill="#60a5fa" fontSize="8" fontWeight="bold">LINE OF SCRIMMAGE</text>
-
-      {/* First Down Line (10 yards ahead) */}
-      <line x1="0" y1="70" x2="340" y2="70" stroke="#eab308" strokeWidth="1.5" />
-      <text x="8" y="66" fill="#facc15" fontSize="8" fontWeight="bold">1ST DOWN MARKER (10 YDS)</text>
-
-      {/* Offensive Players (Blue/Gold) */}
-      {/* Center Lineman */}
-      <circle cx="170" cy="130" r="5" fill="#f59e0b" stroke="#fff" strokeWidth="1" />
-      {/* QB */}
-      <circle cx="170" cy="160" r="6" fill="#eab308" stroke="#fff" strokeWidth="1.5" />
-      <text x="170" y="174" fill="#fbbf24" fontSize="8" fontWeight="bold" textAnchor="middle">QB</text>
-
-      {/* Running Back */}
-      <circle cx="140" cy="165" r="5.5" fill="#3b82f6" stroke="#fff" strokeWidth="1" />
-      <text x="140" y="178" fill="#93c5fd" fontSize="7" fontWeight="bold" textAnchor="middle">RB</text>
-
-      {/* Wide Receivers Left & Right & Slot */}
-      <circle cx="50" cy="130" r="5" fill="#3b82f6" stroke="#fff" strokeWidth="1" />
-      <text x="50" y="142" fill="#93c5fd" fontSize="7" fontWeight="bold" textAnchor="middle">WR-L</text>
-
-      <circle cx="290" cy="130" r="5" fill="#3b82f6" stroke="#fff" strokeWidth="1" />
-      <text x="290" y="142" fill="#93c5fd" fontSize="7" fontWeight="bold" textAnchor="middle">WR-R</text>
-
-      <circle cx="230" cy="130" r="5" fill="#3b82f6" stroke="#fff" strokeWidth="1" />
-      <text x="230" y="142" fill="#93c5fd" fontSize="7" fontWeight="bold" textAnchor="middle">SLOT</text>
-
-      {play.id === 'PRO_JET_SWEEP' && (
-        <g>
-          {/* Motion path before snap */}
-          <path d="M 250 140 L 175 152" fill="none" stroke="#38bdf8" strokeWidth="2" strokeDasharray="4 3" markerEnd="url(#arrowCyan)" />
-          <text x="215" y="146" fill="#7dd3fc" fontSize="6" fontWeight="bold">PRE-SNAP MOTION</text>
-          {/* Edge sprint path */}
-          <path d="M 175 152 Q 135 155 100 135 L 45 60 L 45 20" fill="none" stroke="#fbbf24" strokeWidth="3" markerEnd="url(#arrowAmber)" />
-          {/* Perimeter seal blocks */}
-          <line x1="50" y1="130" x2="65" y2="100" stroke="#34d399" strokeWidth="2.5" />
-          <line x1="170" y1="130" x2="150" y2="115" stroke="#34d399" strokeWidth="2.5" />
-        </g>
-      )}
-
-      {play.id === 'PRO_DRAW' && (
-        <g>
-          {/* QB fake pass drop */}
-          <path d="M 170 160 L 170 178" fill="none" stroke="#f59e0b" strokeWidth="1.8" strokeDasharray="3 2" />
-          {/* Delayed handoff up the middle */}
-          <path d="M 140 165 Q 165 174 170 155 L 170 85 L 170 30" fill="none" stroke="#fbbf24" strokeWidth="3" markerEnd="url(#arrowAmber)" />
-          {/* Receivers clear deep */}
-          <path d="M 50 130 L 50 60" fill="none" stroke="#38bdf8" strokeWidth="1.5" strokeDasharray="3 2" />
-          <path d="M 290 130 L 290 60" fill="none" stroke="#38bdf8" strokeWidth="1.5" strokeDasharray="3 2" />
-          <text x="170" y="110" fill="#facc15" fontSize="7" fontWeight="bold" textAnchor="middle">DELAYED CREASE</text>
-        </g>
-      )}
-
+          ? <path d={`M ${rbX} ${runningBackY} Q ${runX} ${runningBackY - 15 * direction} ${runX} ${lineY + 15 * direction} L ${runX} ${lineY + 180 * direction}`} fill="none" stroke="#fbbf24" strokeWidth="4" markerEnd={`url(#routeArrow-${play.id})`} />
+          : <path d={`M ${rbX} ${runningBackY} v ${16 * direction} m -9 0 h 18`} stroke="#34d399" strokeWidth="3" />}
+        <text x={rbX} y={runningBackY - 20 * direction} transform={`rotate(-90 ${rbX} ${runningBackY - 20 * direction})`} fill="#93c5fd" fontSize="10" textAnchor="middle">{play.isRun ? 'RB RUN' : 'RB BLOCK'}</text>
+      </g>
     </svg>
   );
 };

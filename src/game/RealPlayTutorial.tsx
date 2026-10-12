@@ -87,6 +87,7 @@ export function RealPlayTutorial({ onFinish }: { onFinish: () => void }) {
         <ProPlaybookCards
           selectionOnly
           initialTab={step === 4 ? 'DEFENSE' : 'OFFENSE'}
+          attackDirection={engineRef.current?.attackDirection ?? -1}
           activeOffensePlay={offense}
           activeDefensePlay={defense}
           downDistanceText={downDistance}

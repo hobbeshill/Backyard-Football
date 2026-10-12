@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { getRouteWaypoints, getScreenEdgeTargetPosition, updateRouteMovement } from './movement';
-import { allRoutes, offensivePlaybook } from './playbook';
+import { allRoutes, getScreenTravelDirection, offensivePlaybook } from './playbook';
 import type { Entity } from './types';
 
 test('routes stay in bounds and settle at their endpoints in either direction', () => {
@@ -42,6 +42,11 @@ test('route depths include intermediate targets, long shots and short checkdowns
   assert.equal(depth('FLY'), 60, 'Fly route reaches the opponent goal line');
 });
 
+test('playbook travel direction matches the side-view screen', () => {
+  assert.equal(getScreenTravelDirection(-1), 1, 'Upfield travel maps to screen-right');
+  assert.equal(getScreenTravelDirection(1), -1, 'Downfield travel maps to screen-left');
+});
+
 test('screen pass receiver slants across the formation toward the middle', () => {
   const receiver: Entity = {
     x: 260,
@@ -64,6 +69,41 @@ test('route movement does not take over caught receivers or pre-snap players', (
   receiver.caught = true;
   updateRouteMovement(receiver, 'THROWN', 1, [], 340);
   assert.equal(receiver.y, 500);
+});
+
+test('changing a receiver route starts the new route at its first waypoint', () => {
+  const receiver: Entity = { x: 170, y: 500, startX: 170, startY: 500, radius: 10, routeType: 'GO' };
+  for (let frame = 0; frame < 80; frame++) {
+    updateRouteMovement(receiver, 'QB_DROP', 1, [], 340);
+  }
+  assert.ok(receiver.y > 550, 'The original route advances downfield');
+
+  receiver.routeType = 'SLANT-R';
+  const startX = receiver.x;
+  const startY = receiver.y;
+  updateRouteMovement(receiver, 'QB_DROP', 1, [], 340);
+  assert.equal(receiver.routeWaypoint, 0);
+  assert.equal(receiver.routeWaypointStartX, startX);
+  assert.equal(receiver.startY, startY);
+  assert.equal(receiver.routeWaypointStartY, startY);
+  assert.equal(receiver.routeWaypointType, 'SLANT-R');
+});
+
+test('a repeated route restarts when the receiver gets a new formation start', () => {
+  const receiver: Entity = { x: 100, y: 500, startX: 100, startY: 500, radius: 10, routeType: 'SLANT-R' };
+  for (let frame = 0; frame < 500; frame++) {
+    updateRouteMovement(receiver, 'QB_DROP', 1, [], 340);
+  }
+  assert.equal(receiver.routeWaypoint, 1);
+
+  receiver.x = 120;
+  receiver.y = 600;
+  receiver.startX = 120;
+  receiver.startY = 600;
+  updateRouteMovement(receiver, 'QB_DROP', 1, [], 340);
+  assert.equal(receiver.routeWaypoint, 0);
+  assert.equal(receiver.routeWaypointStartX, 120);
+  assert.equal(receiver.routeWaypointStartY, 600);
 });
 
 test('off-screen receiver targets are anchored to the nearest edge with direction', () => {

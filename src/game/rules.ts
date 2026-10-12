@@ -108,6 +108,21 @@ export function getPassArcHeight(maxHeight: number, progress: number): number {
   return Math.max(2, baseHeight + arcHeight);
 }
 
+export function getPassArcScreenPoint(
+  startX: number,
+  startY: number,
+  targetX: number,
+  targetY: number,
+  maxHeight: number,
+  progress: number
+): { x: number; y: number } {
+  const clampedProgress = Math.max(0, Math.min(1, progress));
+  return {
+    x: startX + (targetX - startX) * clampedProgress - getPassArcHeight(maxHeight, clampedProgress),
+    y: startY + (targetY - startY) * clampedProgress
+  };
+}
+
 export function getFieldGoalBallHeight(maxHeight: number, arrivalHeight: number, progress: number): number {
   const clampedProgress = Math.max(0, Math.min(1, progress));
   return getPassArcHeight(maxHeight, clampedProgress) + (arrivalHeight - 14) * clampedProgress;

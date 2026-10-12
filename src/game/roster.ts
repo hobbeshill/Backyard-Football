@@ -25,6 +25,12 @@ export interface PlayerProfile {
 
 export type TeamRoster = Record<RosterSlot, PlayerProfile>;
 
+export function getFastestRosterSlot(roster: TeamRoster): RosterSlot {
+  return (Object.keys(roster) as RosterSlot[]).reduce((fastest, slot) =>
+    roster[slot].ratings.speed > roster[fastest].ratings.speed ? slot : fastest
+  );
+}
+
 interface RosterTeamRatings {
   wrSpeed: number;
   passProtection: number;

@@ -150,6 +150,31 @@ export default function App() {
   const vignetteTimeoutRef = useRef<any>(null);
   const activePriorityRef = useRef<number>(0);
   const bannerCreatedAtRef = useRef<number>(0);
+  const phaseStateRef = useRef(phaseState);
+  const queuedAnnouncementRef = useRef<typeof banner | null>(null);
+
+  const displayAnnouncement = (announcement: typeof banner) => {
+    const now = Date.now();
+    if (activePriorityRef.current >= 3 && announcement.priority < 3 && now - bannerCreatedAtRef.current < 3800) {
+      return;
+    }
+
+    activePriorityRef.current = announcement.priority;
+    bannerCreatedAtRef.current = now;
+    if (bannerTimeoutRef.current) clearTimeout(bannerTimeoutRef.current);
+
+    if (announcement.category === 'TURNOVER' || announcement.category === 'TOUCHDOWN') {
+      if (vignetteTimeoutRef.current) clearTimeout(vignetteTimeoutRef.current);
+      setScreenVignette(announcement.category);
+      vignetteTimeoutRef.current = setTimeout(() => setScreenVignette(null), 1600);
+    }
+
+    setBanner({ ...announcement, visible: true, key: now });
+    bannerTimeoutRef.current = setTimeout(() => {
+      setBanner(prev => ({ ...prev, visible: false }));
+      activePriorityRef.current = 0;
+    }, announcement.durationMs);
+  };
 
   const showAnnouncement = (
     text: string,
@@ -199,29 +224,7 @@ export default function App() {
     }
 
     const duration = meta?.durationMs || defaultDuration;
-    const now = Date.now();
-
-    // Priority protection: if a major turnover or touchdown is active (< 3800ms ago),
-    // prevent routine priority 1 events from prematurely hiding it!
-    if (activePriorityRef.current >= 3 && priority < 3 && now - bannerCreatedAtRef.current < 3800) {
-      return;
-    }
-
-    activePriorityRef.current = priority;
-    bannerCreatedAtRef.current = now;
-
-    if (bannerTimeoutRef.current) clearTimeout(bannerTimeoutRef.current);
-
-    // Full-screen alert vignette for turnovers and touchdowns
-    if (category === 'TURNOVER' || category === 'TOUCHDOWN') {
-      if (vignetteTimeoutRef.current) clearTimeout(vignetteTimeoutRef.current);
-      setScreenVignette(category);
-      vignetteTimeoutRef.current = setTimeout(() => {
-        setScreenVignette(null);
-      }, 1600);
-    }
-
-    setBanner({
+    const announcement = {
       text,
       color,
       visible: true,
@@ -231,13 +234,18 @@ export default function App() {
       possessionTeam: meta?.possessionTeam,
       durationMs: duration,
       priority,
-      key: now
-    });
+      key: 0
+    };
 
-    bannerTimeoutRef.current = setTimeout(() => {
-      setBanner(prev => ({ ...prev, visible: false }));
-      activePriorityRef.current = 0;
-    }, duration);
+    if (phaseStateRef.current !== 'PRE_SNAP' && phaseStateRef.current !== 'DEAD') {
+      const queuedAnnouncement = queuedAnnouncementRef.current;
+      if (!queuedAnnouncement || announcement.priority >= queuedAnnouncement.priority) {
+        queuedAnnouncementRef.current = announcement;
+      }
+      return;
+    }
+
+    displayAnnouncement(announcement);
   };
 
   // Schematic rendering helper for playbook cards
@@ -390,7 +398,23 @@ export default function App() {
       setP2DefPlayState,
       setDownDistanceText,
       setActiveOffenseState,
-      setPhaseState,
+      setPhaseState: phase => {
+        phaseStateRef.current = phase;
+        setPhaseState(phase);
+        if (phase !== 'DEAD' && phase !== 'PRE_SNAP') {
+          if (bannerTimeoutRef.current) clearTimeout(bannerTimeoutRef.current);
+          if (vignetteTimeoutRef.current) clearTimeout(vignetteTimeoutRef.current);
+          activePriorityRef.current = 0;
+          setBanner(previous => ({ ...previous, visible: false }));
+          setScreenVignette(null);
+          return;
+        }
+        if ((phase === 'DEAD' || phase === 'PRE_SNAP') && queuedAnnouncementRef.current) {
+          const announcement = queuedAnnouncementRef.current;
+          queuedAnnouncementRef.current = null;
+          displayAnnouncement(announcement);
+        }
+      },
       setTacticalModeState: setTacticalMode,
       setUserScore,
       setCpuScore,
@@ -951,7 +975,7 @@ export default function App() {
   }, [finishedGame, hasKickedOff, isKickoffActive, onlineRole, phaseState, showOnlineLobby, showPauseMenu, showTeamModal, showTutorial, showSettings]);
 
   return (
-    <div className="relative w-screen min-h-[100dvh] h-[100dvh] overflow-hidden flex flex-col items-center justify-between pt-1 pb-0 bg-[#030704] text-white font-mono select-none">
+    <div className="game-shell relative w-screen min-h-[100dvh] h-[100dvh] overflow-hidden flex flex-col items-center justify-between pt-1 pb-0 bg-[#030704] text-white font-mono select-none">
       {!showTutorial && <button
         type="button"
         onClick={() => setShowSettings(true)}
@@ -963,7 +987,7 @@ export default function App() {
       </button>}
       
       {/* Top Header & Scoreboard */}
-      <header className="flex flex-col items-center justify-center z-20 mb-0.5 w-full max-w-[430px] px-2 pt-0.5 shrink-0">
+      <header className="game-header flex flex-col items-center justify-center z-20 mb-0.5 w-full max-w-[430px] px-2 pt-0.5 shrink-0">
         {/* Relocated Footer / Game Status Bar */}
         <footer className="mb-1 text-[0.52rem] text-[#adff2f] text-center z-20 px-2 w-full max-w-[430px] flex items-center justify-between gap-2 shrink-0">
           <span className="font-bold opacity-90 whitespace-nowrap">
@@ -1234,7 +1258,7 @@ export default function App() {
       {/* Main Game Announcement Banner */}
       {banner.visible && (
         <div
-          className={`absolute top-[22%] sm:top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-[94vw] max-w-[440px] transition-all duration-200 select-none ${
+          className={`pointer-events-none absolute top-[22%] sm:top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-[94vw] max-w-[440px] transition-all duration-200 select-none ${
             banner.category === 'TURNOVER'
               ? 'animate-turnover-glow'
               : banner.category === 'TOUCHDOWN'
@@ -1256,7 +1280,7 @@ export default function App() {
                     setBanner(prev => ({ ...prev, visible: false }));
                     activePriorityRef.current = 0;
                   }}
-                  className="rounded p-0.5 text-black hover:bg-black/20 transition cursor-pointer"
+                  className="pointer-events-auto rounded p-0.5 text-black hover:bg-black/20 transition cursor-pointer"
                   title="Dismiss notification"
                 >
                   <X size={14} />
@@ -1288,7 +1312,7 @@ export default function App() {
                     setBanner(prev => ({ ...prev, visible: false }));
                     activePriorityRef.current = 0;
                   }}
-                  className="rounded p-0.5 text-black hover:bg-black/20 transition cursor-pointer"
+                  className="pointer-events-auto rounded p-0.5 text-black hover:bg-black/20 transition cursor-pointer"
                   title="Dismiss notification"
                 >
                   <X size={14} />
@@ -1330,7 +1354,7 @@ export default function App() {
                     setBanner(prev => ({ ...prev, visible: false }));
                     activePriorityRef.current = 0;
                   }}
-                  className="rounded p-0.5 text-black hover:bg-black/20 transition cursor-pointer"
+                  className="pointer-events-auto rounded p-0.5 text-black hover:bg-black/20 transition cursor-pointer"
                   title="Dismiss notification"
                 >
                   <X size={13} />
@@ -1366,11 +1390,11 @@ export default function App() {
           )}
         </div>
       )}
-      <div className="relative flex-1 flex flex-col items-center justify-end min-h-0 w-full overflow-hidden pb-0">
+      <div className="game-canvas-stage relative flex-1 flex flex-col items-center justify-end min-h-0 w-full overflow-hidden pb-0">
         <canvas
           ref={canvasRef}
           aria-label="Side-view football field"
-          className="bg-[#176620] shadow-[0_8px_30px_rgba(0,0,0,0.9)] rounded-md border-2 border-white touch-none"
+          className="game-field bg-[#176620] shadow-[0_8px_30px_rgba(0,0,0,0.9)] rounded-md border-2 border-white touch-none"
         />
       </div>
 
@@ -2385,6 +2409,7 @@ export default function App() {
           isDefense={onlineRole ? !isOnlinePlayerOnOffense : activeOffenseState === 'P2'}
           activeOffensePlay={onlineRole && isOnlinePlayerOnOffense ? onlineSelectedPlay : p1OffPlayState}
           activeDefensePlay={onlineRole && !isOnlinePlayerOnOffense ? onlineSelectedPlay : p1DefPlayState}
+          attackDirection={engineRef.current?.attackDirection ?? -1}
           downDistanceText={downDistanceText}
           canPunt={is4thDown}
           fieldGoalDistance={engineRef.current?.getFieldGoalDistance?.()}

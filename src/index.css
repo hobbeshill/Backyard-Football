@@ -19,6 +19,51 @@
 	animation: team-selector-enter 180ms ease-out;
 }
 
+@media (orientation: landscape) {
+	.game-shell {
+		justify-content: flex-start !important;
+		padding: 0 !important;
+	}
+
+	.game-header {
+		position: relative;
+		inset: auto;
+		width: 100%;
+		max-width: none !important;
+		flex-direction: column !important;
+		justify-content: center !important;
+		margin: 0 !important;
+		padding: 2px 4px 0 !important;
+	}
+
+	.game-header > footer {
+		display: none !important;
+	}
+
+	.game-header > div {
+		width: min(100%, 420px) !important;
+		max-width: 420px;
+		padding: 2px 8px !important;
+	}
+
+	.game-canvas-stage {
+		position: relative !important;
+		inset: auto;
+		z-index: 0;
+		flex: 1 1 0%;
+		min-height: 0;
+		width: 100%;
+		height: auto;
+		align-items: center !important;
+		justify-content: center !important;
+	}
+
+	.game-field {
+		border: 0 !important;
+		border-radius: 0 !important;
+	}
+}
+
 @media (prefers-reduced-motion: reduce) {
 	.team-selector-panel {
 		animation: none;

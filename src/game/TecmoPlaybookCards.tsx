@@ -1,12 +1,14 @@
 import React from 'react';
 import { getTecmoPlaysForTeam, type TecmoPlayOption } from './tecmoPlaybook';
 import { getTeam } from './teams';
+import { getScreenTravelDirection } from './playbook';
 import { Shield, Zap, Target, Lock, ArrowUpRight, ChevronRight, X } from 'lucide-react';
 
 interface TecmoPlaybookCardsProps {
   teamId: string;
   opposingTeamId: string;
   isDefense: boolean;
+  attackDirection: number;
   activeOffensePlay?: string;
   activeDefensePlay?: string;
   downDistanceText?: string;
@@ -17,53 +19,64 @@ interface TecmoPlaybookCardsProps {
   onClose: () => void;
 }
 
-function MiniRouteDiagram({ play }: { play: TecmoPlayOption }) {
+function MiniRouteDiagram({ play, attackDirection }: { play: TecmoPlayOption; attackDirection: number }) {
   const isRun = play.isRun;
+  const screenDirection = getScreenTravelDirection(attackDirection);
+  const direction = -screenDirection;
+  const lineY = screenDirection === 1 ? 85 : 25;
+  const qbY = lineY - 12 * direction;
+  const rbY = lineY - 18 * direction;
+  const advance = (depth: number) => lineY + depth * direction;
+  const depthScale = 160 / 110;
+  const crossScale = 110 / 160;
+  const lineX = 160 - lineY * depthScale;
+  const routeTransform = `matrix(0 ${crossScale} ${-depthScale} 0 160 0)`;
   return (
     <svg viewBox="0 0 160 110" className="w-full h-full" preserveAspectRatio="xMidYMid meet">
       {/* Field Background & Line of Scrimmage */}
       <rect x="0" y="0" width="160" height="110" fill="#0d1b12" />
       {/* 5-yard yardlines */}
-      <line x1="0" y1="25" x2="160" y2="25" stroke="#ffffff15" strokeWidth="1" strokeDasharray="3 3" />
-      <line x1="0" y1="55" x2="160" y2="55" stroke="#ffffff15" strokeWidth="1" strokeDasharray="3 3" />
+      {(screenDirection === 1 ? [25, 55] : [55, 85]).map(y => (
+        <line key={y} x1={160 - y * depthScale} y1="0" x2={160 - y * depthScale} y2="110" stroke="#ffffff15" strokeWidth="1" strokeDasharray="3 3" />
+      ))}
       {/* Line of Scrimmage */}
-      <line x1="0" y1="85" x2="160" y2="85" stroke="#3b82f6" strokeWidth="1.5" />
+      <line x1={lineX} y1="0" x2={lineX} y2="110" stroke="#3b82f6" strokeWidth="1.5" />
       {/* Offensive Line (Center + Guards/Tackles) */}
-      <circle cx="80" cy="85" r="3.5" fill="#ffffff" />
-      <circle cx="68" cy="85" r="3" fill="#94a3b8" />
-      <circle cx="92" cy="85" r="3" fill="#94a3b8" />
+      <circle cx={lineX} cy="55" r="3.5" fill="#ffffff" />
+      <circle cx={lineX} cy={68 * crossScale} r="3" fill="#94a3b8" />
+      <circle cx={lineX} cy={92 * crossScale} r="3" fill="#94a3b8" />
       {/* QB */}
-      <circle cx="80" cy="97" r="3.5" fill="#38bdf8" />
+      <circle cx={160 - qbY * depthScale} cy="55" r="3.5" fill="#38bdf8" />
       {/* RB */}
-      <circle cx="70" cy="103" r="3" fill="#f59e0b" />
+      <circle cx={160 - rbY * depthScale} cy={70 * crossScale} r="3" fill="#f59e0b" />
 
       {/* Receiver Route Schematics */}
       {/* Left WR (x=24) */}
-      <circle cx="24" cy="85" r="3" fill="#ec4899" />
-      <RoutePath route={play.left} startX={24} startY={85} />
+      <circle cx={lineX} cy={24 * crossScale} r="3" fill="#ec4899" />
+      <RoutePath route={play.left} startX={24} startY={lineY} direction={direction} transform={routeTransform} />
 
       {/* Slot WR (x=50) */}
-      <circle cx="50" cy="85" r="3" fill="#a855f7" />
-      <RoutePath route={play.slot} startX={50} startY={85} />
+      <circle cx={lineX} cy={50 * crossScale} r="3" fill="#a855f7" />
+      <RoutePath route={play.slot} startX={50} startY={lineY} direction={direction} transform={routeTransform} />
 
       {/* Center/TE (x=110) */}
-      <circle cx="110" cy="85" r="3" fill="#34d399" />
-      <RoutePath route={play.center} startX={110} startY={85} />
+      <circle cx={lineX} cy={110 * crossScale} r="3" fill="#34d399" />
+      <RoutePath route={play.center} startX={110} startY={lineY} direction={direction} transform={routeTransform} />
 
       {/* Right WR (x=136) */}
-      <circle cx="136" cy="85" r="3" fill="#ec4899" />
-      <RoutePath route={play.right} startX={136} startY={85} />
+      <circle cx={lineX} cy={136 * crossScale} r="3" fill="#ec4899" />
+      <RoutePath route={play.right} startX={136} startY={lineY} direction={direction} transform={routeTransform} />
 
       {/* Run Action Path for Designed Runs */}
       {isRun && (
-        <>
+        <g transform={routeTransform}>
           <path
             d={
               play.type === 'SWEEP'
-                ? 'M 70 103 Q 40 98 25 70 Q 18 45 22 15'
+                ? `M 70 ${rbY} Q 40 ${rbY - 5 * direction} 25 ${advance(15)} Q 18 ${advance(40)} 22 ${advance(70)}`
                 : play.type === 'POWER'
-                  ? 'M 70 103 Q 75 92 88 75 L 94 20'
-                  : 'M 70 103 Q 74 92 80 75 L 80 18'
+                  ? `M 70 ${rbY} Q 75 ${rbY - 11 * direction} 88 ${advance(10)} L 94 ${advance(65)}`
+                  : `M 70 ${rbY} Q 74 ${rbY - 11 * direction} 80 ${advance(10)} L 80 ${advance(70)}`
             }
             fill="none"
             stroke="#f59e0b"
@@ -74,64 +87,65 @@ function MiniRouteDiagram({ play }: { play: TecmoPlayOption }) {
           <polygon
             points={
               play.type === 'SWEEP'
-                ? '22,12 18,20 26,20'
+                ? `22,${advance(70)} 18,${advance(62)} 26,${advance(62)}`
                 : play.type === 'POWER'
-                  ? '94,17 90,25 98,25'
-                  : '80,15 76,23 84,23'
+                  ? `94,${advance(65)} 90,${advance(57)} 98,${advance(57)}`
+                  : `80,${advance(70)} 76,${advance(62)} 84,${advance(62)}`
             }
             fill="#f59e0b"
           />
-        </>
+        </g>
       )}
     </svg>
   );
 }
 
-function RoutePath({ route, startX, startY }: { route: string; startX: number; startY: number }) {
+function RoutePath({ route, startX, startY, direction, transform }: { route: string; startX: number; startY: number; direction: number; transform: string }) {
   if (route === 'BLOCK') {
     return (
-      <line x1={startX - 6} y1={startY - 6} x2={startX + 6} y2={startY - 6} stroke="#ffffff" strokeWidth="2.5" strokeLinecap="round" />
+      <line transform={transform} x1={startX - 6} y1={startY + 6 * direction} x2={startX + 6} y2={startY + 6 * direction} stroke="#ffffff" strokeWidth="2.5" strokeLinecap="round" />
     );
   }
   let pathD = '';
   const dir = startX < 80 ? 1 : -1;
+  const advance = (depth: number) => startY + depth * direction;
 
   switch (route) {
     case 'GO':
-      pathD = `M ${startX} ${startY} L ${startX} 15`;
+      pathD = `M ${startX} ${startY} L ${startX} ${advance(70)}`;
       break;
     case 'SLANT-R':
-      pathD = `M ${startX} ${startY} L ${startX} ${startY - 15} L ${startX + 30} ${startY - 45}`;
+      pathD = `M ${startX} ${startY} L ${startX} ${advance(15)} L ${startX + 30} ${advance(45)}`;
       break;
     case 'SLANT-L':
-      pathD = `M ${startX} ${startY} L ${startX} ${startY - 15} L ${startX - 30} ${startY - 45}`;
+      pathD = `M ${startX} ${startY} L ${startX} ${advance(15)} L ${startX - 30} ${advance(45)}`;
       break;
     case 'CROSS-R':
-      pathD = `M ${startX} ${startY} L ${startX} ${startY - 20} L ${startX + 55} ${startY - 25}`;
+      pathD = `M ${startX} ${startY} L ${startX} ${advance(20)} L ${startX + 55} ${advance(25)}`;
       break;
     case 'CROSS-L':
-      pathD = `M ${startX} ${startY} L ${startX} ${startY - 20} L ${startX - 55} ${startY - 25}`;
+      pathD = `M ${startX} ${startY} L ${startX} ${advance(20)} L ${startX - 55} ${advance(25)}`;
       break;
     case 'COMEBACK':
-      pathD = `M ${startX} ${startY} L ${startX} ${startY - 45} L ${startX + (dir * 8)} ${startY - 35}`;
+      pathD = `M ${startX} ${startY} L ${startX} ${advance(45)} L ${startX + (dir * 8)} ${advance(35)}`;
       break;
     case 'HITCH':
-      pathD = `M ${startX} ${startY} L ${startX} ${startY - 25} L ${startX - (dir * 6)} ${startY - 20}`;
+      pathD = `M ${startX} ${startY} L ${startX} ${advance(25)} L ${startX - (dir * 6)} ${advance(20)}`;
       break;
     case 'POST-R':
-      pathD = `M ${startX} ${startY} L ${startX} ${startY - 35} L ${startX + 28} 15`;
+      pathD = `M ${startX} ${startY} L ${startX} ${advance(35)} L ${startX + 28} ${advance(70)}`;
       break;
     case 'POST-L':
-      pathD = `M ${startX} ${startY} L ${startX} ${startY - 35} L ${startX - 28} 15`;
+      pathD = `M ${startX} ${startY} L ${startX} ${advance(35)} L ${startX - 28} ${advance(70)}`;
       break;
     case 'FLAG-R':
-      pathD = `M ${startX} ${startY} L ${startX} ${startY - 35} L ${startX + 32} 20`;
+      pathD = `M ${startX} ${startY} L ${startX} ${advance(35)} L ${startX + 32} ${advance(65)}`;
       break;
     case 'FLAG-L':
-      pathD = `M ${startX} ${startY} L ${startX} ${startY - 35} L ${startX - 32} 20`;
+      pathD = `M ${startX} ${startY} L ${startX} ${advance(35)} L ${startX - 32} ${advance(65)}`;
       break;
     case 'WHEEL':
-      pathD = `M ${startX} ${startY} Q ${startX + (dir * 25)} ${startY - 20} ${startX + (dir * 20)} 15`;
+      pathD = `M ${startX} ${startY} Q ${startX + (dir * 25)} ${advance(20)} ${startX + (dir * 20)} ${advance(70)}`;
       break;
     default:
       pathD = `M ${startX} ${startY} L ${startX} 25`;
@@ -141,6 +155,7 @@ function RoutePath({ route, startX, startY }: { route: string; startX: number; s
   return (
     <path
       d={pathD}
+      transform={transform}
       fill="none"
       stroke="#38bdf8"
       strokeWidth="1.5"
@@ -154,6 +169,7 @@ export const TecmoPlaybookCards: React.FC<TecmoPlaybookCardsProps> = ({
   teamId,
   opposingTeamId,
   isDefense,
+  attackDirection,
   activeOffensePlay,
   activeDefensePlay,
   downDistanceText,
@@ -274,7 +290,7 @@ export const TecmoPlaybookCards: React.FC<TecmoPlaybookCardsProps> = ({
 
                 {/* Route Diagram Canvas */}
                 <div className="h-24 sm:h-28 w-full shrink-0 overflow-hidden bg-[#09140e]">
-                  <MiniRouteDiagram play={play} />
+                  <MiniRouteDiagram play={play} attackDirection={attackDirection} />
                 </div>
 
                 {/* Play Details */}

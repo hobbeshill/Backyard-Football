@@ -3,7 +3,7 @@ import test from 'node:test';
 import { chooseProDefensiveCall, getCoverageMistakeChance, getCpuCounterReason, getSuccessfulPlayCounter, isCpuPressureRecognized, scoreRunBlockTarget, shouldCpuReleasePass, shouldCpuScramble } from './ai';
 import { alignDefenderAcrossFromReceiver, alignDefenderAcrossFromRunningBack, alignDefenderToZone, alignDefenders, chooseCpuDefensiveAssignments, constrainDefendersToFieldSide, getBlitzAlignmentY, getBracketCoverageTarget, getDefensiveLineAlignmentY, matchCpuDefendersToReceivers, separateDefenderAlignments } from './defense';
 import { getCarrierFumbleChance } from './fumbles';
-import { calculateYardsToGo, canApplyProMatchupAdjustment, canDefenderDeflectPass, canTackleQuarterback, findTappedPassReceiver, getCatchCompletionChance, getDefenderPassReachHeight, getDriveStartY, getSnapBallPosition, getPassArcHeight, getPassArcMaxHeight, getPassFlightFrames, getPassLeadTarget, getRoutePassLeadTarget, isSafety, resolveCatchContestOutcome, resolvePlayResult } from './rules';
+import { calculateYardsToGo, canApplyProMatchupAdjustment, canDefenderDeflectPass, canTackleQuarterback, findTappedPassReceiver, getCatchCompletionChance, getDefenderPassReachHeight, getDriveStartY, getSnapBallPosition, getPassArcHeight, getPassArcMaxHeight, getPassArcScreenPoint, getPassFlightFrames, getPassLeadTarget, getRoutePassLeadTarget, isSafety, resolveCatchContestOutcome, resolvePlayResult } from './rules';
 import { canEngagePassBlock, checkOffensiveLineWall, clampPlayerToFieldY, GAME_SPEED_SCALE, getBallCarrierRunSpeed, getFatigueSpeedMultiplier, getPassBlockBaseHoldFrames, getPassBlockHoldFrames, getRunDirectionSpeedFactor, getRunPursuitMovement, getUserDefenderSpeed, isRusherActivelyBlocked, moveToward, resolveCollisions, shouldHoldPassBlock, updatePlayerStamina, updateReceiverTargetStamina, updateRunningBackStamina, updateRouteMovement, USER_CONTROL_SPEED_MULTIPLIER } from './movement';
 import type { Entity } from './types';
 
@@ -330,6 +330,17 @@ test('short passes clear defensive linemen on a safe arc', () => {
   assert.equal(maxHeight, 38);
   assert.ok(lineCrossingHeight > getDefenderPassReachHeight('DL'));
   assert.equal(getPassArcHeight(maxHeight, 0.5), maxHeight);
+});
+
+test('pass screen path rises above its release and catch points at the arc apex', () => {
+  const start = getPassArcScreenPoint(100, 200, 200, 300, 38, 0);
+  const apex = getPassArcScreenPoint(100, 200, 200, 300, 38, 0.5);
+  const end = getPassArcScreenPoint(100, 200, 200, 300, 38, 1);
+
+  assert.equal(start.x, 80);
+  assert.equal(end.x, 186);
+  assert.equal(apex.y, 250);
+  assert.ok(apex.x < (start.x + end.x) / 2, 'The apex should project upward on screen');
 });
 
 test('blitz lobs have more airtime and a higher arc than standard throws', () => {

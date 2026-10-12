@@ -563,13 +563,12 @@ test('kick coverage pursuers only gain return speed after the returner fields th
   assert.ok(postCatchSpeed > flightSpeed);
 });
 
-test('kick and punt returners are slowed to match the speed of their own team and can break tackles', () => {
+test('kick and punt returners run at caught-pass speed and can break tackles', () => {
   const normalCarrierSpeed = getBallCarrierRunSpeed(false, false);
-  const regularWrRouteSpeed = 1.4 * 1.18 * 0.68;
 
   assert.equal(normalCarrierSpeed, 1.84);
-  assert.equal(getBallCarrierRunSpeed(true, false), regularWrRouteSpeed);
-  assert.equal(getBallCarrierRunSpeed(true, true), regularWrRouteSpeed);
+  assert.equal(getBallCarrierRunSpeed(true, false), normalCarrierSpeed);
+  assert.equal(getBallCarrierRunSpeed(true, true), getBallCarrierRunSpeed(false, true));
   assert.equal(getBallCarrierRunSpeed(false, true), 2.15);
   const returnerBreakChance = calculateBrokenTackleChance({
     isRB: false,

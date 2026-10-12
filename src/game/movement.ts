@@ -40,7 +40,7 @@ export function createSimulationClock() {
 
 export function getBallCarrierRunSpeed(isReturner: boolean, isBoosted: boolean): number {
   if (isReturner) {
-    return 1.4 * 1.18 * 0.68;
+    return isBoosted ? 2.15 : 1.84;
   }
   return isBoosted ? 2.15 : 1.84;
 }
@@ -416,8 +416,19 @@ export function updateRouteMovement(
 ): void {
   if (!receiver || receiver.caught || (phase !== 'QB_DROP' && phase !== 'THROWN')) return;
   receiver.timer = (receiver.timer || 0) + 1;
+  if (receiver.routeWaypointType !== receiver.routeType) {
+    receiver.startX = receiver.x;
+    receiver.startY = receiver.y;
+    receiver.routeWaypoint = 0;
+    receiver.routeWaypointType = receiver.routeType;
+  }
   receiver.startX ??= receiver.x;
   receiver.startY ??= receiver.y;
+  if (receiver.routeWaypointStartX !== receiver.startX || receiver.routeWaypointStartY !== receiver.startY) {
+    receiver.routeWaypoint = 0;
+    receiver.routeWaypointStartX = receiver.startX;
+    receiver.routeWaypointStartY = receiver.startY;
+  }
   const points = getRouteWaypoints(receiver, attackDirection, fieldWidth, fieldHeight);
   const waypoint = receiver.routeWaypoint ?? 0;
   const target = points[Math.min(waypoint, points.length - 1)];

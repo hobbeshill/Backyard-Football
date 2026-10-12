@@ -2,6 +2,10 @@ import type { DefOption, PlayOption } from './types';
 import { SIGNATURE_PLAYS, signatureOffenseIds, signatureDefenseIds } from './signaturePlays';
 import { SEC_TEAM_TECMO_PLAYS } from './tecmoPlaybook';
 
+export function getScreenTravelDirection(attackDirection: number): -1 | 1 {
+  return attackDirection < 0 ? 1 : -1;
+}
+
 export const offensivePlaybook: Record<string, PlayOption> = {
   SHORT_PASS: {
     name: 'ALIGNMENT: SPREAD',

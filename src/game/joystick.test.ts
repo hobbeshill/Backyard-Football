@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { FIELD_NUMBERS_INNER_EDGE_X, getCanvasRenderScale, getCameraYForAction, getCameraYForLineOfScrimmage, getSideScrollCameraYForLineOfScrimmage, getOffenseJoystickAnchor, getPlayerForwardDirection, isOffenseJoystickStartZone, mountFootballGame, OFFENSE_JOYSTICK_INNER_RING_RADIUS, OFFENSE_JOYSTICK_RADIUS, type GameEngineHandle } from './engine';
+import { FIELD_NUMBERS_INNER_EDGE_X, getCanvasRenderScale, getResponsiveCanvasSize, getCameraYForAction, getCameraYForLineOfScrimmage, getLineOfScrimmageFacingDirection, getSideScrollCameraYForLineOfScrimmage, getOffenseJoystickAnchor, getPlayerForwardDirection, isOffenseJoystickStartZone, mountFootballGame, OFFENSE_JOYSTICK_INNER_RING_RADIUS, OFFENSE_JOYSTICK_RADIUS, type GameEngineHandle } from './engine';
 import { createSimulationClock, getDesignedRunLateralBias, getDirectionalInput, getRunLaneOptions, getScreenEdgeTargetPosition, getUserRunnerVelocity } from './movement';
 import { TEAMS } from './teams';
-import { getPlayerSpeedMultiplier } from './roster';
+import { getFastestRosterSlot, getPlayerSpeedMultiplier } from './roster';
 
 test('camera raises the offensive line of scrimmage while retaining defensive framing', () => {
   const lineOfScrimmageY = 500;
@@ -80,11 +80,29 @@ test('player facing follows team ownership when kickoff roles differ from posses
   assert.equal(getPlayerForwardDirection(undefined, 'P1', -1, 1), 1, 'Untagged players retain their role-based direction');
 });
 
+test('pre-snap players face the line of scrimmage from either side', () => {
+  assert.equal(getLineOfScrimmageFacingDirection(520, 500, -1), -1, 'A player below the line faces upfield toward it');
+  assert.equal(getLineOfScrimmageFacingDirection(480, 500, 1), 1, 'A player above the line faces downfield toward it');
+  assert.equal(getLineOfScrimmageFacingDirection(500, 500, -1), -1, 'Players on the line use their team direction');
+});
+
 test('canvas backing resolution follows display scale with a bounded pixel ratio', () => {
   assert.equal(getCanvasRenderScale(340, 450, 2), 2);
   assert.equal(getCanvasRenderScale(680, 900, 2), 3);
   assert.equal(getCanvasRenderScale(170, 225, 1), 1);
   assert.equal(getCanvasRenderScale(450, 340, 2, 450, 340), 2);
+});
+
+test('landscape canvas layout fills the viewport without distorting its logical aspect', () => {
+  const landscape = getResponsiveCanvasSize(900, 400);
+  assert.equal(landscape.displayWidth, 900);
+  assert.equal(landscape.displayHeight, 400);
+  assert.equal(landscape.logicalWidth, 765);
+
+  const portrait = getResponsiveCanvasSize(390, 844);
+  assert.ok(portrait.displayWidth <= 390);
+  assert.ok(portrait.displayHeight <= 844);
+  assert.equal(portrait.logicalWidth, 450);
 });
 
 test('simulation runs at 60 Hz regardless of display refresh rate', () => {
@@ -180,9 +198,9 @@ test('engine uses team roster profiles across possessions, team switches and ret
     game.resetDrill();
     game.set4thDownForTest?.();
     game.callPunt();
-    assert.equal(game.getDefenders?.().find(player => player.isReturner)?.player, TEAMS.ARKANSAS.roster['wr-0']);
+    assert.equal(game.getDefenders?.().find(player => player.isReturner)?.player, TEAMS.ARKANSAS.roster[getFastestRosterSlot(TEAMS.ARKANSAS.roster)]);
     game.resetGame();
-    assert.equal(game.getDefenders?.().find(player => player.isReturner)?.player, TEAMS.FLORIDA.roster['wr-0']);
+    assert.equal(game.getDefenders?.().find(player => player.isReturner)?.player, TEAMS.FLORIDA.roster[getFastestRosterSlot(TEAMS.FLORIDA.roster)]);
   } finally {
     cleanup?.();
   }
@@ -846,6 +864,7 @@ test('P1 can steer the return man after fielding a kickoff', () => {
     assert.equal(game.phase, 'RUNNING', 'The receiving player must field this non-touchback kickoff');
     const returner = game.getDefenders?.().find(player => player.isReturner);
     assert.ok(returner);
+    returner.team = 'P2';
     const catchY = returner.y;
     for (let frame = 0; frame < 6; frame++) advanceFrame();
     assert.ok((returner.y - catchY) * game.attackDirection > 0, 'The returner continues upfield when no lateral input is held');
@@ -876,6 +895,14 @@ test('P1 can steer the return man after fielding a kickoff', () => {
     advanceFrame();
     assert.ok(returner.y > yBeforeReverse, 'The returner must reverse left even while blockers pursue coverage');
     canvas._listeners.get('pointerup')?.({ clientX: 120, clientY: 220, pointerId: 8 } as PointerEvent);
+
+    const depthBeforeSidestep = returner.y;
+    const sidelineBeforeSidestep = returner.x;
+    game.applyLocalInput?.(0, -1, true);
+    advanceFrame();
+    assert.ok(returner.x < sidelineBeforeSidestep, 'The returner can steer toward either sideline');
+    assert.ok(Math.abs(returner.y - depthBeforeSidestep) < 1, 'Sideline input does not force the returner downfield');
+    game.applyLocalInput?.(0, 0, false);
   } finally {
     cleanup?.();
     globalThis.requestAnimationFrame = originalRequest;

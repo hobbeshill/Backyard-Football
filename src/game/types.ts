@@ -65,6 +65,9 @@ export interface Entity {
   routeType?: string;
   routeIndex?: number;
   routeWaypoint?: number;
+  routeWaypointType?: string;
+  routeWaypointStartX?: number;
+  routeWaypointStartY?: number;
   timer?: number;
   flash?: number;
   caught?: boolean;
