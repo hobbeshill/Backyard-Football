@@ -54,7 +54,9 @@ function getThreeQuarterFacing(
       lateralSpeed > 0.3 && lateralSpeed > verticalSpeed * 0.8;
     const turnToProfile = lateralSpeed > 0.5 && lateralSpeed > verticalSpeed * 1.15;
     const facing = {
-      profileDirection: keepProfile || turnToProfile ? Math.sign(entity.vx || 0) : 0,
+      profileDirection: Math.hypot(entity.vx || 0, entity.vy || 0) <= 0.4
+        ? -forwardDirection
+        : keepProfile || turnToProfile ? Math.sign(entity.vx || 0) : 0,
       facingAway: false
     };
     facing.facingAway = facing.profileDirection === 0 && forwardDirection === -1;
@@ -66,6 +68,11 @@ function getThreeQuarterFacing(
   const velocityY = entity.vy || 0;
   const speed = Math.hypot(velocityX, velocityY);
   const previous = threeQuarterFacingByEntity.get(entity);
+  if (speed <= 0.4) {
+    const facing = { profileDirection: -forwardDirection, facingAway: false };
+    threeQuarterFacingByEntity.set(entity, { forwardDirection, ...facing });
+    return facing;
+  }
   let profileDirection = 0;
   let facingAway = false;
 

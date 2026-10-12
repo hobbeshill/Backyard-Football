@@ -186,10 +186,9 @@ export function getSideScrollCameraYForLineOfScrimmage(
   lineOfScrimmageY: number,
   viewWidth: number,
   pitch: number,
-  userOnOffense: boolean
+  _userOnOffense: boolean
 ): number {
-  const lineScreenFraction = userOnOffense ? 0.34 : 0.40;
-  return lineOfScrimmageY - (viewWidth * (1 - lineScreenFraction) / pitch);
+  return lineOfScrimmageY - (viewWidth * 0.5 / pitch);
 }
 
 export interface GameEngineCallbacks {
@@ -3858,9 +3857,11 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
     const isBehindLine = (attackDirection === -1 && carrier.y > lineOfScrimmageY) ||
                          (attackDirection === 1 && carrier.y < lineOfScrimmageY);
-    const playEndingType = (carrier === qb && isBehindLine) ? 'SACK' : 'TACKLE';
+    const playEndingType = ((carrier === qb || carrier.isQuarterback) && isBehindLine) ? 'SACK' : 'TACKLE';
 
-    let announce = "USER TACKLE! BALL CARRIER STOPPED! 🛑";
+    let announce = playEndingType === 'SACK'
+      ? 'USER SACK! QUARTERBACK DOWN! 🛑'
+      : 'USER TACKLE! BALL CARRIER STOPPED! 🛑';
     if (defender.isOnFire) {
       announce = "🔥 FLAMING BLITZ SMACKDOWN! 🔥";
     } else if (isDiving) {
@@ -3869,7 +3870,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       announce = "TURBO HIT-STICK! DE-CLEATED! 💥⚡";
     }
     if (isBehindLine) {
-      announce += " TACKLE FOR LOSS!";
+      if (playEndingType !== 'SACK') announce += " TACKLE FOR LOSS!";
       recordDefensiveBigPlay(defender, playEndingType === 'SACK' ? "SACK" : "TFL");
     }
 
@@ -6229,9 +6230,11 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         });
 
         // Enforce 3 OL blocking wall against all defenders attempting to run through the line
-        if (!exactPassCounter) {
+        const userControlsPassRush = Boolean(isUserDefense() && passRushers.includes(getControlledDefender() as Entity));
+        if (!exactPassCounter && !userControlsPassRush) {
           defenders.forEach(d => {
             if (!d) return;
+            if (isUserDefense() && d === getControlledDefender()) return;
             checkOffensiveLineWall(d, linemen, lineOfScrimmageY, attackDirection);
           });
         }
@@ -6241,7 +6244,9 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           const isUserRusher = isUserDefense() && rusher === getControlledDefender();
 
           // Find engaging blocker
-          const engagingBlocker = exactPassCounter
+          const engagingBlocker = isUserRusher
+            ? undefined
+            : exactPassCounter
             ? undefined
             : allPassBlockers.find(b => canEngagePassBlock(b, rusher));
 
@@ -6620,14 +6625,12 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
               d.vx = defenderDirection.x * defSpeed;
               d.vy = defenderDirection.y * defSpeed;
               if (phase === 'QB_DROP') {
-                const wallEngaged = checkOffensiveLineWall(d, linemen, lineOfScrimmageY, attackDirection);
-                if (!wallEngaged && !d.isEngagedWithBlocker) {
-                  d.x += d.vx;
-                  d.y += d.vy;
-                  d.x = Math.max(20, Math.min(fieldWidth - 20, d.x));
-                  d.y = Math.max(30, Math.min(fieldHeight - 30, d.y));
-                  checkOffensiveLineWall(d, linemen, lineOfScrimmageY, attackDirection);
-                }
+                d.isEngagedWithBlocker = false;
+                d.blockingDefender = null;
+                d.x += d.vx;
+                d.y += d.vy;
+                d.x = Math.max(20, Math.min(fieldWidth - 20, d.x));
+                d.y = Math.max(30, Math.min(fieldHeight - 30, d.y));
               } else if (!d.isEngagedWithBlocker) {
                 d.x += d.vx;
                 d.y += d.vy;
@@ -6668,11 +6671,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
             const isDiving = (d.diveTimer || 0) > 0;
             const contactDist = (qb.radius || 10) + (d.radius || 10) + (isDiving ? 12 : 5);
             if (distToQb < contactDist) {
-              const isBlocked = isRusherActivelyBlocked(d, [...passBlockers, ...linemen]);
-              if (!isBlocked && !d.isEngagedWithBlocker) {
-                executeUserTackleOnCarrier(d, qb, isDiving);
-                return;
-              }
+              executeUserTackleOnCarrier(d, qb, isDiving);
+              return;
             }
           }
 
@@ -6966,6 +6966,10 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       const controlledDefender = getControlledDefender();
       if (controlledDefender) userControlledEntities.push(controlledDefender);
     }
+    const controlledPassRusher = phase === 'QB_DROP' && isUserDefense() ? getControlledDefender() : null;
+    const userPassThroughEntities = controlledPassRusher
+      ? allPlayers.filter((player): player is Entity => Boolean(player && player !== controlledPassRusher))
+      : [];
     resolveCollisions(
       allPlayers.filter((player): player is Entity => player !== null && player !== undefined),
       includeReceiverCollisions,
@@ -6973,7 +6977,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       defenders,
       phase === 'RUNNING' || phase === 'HANDOFF' ? activeEntity : (phase === 'QB_DROP' ? qb : null),
       fieldWidth,
-      userControlledEntities
+      userControlledEntities,
+      userPassThroughEntities
     );
     allPlayers.forEach(player => {
       if (player) clampPlayerToFieldY(player, fieldHeight);
@@ -7677,46 +7682,6 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       : { vx: -(entity.vy || 0), vy: entity.vx || 0 };
     drawHelmetSprite(ctx!, { ...entity, ...facingVelocity }, design, forwardDirection, (touchOptimized ? 1.23 : 1.08) * buildScale, 'THREE_QUARTER', faceForwardDirection);
     ctx!.restore();
-    ctx!.save();
-    if (entity.stamina !== undefined) {
-      const stamina = entity.stamina;
-      ctx!.fillStyle = '#171717';
-      ctx!.fillRect(entity.x - 12, entity.y + 20, 24, 4);
-      ctx!.fillStyle = stamina < 25 ? '#ef4444' : stamina < 55 ? '#fbbf24' : '#4ade80';
-      ctx!.fillRect(entity.x - 12, entity.y + 20, 24 * stamina / 100, 4);
-    }
-    ctx!.restore();
-  }
-
-  function drawPlayerBody(entity: Entity, uniformColor: string) {
-    const stride = Math.sin(Date.now() * 0.025 + entity.x) * Math.min(2.5, Math.abs(entity.vy || 0));
-    ctx!.save();
-    ctx!.fillStyle = 'rgba(0, 0, 0, 0.35)';
-    ctx!.beginPath();
-    ctx!.ellipse(entity.x + 13, entity.y + 2, 5, 8, 0, 0, Math.PI * 2);
-    ctx!.fill();
-
-    ctx!.strokeStyle = '#17211e';
-    ctx!.lineWidth = 3.5;
-    ctx!.lineCap = 'round';
-    ctx!.beginPath();
-    ctx!.moveTo(entity.x + 12, entity.y - 2);
-    ctx!.lineTo(entity.x + 17, entity.y - 5 + stride);
-    ctx!.moveTo(entity.x + 12, entity.y + 2);
-    ctx!.lineTo(entity.x + 17, entity.y + 5 - stride);
-    ctx!.stroke();
-
-    ctx!.fillStyle = uniformColor;
-    ctx!.beginPath();
-    ctx!.ellipse(entity.x + 8, entity.y, 7, 6, 0, 0, Math.PI * 2);
-    ctx!.fill();
-    ctx!.strokeStyle = '#f1ead0';
-    ctx!.lineWidth = 1.5;
-    ctx!.beginPath();
-    ctx!.moveTo(entity.x + 7, entity.y - 4);
-    ctx!.lineTo(entity.x + 7, entity.y + 4);
-    ctx!.stroke();
-    ctx!.restore();
   }
 
   function drawGoalPost(postY: number, isTopEnd: boolean) {
@@ -8001,10 +7966,6 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       const teamKey = entity.team || (defaultRole === 'offense' ? activeOffense : activeDefense);
       return teamKey === 'P1' ? p1Helmet : p2Helmet;
     };
-    const getEntityUniformColor = (entity: Entity, defaultRole: 'offense' | 'defense') => {
-      const teamKey = entity.team || (defaultRole === 'offense' ? activeOffense : activeDefense);
-      return teamKey === 'P1' ? p1Team.primaryColor : p2Team.primaryColor;
-    };
     const getEntityForwardDirection = (entity: Entity, defaultRole: 'offense' | 'defense') => {
       const teamDirection = getPlayerForwardDirection(
         entity.team,
@@ -8048,7 +8009,6 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         worldToCanvas(first.entity.x, first.entity.y).y - worldToCanvas(second.entity.x, second.entity.y).y
       )
       .forEach(({ entity, role, forwardDirection }) => {
-        drawPlayerBody(entity, getEntityUniformColor(entity, role));
         const faceTeamTravel = phase === 'PRE_SNAP' || (entity === qb && phase === 'QB_DROP');
         drawHelmet(entity, getEntityHelmet(entity, role), forwardDirection, faceTeamTravel, phase === 'PRE_SNAP');
       });

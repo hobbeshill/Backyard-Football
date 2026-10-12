@@ -201,13 +201,13 @@ test('3/4 helmet profiles reverse when the player changes horizontal direction',
 
 test('rear 3/4 helmet uses a custom shell silhouette', () => {
   const { ctx, ellipses } = createRecordingContext();
-  drawHelmetSprite(ctx, { x: 0, y: 0, radius: 10 }, getHelmetDesign(TEAMS.AUBURN), -1, 1, 'THREE_QUARTER');
+  drawHelmetSprite(ctx, { x: 0, y: 0, radius: 10, vy: -2 }, getHelmetDesign(TEAMS.AUBURN), -1, 1, 'THREE_QUARTER');
   assert.equal(ellipses.length, 1, 'Only the ground shadow is circular');
 });
 
 test('rear 3/4 helmet is taller without changing width and has a flat bottom', () => {
   const { ctx, movePoints, lineToPoints, bezierCurveYs } = createRecordingContext();
-  drawHelmetSprite(ctx, { x: 0, y: 0, radius: 10 }, getHelmetDesign(TEAMS.AUBURN), -1, 1, 'THREE_QUARTER');
+  drawHelmetSprite(ctx, { x: 0, y: 0, radius: 10, vy: -2 }, getHelmetDesign(TEAMS.AUBURN), -1, 1, 'THREE_QUARTER');
   const radius = 10 * 1.15;
 
   assert.ok(Math.abs(movePoints[0][0] + radius * 0.72) < 0.000001);
@@ -218,7 +218,7 @@ test('rear 3/4 helmet is taller without changing width and has a flat bottom', (
 
 test('front helmet shell reaches the rear base height while leaving the face opening clear', () => {
   const { ctx, quadraticEndY, quadraticControlY } = createRecordingContext();
-  drawHelmetSprite(ctx, { x: 0, y: 0, radius: 10 }, getHelmetDesign(TEAMS.AUBURN), 1, 1, 'THREE_QUARTER');
+  drawHelmetSprite(ctx, { x: 0, y: 0, radius: 10, vy: 2 }, getHelmetDesign(TEAMS.AUBURN), 1, 1, 'THREE_QUARTER');
   const helmetRadius = 10 * 1.15;
 
   const shellCurveYs = [...quadraticEndY.slice(0, 8), ...quadraticControlY.slice(0, 8)];
@@ -242,12 +242,12 @@ test('front and rear helmet crowns share the same width and height', () => {
 test('rear-facing 3/4 helmets show neither side logos nor the front facemask', () => {
   const design = getHelmetDesign(TEAMS.AUBURN);
   const rear = createRecordingContext();
-  drawHelmetSprite(rear.ctx, { x: 0, y: 0, radius: 10 }, design, -1, 1, 'THREE_QUARTER');
+  drawHelmetSprite(rear.ctx, { x: 0, y: 0, radius: 10, vy: -2 }, design, -1, 1, 'THREE_QUARTER');
   assert.deepEqual(rear.text, []);
   assert.equal(rear.lineToX.some(x => Math.abs(x) < 10 * 1.15 * 0.4), false);
 
   const front = createRecordingContext();
-  drawHelmetSprite(front.ctx, { x: 0, y: 0, radius: 10 }, design, 1, 1, 'THREE_QUARTER');
+  drawHelmetSprite(front.ctx, { x: 0, y: 0, radius: 10, vy: 2 }, design, 1, 1, 'THREE_QUARTER');
   assert.equal(front.text.length, 2);
   assert.ok(front.lineToX.some(x => Math.abs(x) < 10 * 1.15 * 0.4));
 });
@@ -325,7 +325,7 @@ test('Texas longhorn remains a graphic side decal in profile view', () => {
   assert.deepEqual(text, [], 'Texas uses its graphic decal, not substitute text');
 });
 
-test('quarterback helmet turns with lateral movement but never faces his own end zone', () => {
+test('quarterback rests in profile, turns laterally, and never faces his own end zone while moving', () => {
   const design = getHelmetDesign(TEAMS.AUBURN);
   const draw = (entity: { x: number; y: number; radius: number; vx: number; vy: number }, forwardDirection: number) => {
     const recording = createRecordingContext();
@@ -336,7 +336,9 @@ test('quarterback helmet turns with lateral movement but never faces his own end
   for (const forwardDirection of [-1, 1]) {
     const qb = { x: 0, y: 0, radius: 10, vx: 0, vy: 0 };
     const facingForwardTextCount = forwardDirection === 1 ? 2 : 0;
-    assert.equal(draw(qb, forwardDirection).text.length, facingForwardTextCount, 'Stationary QB faces downfield');
+    const stationary = draw(qb, forwardDirection);
+    assert.equal(stationary.text.length, 1, 'Stationary QB shows the side helmet decal');
+    assert.ok(stationary.lineToX.some(x => Math.sign(x) === -forwardDirection && Math.abs(x) > 8), 'Stationary QB facemask points downfield in profile');
 
     qb.vx = 2;
     assert.ok(draw(qb, forwardDirection).scales.some(([x, y]) => x === 1.22 && y === 1.28), 'QB turns to profile moving right');

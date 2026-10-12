@@ -52,16 +52,22 @@
 	}
 
 	.team-selector-overlay {
+		display: block;
 		align-items: stretch;
 		padding: 0;
+		overflow-x: hidden;
+		overflow-y: auto;
+		-webkit-overflow-scrolling: touch;
 	}
 
 	.team-selector-panel {
 		width: 100%;
-		max-height: 100dvh;
-		height: 100dvh;
+		min-height: 100dvh;
+		max-height: none;
+		height: auto;
 		border: 0;
 		border-radius: 0;
+		overflow: visible;
 	}
 
 	.team-selector-header {
@@ -88,11 +94,9 @@
 	}
 
 	.team-selector-list {
-		min-height: 0;
-		overflow-y: auto;
-		overscroll-behavior-y: contain;
-		-webkit-overflow-scrolling: touch;
-		touch-action: pan-y;
+		flex: none;
+		min-height: auto;
+		overflow: visible;
 	}
 
 	.team-selector-list > div {
@@ -121,6 +125,7 @@
 	}
 
 	.team-selector-footer {
+		position: static;
 		padding: 8px 10px;
 	}
 

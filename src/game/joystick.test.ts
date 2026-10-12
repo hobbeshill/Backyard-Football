@@ -18,9 +18,16 @@ test('camera raises the offensive line of scrimmage while retaining defensive fr
   assert.ok(Math.abs(getScreenFraction(false) - 1 / 3) < 0.000001);
 });
 
-test('side-scroll camera places the line of scrimmage left of center with room ahead', () => {
-  const cameraY = getSideScrollCameraYForLineOfScrimmage(600, 450, 1, true);
-  assert.ok(Math.abs(450 - (600 - cameraY) - 153) < 0.000001);
+test('side-scroll camera centers the line of scrimmage for either controlled side', () => {
+  for (const viewWidth of [390, 450, 765]) {
+    for (const pitch of [0.75, 1]) {
+      for (const userOnOffense of [true, false]) {
+        const cameraY = getSideScrollCameraYForLineOfScrimmage(600, viewWidth, pitch, userOnOffense);
+        const lineScreenX = viewWidth - ((600 - cameraY) * pitch);
+        assert.ok(Math.abs(lineScreenX - viewWidth / 2) < 0.000001);
+      }
+    }
+  }
 });
 
 test('idle joystick marker stays inside the field numbers at the RB formation depth', () => {
@@ -795,6 +802,83 @@ test('relative joystick controls the unassigned defender when user is on defense
     upHandler({ clientX: 110, clientY: 264, pointerId: 5 } as PointerEvent);
   } finally {
     cleanup?.();
+  }
+});
+
+test('user-controlled defender can sack the quarterback on a pass play', () => {
+  const originalRequest = globalThis.requestAnimationFrame;
+  const originalCancel = globalThis.cancelAnimationFrame;
+  const originalRandom = Math.random;
+  let nextFrame: FrameRequestCallback | null = null;
+  let timestamp = 0;
+  globalThis.requestAnimationFrame = callback => { nextFrame = callback; return 1; };
+  globalThis.cancelAnimationFrame = () => {};
+  Math.random = () => 0.99;
+
+  const handle: { game?: GameEngineHandle } = {};
+  const announcements: string[] = [];
+  const cleanup = mountFootballGame(createMockCanvas(), {
+    setP2OffPlayState: () => {}, setP2DefPlayState: () => {},
+    setDownDistanceText: () => {}, setActiveOffenseState: () => {},
+    setUserScore: () => {}, setCpuScore: () => {}, setP1DefPlayState: () => {},
+    setMomentumState: () => {}, setGameClockState: () => {},
+    showAnnouncement: text => announcements.push(text),
+    onEngineReady: game => { handle.game = game ?? undefined; }
+  });
+  const advanceFrame = () => {
+    const frame = nextFrame;
+    assert.ok(frame);
+    timestamp += 1000 / 60;
+    frame(timestamp);
+  };
+
+  try {
+    const game = handle.game;
+    assert.ok(game);
+    game.setOnlineGuestControl?.(true);
+    game.setOnlinePlayerSide?.('P1');
+    game.setPossessionForTest?.('P2');
+    game.resetDrill();
+
+    const snapshot = game.getNetworkSnapshot?.();
+    assert.ok(snapshot);
+    assert.equal(snapshot.activeOffense, 'P2');
+    assert.equal(snapshot.activeDefense, 'P1');
+    const quarterback = snapshot.entities.qb.data;
+    const defenderId = snapshot.defenderIds[0];
+    const defender = snapshot.entities[defenderId].data;
+    const attackDirection = snapshot.attackDirection as number;
+    snapshot.phase = 'QB_DROP';
+    snapshot.activeEntityId = 'qb';
+    snapshot.p2OffPlay = 'UGA_P1';
+    snapshot.cpuScrambleDecisionMade = true;
+    snapshot.userControlledDefenderIndex = 0;
+    snapshot.formationTransitions = [];
+    quarterback.hasBall = true;
+    quarterback.dropStepTimer = 0;
+    quarterback.tackleImmunity = 0;
+    defender.x = quarterback.x;
+    defender.y = quarterback.y + 27 * attackDirection;
+    defender.passRusher = true;
+    defender.defenseAssignment = 'BLITZ';
+    defender.isEngagedWithBlocker = true;
+    game.applyNetworkSnapshot?.(snapshot);
+    assert.equal(game.phase, 'QB_DROP', 'The test starts from a live pocket, not a scramble/run phase');
+    const userDefender = game.getControlledDefender?.();
+    assert.ok(userDefender);
+    assert.equal(userDefender, game.getDefenders?.()[0], 'The expected P1 defender receives manual control');
+    assert.equal(userDefender.team, 'P1');
+    game.applyLocalInput?.(attackDirection, 0, true);
+    assert.equal(game.isJoystickActiveForTest?.(), true);
+    for (let frame = 0; frame < 10 && game.phase === 'QB_DROP'; frame++) advanceFrame();
+
+    assert.equal(game.phase, 'DEAD');
+    assert.ok(announcements.some(text => /SACK/.test(text)), 'The user hit ends the play as a sack');
+  } finally {
+    cleanup?.();
+    Math.random = originalRandom;
+    globalThis.requestAnimationFrame = originalRequest;
+    globalThis.cancelAnimationFrame = originalCancel;
   }
 });
 

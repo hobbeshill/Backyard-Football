@@ -318,13 +318,16 @@ export function resolveCollisions(
   defenders: Entity[],
   ballCarrier: Entity | null = null,
   fieldWidth = 340,
-  userControlledEntities: Entity[] = []
+  userControlledEntities: Entity[] = [],
+  userPassThroughEntities: Entity[] = []
 ): void {
   for (let i = 0; i < allEntities.length; i++) {
     for (let j = i + 1; j < allEntities.length; j++) {
       const first = allEntities[i];
       const second = allEntities[j];
       if (!first || !second) continue;
+      if ((userControlledEntities.includes(first) && userPassThroughEntities.includes(second)) ||
+        (userControlledEntities.includes(second) && userPassThroughEntities.includes(first))) continue;
       if ((first === ballCarrier && second.isQuarterback) || (second === ballCarrier && first.isQuarterback)) continue;
 
       if (!includeReceivers) {
