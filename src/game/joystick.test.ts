@@ -100,21 +100,28 @@ test('canvas backing resolution follows display scale with a bounded pixel ratio
   assert.equal(getCanvasRenderScale(450, 340, 2, 450, 340), 2);
 });
 
-test('landscape canvas layout fills the viewport without distorting its logical aspect', () => {
+test('canvas layout fills the viewport top-to-bottom without distorting its logical aspect', () => {
   const landscape = getResponsiveCanvasSize(900, 400);
   assert.equal(landscape.displayWidth, 900);
   assert.equal(landscape.displayHeight, 400);
   assert.equal(landscape.logicalWidth, 765);
 
   const portrait = getResponsiveCanvasSize(390, 844);
-  assert.ok(portrait.displayWidth <= 390);
-  assert.ok(portrait.displayHeight <= 844);
-  assert.equal(portrait.logicalWidth, 450);
+  assert.equal(portrait.displayWidth, 390);
+  assert.equal(portrait.displayHeight, 844);
+  assert.ok(portrait.logicalWidth > 150);
 
   const compact = getResponsiveCanvasSize(220, 140);
   assert.ok(Math.abs(compact.displayWidth - 220) < 0.001);
   assert.ok(Math.abs(compact.displayHeight - 140) < 0.001);
   assert.ok(300 * (compact.displayHeight / 340) <= compact.displayHeight, 'Both sidelines fit inside the measured canvas height');
+
+  // Landscape phone with scoreboard height deducted
+  const phoneLandscapeAvailableHeight = 375 - 28; // 347px
+  const phoneLandscape = getResponsiveCanvasSize(812, phoneLandscapeAvailableHeight);
+  assert.equal(phoneLandscape.displayHeight, 347);
+  const topSidelineCanvasY = 20 * (phoneLandscape.displayHeight / 340);
+  assert.ok(topSidelineCanvasY > 20, 'Top sideline sits comfortably inside measured canvas stage below scoreboard');
 });
 
 test('simulation runs at 60 Hz regardless of display refresh rate', () => {
@@ -2071,3 +2078,21 @@ test('defender under user control does not move unless the user moves them', () 
     cleanup?.();
   }
 });
+
+test('line of scrimmage is centered and snap starts right there without pulling back camera into backfield', () => {
+  const lineOfScrimmageY = 600;
+  const viewWidth = 765;
+  const pitch = 1.0;
+  const cameraY = getSideScrollCameraYForLineOfScrimmage(lineOfScrimmageY, viewWidth, pitch, true);
+  const screenX = viewWidth - ((lineOfScrimmageY - cameraY) * pitch);
+  assert.equal(screenX, viewWidth / 2, 'Line of scrimmage is centered horizontally');
+
+  // When ball is in backfield during handoff or dropback (e.g. 50px behind line of scrimmage):
+  const backfieldY = lineOfScrimmageY + 50; // attackDirection -1: higher Y is backfield
+  const backfieldCameraY = getCameraYForAction(backfieldY, viewWidth, pitch);
+  // Pulling back would mean cameraY increases toward backfieldCameraY.
+  // The clamped snap target stays anchored at cameraY.
+  const targetCameraY = Math.min(cameraY, backfieldCameraY);
+  assert.equal(targetCameraY, cameraY, 'Camera does not pull back into the backfield behind the snap anchor');
+});
+

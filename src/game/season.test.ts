@@ -294,4 +294,6 @@ test('opening UI offers saved-season continuation without skipping mode selectio
   assert.ok(!headerContent.includes('border-yellow-400/80'), 'No rivalry banner under scoreboard');
   assert.ok(!headerContent.includes('Iron Bowl'), 'Rivalry names must not be listed under scoreboard');
   assert.ok(!headerContent.includes('Red River Rivalry'), 'Rivalry names must not be listed under scoreboard');
+  assert.ok(!headerContent.includes('absolute top-0'), 'Scoreboard strip is not absolutely positioned over the field sidelines');
+  assert.ok(headerContent.includes('shrink-0'), 'Scoreboard strip flex-shrinks appropriately above the field');
 });

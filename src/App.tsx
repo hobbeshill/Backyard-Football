@@ -975,181 +975,135 @@ export default function App() {
   }, [finishedGame, hasKickedOff, isKickoffActive, onlineRole, phaseState, showOnlineLobby, showPauseMenu, showTeamModal, showTutorial, showSettings]);
 
   return (
-    <div className="game-shell relative w-screen min-h-[100dvh] h-[100dvh] overflow-hidden flex flex-col items-center justify-between pt-1 pb-0 bg-[#030704] text-white font-mono select-none">
-      {!showTutorial && <button
-        type="button"
-        onClick={() => setShowSettings(true)}
-        aria-label="Settings"
-        title="Settings"
-        className="fixed right-2 top-2 z-[130] rounded-lg border border-neutral-600 bg-neutral-950 p-2 text-neutral-200 shadow-lg hover:text-white"
-      >
-        <Settings size={20} />
-      </button>}
-      
-      {/* Top Header & Scoreboard */}
-      <header className="game-header flex flex-col items-center justify-center z-20 mb-0.5 w-full max-w-[430px] px-2 pt-0.5 shrink-0">
-        {/* Relocated Footer / Game Status Bar */}
-        <footer className="mb-1 text-[0.52rem] text-[#adff2f] text-center z-20 px-2 w-full max-w-[430px] flex items-center justify-between gap-2 shrink-0">
-          <span className="font-bold opacity-90 whitespace-nowrap">
-            BACKYARD GRIDIRON • SIDE VIEW • 8v8
-            {gameMode === 'SEASON' && (
-              <span className="text-emerald-400 font-bold ml-1">
-                • {isChampionshipWeek ? '🏆 SEC TITLE' : `WK ${currentWeekNumber} (${getSeasonRecord(seasonForDisplay).wins}-${getSeasonRecord(seasonForDisplay).losses})`}
+    <div className="game-shell relative w-screen min-h-[100dvh] h-[100dvh] overflow-hidden flex flex-col items-center justify-start p-0 bg-[#030704] text-white font-mono select-none">
+      {/* Top Broadcast Scoreboard Strip */}
+      <header className="game-scoreboard-strip relative z-30 w-full shrink-0 bg-[#08120c]/90 border-b border-[#ffcc00]/40 px-2 sm:px-4 py-0.5 sm:py-1 h-7 sm:h-8 flex items-center justify-between text-[11px] sm:text-xs font-mono shadow-md backdrop-blur-md select-none">
+        {/* P2 (CPU / Guest / Away) */}
+        <div className="flex items-center gap-1 sm:gap-2 min-w-0 pointer-events-auto">
+          <button
+            type="button"
+            onClick={() => setShowTeamModal(true)}
+            className="font-extrabold text-[0.60rem] sm:text-xs px-1.5 py-0.5 rounded truncate max-w-[80px] sm:max-w-[140px] hover:underline cursor-pointer transition active:scale-95"
+            style={getTeamTextStyle(p2TeamState.primaryColor)}
+            title="Change Teams"
+          >
+            {p2TeamState.name} <span className="text-[0.50rem] opacity-75 hidden sm:inline">({onlineRole === 'guest' ? 'YOU' : onlineRole === 'host' ? 'GUEST' : 'CPU'})</span>
+          </button>
+          <span className="text-white text-[11px] sm:text-xs font-black bg-red-950/90 border border-red-500/60 px-1.5 py-0.5 rounded leading-none tabular-nums shadow-inner">
+            {cpuScore}
+          </span>
+        </div>
+
+        {/* Center: Down & Distance, Quarter & Clock, Momentum */}
+        <div className="flex items-center gap-1.5 sm:gap-3 text-center min-w-0 px-1 pointer-events-auto">
+          <span className="text-[#00ffff] font-black text-[0.62rem] sm:text-xs tracking-wider uppercase truncate max-w-[110px] sm:max-w-none">
+            {downDistanceText}
+          </span>
+          <div className="flex items-center gap-1 sm:gap-1.5 text-[0.60rem] sm:text-xs font-bold text-neutral-300">
+            <span className="text-[#ffcc00] font-black">Q{gameClockState.quarter}</span>
+            <span className={`tabular-nums ${gameClockState.seconds <= 30 ? 'text-red-400 font-black animate-pulse' : 'text-neutral-200'}`}>
+              {Math.floor(gameClockState.seconds / 60)}:{String(gameClockState.seconds % 60).padStart(2, '0')}
+            </span>
+            {momentumState !== 0 && (
+              <span className={`text-[0.52rem] font-bold px-1 rounded ${momentumState > 0 ? 'text-[#00ffaa] bg-emerald-950/70 border border-emerald-500/40' : 'text-[#ff6666] bg-red-950/70 border border-red-500/40'}`}>
+                {momentumState > 0 ? `+${momentumState}` : momentumState} MOM
               </span>
             )}
-          </span>
-          <span className="text-neutral-300 truncate text-right">
-            {isKickoffActive
-              ? onlineRole
-                ? kickoffSide.kicking === onlinePlayerSide ? 'Touch the field to kick off' : 'Waiting for the kickoff'
-                : 'Touch Field or Joystick to Kick Off • WASD/Arrows to Steer Return'
-              : onlineRole
-                ? (activeOffenseState === onlinePlayerSide
-                    ? 'Choose your call • Use online controls to start'
-                    : 'Choose a defensive call • Await the offense to start')
-                : tacticalMode === 'PRO'
-              ? (activeOffenseState === 'P1'
-                  ? 'Choose a Play Card • Touch Joystick to Snap'
-                  : 'Pick Defender to Control • Touch Joystick to Start')
-                : (activeOffenseState === 'P1'
-                  ? 'Draw Routes • Swipe RB Up/Down for Run Play • Touch Field to Start'
-                  : 'Pick Defender to Control • Touch Joystick to Start')}
-          </span>
-        </footer>
-
-        <div className="grid grid-cols-3 items-center gap-1 w-full bg-black/90 border-2 border-[#ffcc00] px-3 py-1.5 rounded-lg shadow-xl">
-          {/* P2 CPU Score */}
-          <div className="flex min-w-0 flex-col items-center gap-1.5 text-center">
-            <button
-              type="button"
-              onClick={() => setShowTeamModal(true)}
-              className="rounded-sm px-0.5 font-extrabold text-[0.60rem] hover:underline cursor-pointer transition active:scale-95"
-              style={getTeamTextStyle(p2TeamState.primaryColor)}
-              title="Change Teams"
-            >
-              {p2TeamState.name} ({onlineRole === 'guest' ? 'YOU' : onlineRole === 'host' ? 'GUEST' : 'CPU'})
-            </button>
-            <span className="text-white text-base font-black bg-red-950/80 border border-red-500/50 px-2 py-0.5 rounded leading-none">
-              {cpuScore}
-            </span>
-          </div>
-
-          {/* Down, Distance & Quarter / Clock Center */}
-          <div className="flex flex-col items-center text-center px-1">
-            <span className="text-[#00ffff] font-extrabold text-[0.72rem] tracking-wide">
-              {downDistanceText}
-            </span>
-            <div className="flex items-center gap-2 text-[0.58rem] text-neutral-300 font-bold mt-0.5">
-              <span className="text-[#ffcc00]">Q{gameClockState.quarter}</span>
-              <span className={gameClockState.seconds <= 30 ? 'text-red-400 font-extrabold animate-pulse' : 'text-neutral-200'}>
-                {Math.floor(gameClockState.seconds / 60)}:{String(gameClockState.seconds % 60).padStart(2, '0')}
-              </span>
-              {momentumState !== 0 && (
-                <span className={momentumState > 0 ? 'text-[#00ffaa]' : 'text-[#ff6666]'}>
-                  {momentumState > 0 ? `+${momentumState}` : momentumState} MOM
-                </span>
-              )}
-            </div>
-            <div className="mt-0.5 flex items-center justify-center gap-1 border-t border-white/15 pt-0.5">
-              <button
-                type="button"
-                onClick={() => setShowTeamModal(true)}
-                className="p-1 text-[#ffcc00] hover:text-white transition cursor-pointer"
-                title="Change Teams"
-              >
-                <Users size={13} />
-              </button>
-              <button
-                type="button"
-                onClick={toggleSound}
-                className="p-1 text-[#ffcc00] hover:text-white transition cursor-pointer"
-                title={soundEnabled ? "Mute" : "Unmute"}
-              >
-                {soundEnabled ? <Volume2 size={13} /> : <VolumeX size={13} className="text-neutral-500" />}
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowHelp(true)}
-                className="p-1 text-[#00ffff] hover:text-white transition cursor-pointer"
-                title="Help & Controls"
-              >
-                <HelpCircle size={13} />
-              </button>
-              <button
-                type="button"
-                onClick={handleResetGame}
-                className="p-1 text-emerald-400 hover:text-white transition cursor-pointer"
-                title="Reset Game"
-              >
-                <RefreshCw size={13} />
-              </button>
-              {isUserPreSnapPhase && !onlineRole && (
-                <button
-                  type="button"
-                  onClick={() => setShowPlaybookCards(true)}
-                  className="p-1 text-amber-300 hover:text-white transition cursor-pointer"
-                  title="Team playbook"
-                  aria-label="Team playbook"
-                >
-                  <BookOpen size={13} />
-                </button>
-              )}
-              {hasKickedOff && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    engineRef.current?.setPaused(true);
-                    setShowPauseMenu(true);
-                  }}
-                  className="p-1 text-white hover:text-[#ffcc00] transition cursor-pointer"
-                  title="Pause game"
-                  aria-label="Pause game"
-                >
-                  <Pause size={13} />
-                </button>
-              )}
-              {!hasKickedOff && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    handleStartGame();
-                    showAnnouncement(
-                      `${p1TeamState.name.toUpperCase()} VS ${p2TeamState.name.toUpperCase()} - READY FOR KICKOFF! 🏈`,
-                      p1TeamState.primaryColor,
-                      true
-                    );
-                  }}
-                  className="px-1.5 py-0.5 rounded bg-gradient-to-r from-[#c44d2b] to-[#bd5635] text-[0.55rem] font-black uppercase text-white shadow hover:from-[#b03f1f] hover:to-[#a9492d] active:scale-95 transition cursor-pointer"
-                  title="Kick off game now"
-                >
-                  KICKOFF
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* P1 YOU Score */}
-          <div className="flex min-w-0 flex-col items-center gap-1.5 text-center">
-            <button
-              type="button"
-              onClick={() => setShowTeamModal(true)}
-              className="rounded-sm px-0.5 font-extrabold text-[0.60rem] hover:underline cursor-pointer transition active:scale-95"
-              style={getTeamTextStyle(p1TeamState.primaryColor)}
-              title="Change Teams"
-            >
-              {p1TeamState.name} ({onlineRole === 'guest' ? 'HOST' : 'YOU'})
-            </button>
-            <span className="text-white text-base font-black bg-emerald-950/80 border border-emerald-500/50 px-2 py-0.5 rounded leading-none">
-              {userScore}
-            </span>
           </div>
         </div>
 
+        {/* P1 (User / Host / Home) + Score + Controls */}
+        <div className="flex items-center gap-1 sm:gap-2 min-w-0 pointer-events-auto">
+          <span className="text-white text-[11px] sm:text-xs font-black bg-emerald-950/90 border border-emerald-500/60 px-1.5 py-0.5 rounded leading-none tabular-nums shadow-inner">
+            {userScore}
+          </span>
+          <button
+            type="button"
+            onClick={() => setShowTeamModal(true)}
+            className="font-extrabold text-[0.60rem] sm:text-xs px-1.5 py-0.5 rounded truncate max-w-[80px] sm:max-w-[140px] hover:underline cursor-pointer transition active:scale-95"
+            style={getTeamTextStyle(p1TeamState.primaryColor)}
+            title="Change Teams"
+          >
+            {p1TeamState.name} <span className="text-[0.50rem] opacity-75 hidden sm:inline">({onlineRole === 'guest' ? 'HOST' : 'YOU'})</span>
+          </button>
+
+          {/* Integrated Strip Quick Controls */}
+          <div className="flex items-center gap-0.5 ml-1 border-l border-white/20 pl-1">
+            <button
+              type="button"
+              onClick={toggleSound}
+              className="p-0.5 sm:p-1 text-[#ffcc00] hover:text-white transition cursor-pointer"
+              title={soundEnabled ? "Mute" : "Unmute"}
+              aria-label={soundEnabled ? "Mute" : "Unmute"}
+            >
+              {soundEnabled ? <Volume2 size={12} /> : <VolumeX size={12} className="text-neutral-500" />}
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowHelp(true)}
+              className="p-0.5 sm:p-1 text-[#00ffff] hover:text-white transition cursor-pointer"
+              title="Help & Controls"
+              aria-label="Help & Controls"
+            >
+              <HelpCircle size={12} />
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowSettings(true)}
+              className="p-0.5 sm:p-1 text-neutral-300 hover:text-white transition cursor-pointer"
+              title="Settings"
+              aria-label="Settings"
+            >
+              <Settings size={12} />
+            </button>
+            {isUserPreSnapPhase && !onlineRole && (
+              <button
+                type="button"
+                onClick={() => setShowPlaybookCards(true)}
+                className="p-0.5 sm:p-1 text-amber-300 hover:text-white transition cursor-pointer"
+                title="Team playbook"
+                aria-label="Team playbook"
+              >
+                <BookOpen size={12} />
+              </button>
+            )}
+            {hasKickedOff ? (
+              <button
+                type="button"
+                onClick={() => {
+                  engineRef.current?.setPaused(true);
+                  setShowPauseMenu(true);
+                }}
+                className="p-0.5 sm:p-1 text-white hover:text-[#ffcc00] transition cursor-pointer"
+                title="Pause game"
+                aria-label="Pause game"
+              >
+                <Pause size={12} />
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  handleStartGame();
+                  showAnnouncement(
+                    `${p1TeamState.name.toUpperCase()} VS ${p2TeamState.name.toUpperCase()} - READY FOR KICKOFF! 🏈`,
+                    p1TeamState.primaryColor,
+                    true
+                  );
+                }}
+                className="px-1.5 sm:px-2 py-0.5 rounded bg-gradient-to-r from-[#c44d2b] to-[#bd5635] text-[0.55rem] sm:text-[0.60rem] font-black uppercase text-white shadow hover:from-[#b03f1f] hover:to-[#a9492d] active:scale-95 transition cursor-pointer"
+                title="Kick off game now"
+              >
+                KICKOFF
+              </button>
+            )}
+          </div>
+        </div>
       </header>
 
-      {/* Pre-Snap Tecmo Playcall Status Bar */}
+      {/* Pre-Snap Floating Tecmo Playcall Status Bar */}
       {isUserPreSnapPhase && !onlineRole && !isKickoffActive && !showPauseMenu && (
-        <div className="flex items-center justify-between gap-1.5 w-full max-w-[430px] px-2 py-1 mb-0.5 bg-black/90 border border-neutral-700/80 rounded-lg text-[0.62rem] z-20 shrink-0 shadow-lg">
+        <div className="absolute top-9 sm:top-10 left-1/2 -translate-x-1/2 flex items-center justify-between gap-1.5 max-w-[95vw] px-2 py-1 bg-black/90 border border-neutral-700/80 rounded-lg text-[0.62rem] z-20 shadow-xl backdrop-blur-sm pointer-events-auto">
           {activeOffenseState === 'P1' ? (
             <>
               <button
@@ -1193,14 +1147,14 @@ export default function App() {
       )}
 
       {isUserPreSnapPhase && onlineRole && !isKickoffActive && !showPauseMenu && (
-        <div className="w-full max-w-[430px] px-2 py-1 mb-0.5 z-20 shrink-0">
+        <div className="absolute top-9 sm:top-10 left-1/2 -translate-x-1/2 max-w-[95vw] px-2 py-1 z-20 pointer-events-auto">
           <button
             type="button"
             onClick={() => setShowPlaybookCards(true)}
-            className={`flex w-full items-center justify-between gap-2 rounded-lg border px-3 py-1.5 text-left text-[0.62rem] shadow-lg ${
+            className={`flex w-full items-center justify-between gap-2 rounded-lg border px-3 py-1.5 text-left text-[0.62rem] shadow-xl backdrop-blur-sm ${
               isOnlinePlayerOnOffense
-                ? 'border-amber-500/60 bg-amber-950/80 text-amber-200'
-                : 'border-red-500/60 bg-red-950/80 text-red-200'
+                ? 'border-amber-500/60 bg-amber-950/90 text-amber-200'
+                : 'border-red-500/60 bg-red-950/90 text-red-200'
             }`}
             title={isOnlinePlayerOnOffense ? 'Choose your offensive play' : 'Choose your defensive call'}
           >
@@ -1215,7 +1169,7 @@ export default function App() {
       {/* 4th Down Special Teams Punt / Field Goal Action Controls */}
       {!onlineRole && ((showPuntAction && p1OffPlayState !== 'PUNT' && p1OffPlayState !== 'FIELD_GOAL') ||
         (isUserPreSnapPhase && !isKickoffActive && activeOffenseState === 'P1' && p1OffPlayState === 'FIELD_GOAL' && fgMeterState !== null)) && (
-        <div className="flex items-center justify-center gap-2 mb-1 z-30 w-full max-w-[420px] px-2 shrink-0">
+        <div className="absolute top-9 sm:top-10 left-1/2 -translate-x-1/2 flex items-center justify-center gap-2 z-25 max-w-[95vw] px-2 pointer-events-auto">
           {showPuntAction && p1OffPlayState !== 'PUNT' && p1OffPlayState !== 'FIELD_GOAL' && (
             <>
               <button
@@ -1390,11 +1344,11 @@ export default function App() {
           )}
         </div>
       )}
-      <div className="game-canvas-stage relative flex-1 flex flex-col items-center justify-end min-h-0 w-full overflow-hidden pb-0">
+      <div className="game-canvas-stage relative flex-1 w-full min-h-0 overflow-hidden flex items-center justify-center p-0 m-0">
         <canvas
           ref={canvasRef}
           aria-label="Side-view football field"
-          className="game-field bg-[#176620] shadow-[0_8px_30px_rgba(0,0,0,0.9)] rounded-md border-2 border-white touch-none"
+          className="game-field bg-[#176620] touch-none block shadow-[0_4px_30px_rgba(0,0,0,0.9)]"
         />
       </div>
 
@@ -1528,20 +1482,20 @@ export default function App() {
 
       {/* Franchise & Team Selector Modal */}
       {showTeamModal && !hasKickedOff && setupStep === 'MODE' && (
-        <section role="dialog" aria-modal="true" aria-labelledby="game-mode-title" className="mobile-main-menu-overlay fixed inset-0 z-[100] flex items-center justify-center overflow-y-auto bg-[#07110a] p-4">
-          <div className="mobile-main-menu w-full max-w-2xl rounded-xl border border-neutral-700 bg-[#0d1710] p-5 shadow-2xl sm:p-8">
-            <h1 id="game-mode-title" className="text-center text-2xl font-black uppercase text-amber-300 sm:text-3xl">Backyard Football</h1>
-            <p className="mt-2 text-center text-sm text-neutral-300">Choose how you want to play. Pick your teams next.</p>
-            <div className="mobile-mode-grid mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4" role="group" aria-label="Game mode">
+        <section role="dialog" aria-modal="true" aria-labelledby="game-mode-title" className="mobile-main-menu-overlay fixed inset-0 z-[100] flex items-center justify-center overflow-y-auto bg-[#07110a]/95 p-2 sm:p-5 backdrop-blur-sm">
+          <div className="mobile-main-menu w-full max-w-2xl max-h-[94vh] overflow-y-auto rounded-xl border border-neutral-700 bg-[#0d1710] p-3 sm:p-5 shadow-2xl">
+            <h1 id="game-mode-title" className="text-center text-lg sm:text-2xl font-black uppercase text-amber-300">Backyard Football</h1>
+            <p className="mt-0.5 sm:mt-1 text-center text-[11px] sm:text-sm text-neutral-300">Choose how you want to play. Pick your teams next.</p>
+            <div className="mobile-mode-grid mt-3 sm:mt-4 grid gap-2 sm:gap-2.5 grid-cols-2 lg:grid-cols-4" role="group" aria-label="Game mode">
               {([
                 ['ONE_GAME', 'One Game', 'Pick your team and the CPU opponent for a single matchup.'],
                 ['SEASON', 'Season', 'Choose your SEC team for a 9-game season and a shot at the championship.'],
                 ['DYNASTY', 'Dynasty', 'Choose your program and preview the coming-soon Dynasty mode.']
               ] as const).map(([mode, label, description]) => (
-                <button key={mode} type="button" onClick={() => handleGameModeChange(mode)} className="mobile-mode-option rounded-lg border border-neutral-600 bg-[#15251b] p-4 text-left transition hover:border-amber-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-400">
-                  <span className="block text-lg font-black text-white">{label}</span>
-                  {mode === 'DYNASTY' && <span className="mt-1 block text-[10px] font-bold uppercase text-amber-300">Coming soon</span>}
-                  <span className="mobile-mode-description mt-2 block text-xs leading-5 text-neutral-300">{description}</span>
+                <button key={mode} type="button" onClick={() => handleGameModeChange(mode)} className="mobile-mode-option rounded-lg border border-neutral-600 bg-[#15251b] p-2.5 sm:p-3 text-left transition hover:border-amber-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-400 cursor-pointer">
+                  <span className="block text-xs sm:text-base font-black text-white">{label}</span>
+                  {mode === 'DYNASTY' && <span className="mt-0.5 block text-[8px] sm:text-[9px] font-bold uppercase text-amber-300">Coming soon</span>}
+                  <span className="mobile-mode-description mt-0.5 sm:mt-1 block text-[10px] sm:text-[11px] leading-3.5 sm:leading-4 text-neutral-300">{description}</span>
                 </button>
               ))}
               <button
@@ -1550,22 +1504,22 @@ export default function App() {
                   setOnlineError('');
                   setShowOnlineLobby(true);
                 }}
-                className="mobile-mode-option rounded-lg border border-cyan-500/70 bg-[#10232a] p-4 text-left transition hover:border-cyan-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-300"
+                className="mobile-mode-option rounded-lg border border-cyan-500/70 bg-[#10232a] p-2.5 sm:p-3 text-left transition hover:border-cyan-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-300 cursor-pointer"
               >
                 <div className="flex items-center justify-between">
-                  <span className="block text-lg font-black text-white">Online Versus</span>
-                  <span className="rounded bg-cyan-400/20 px-1.5 py-0.5 text-[9px] font-black uppercase text-cyan-300">Live</span>
+                  <span className="block text-xs sm:text-base font-black text-white">Online Versus</span>
+                  <span className="rounded bg-cyan-400/20 px-1 py-0.2 text-[8px] font-black uppercase text-cyan-300">Live</span>
                 </div>
-                <span className="mobile-mode-description mt-2 block text-xs leading-5 text-neutral-300">Create an invite code or join a friend for a live head-to-head game.</span>
+                <span className="mobile-mode-description mt-0.5 sm:mt-1 block text-[10px] sm:text-[11px] leading-3.5 sm:leading-4 text-neutral-300">Create an invite code or join a friend for a live head-to-head game.</span>
               </button>
             </div>
             {seasonProgress && (
-              <button type="button" onClick={handleContinueSeason} className="mt-4 w-full rounded-md border border-emerald-500/50 px-3 py-2 text-sm font-bold text-emerald-300 hover:bg-emerald-900/30">
+              <button type="button" onClick={handleContinueSeason} className="mt-2.5 sm:mt-3 w-full rounded-md border border-emerald-500/50 bg-emerald-950/40 px-3 py-1.5 sm:py-2 text-xs sm:text-sm font-bold text-emerald-300 hover:bg-emerald-900/50 cursor-pointer">
                 Continue season - {getTeam(seasonProgress.teamId).name}
               </button>
             )}
-            <button type="button" onClick={replayTutorial} className="mt-5 flex w-full items-center justify-center gap-2 text-sm font-bold text-neutral-300 hover:text-white">
-              <Hand size={16} /> Learn to play
+            <button type="button" onClick={replayTutorial} className="mt-2.5 sm:mt-3 flex w-full items-center justify-center gap-1.5 text-xs font-bold text-neutral-300 hover:text-white cursor-pointer">
+              <Hand size={14} /> Learn to play
             </button>
           </div>
         </section>
@@ -1772,101 +1726,88 @@ export default function App() {
             role="dialog"
             aria-modal="true"
             aria-labelledby="team-selector-title"
-            className="team-selector-panel flex flex-col h-full sm:h-auto sm:max-h-[94vh] w-full max-w-5xl rounded-none sm:rounded-xl border-0 sm:border border-[#d5ded7] bg-[#f2f5f2] text-left text-[#1b3026] shadow-2xl overflow-hidden"
+            className="team-selector-panel flex flex-col h-full sm:h-auto max-h-[100dvh] sm:max-h-[94vh] w-full max-w-5xl rounded-none sm:rounded-xl border-0 sm:border border-[#d5ded7] bg-[#f2f5f2] text-left text-[#1b3026] shadow-2xl overflow-hidden"
           >
-            <div className="team-selector-header flex shrink-0 items-center justify-between border-b border-[#dce3dd] bg-white px-4 py-3 sm:px-6">
-              <div className="flex items-center gap-3">
-                <span className="flex h-10 w-10 items-center justify-center rounded-md bg-[#e8f0ea] text-[#246344]">
-                  <Users size={20} />
+            {/* Consolidated Responsive Header & Controls */}
+            <div className="team-selector-header flex shrink-0 flex-wrap items-center justify-between gap-1.5 sm:gap-2 border-b border-[#dce3dd] bg-white px-2.5 py-1.5 sm:px-5 sm:py-2">
+              <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
+                <span className="flex h-7 w-7 sm:h-9 sm:w-9 shrink-0 items-center justify-center rounded-md bg-[#e8f0ea] text-[#246344]">
+                  <Users size={15} />
                 </span>
-                <div>
-                  <h2 id="team-selector-title" className="text-xl font-extrabold leading-tight sm:text-2xl">
-                    {!hasKickedOff ? (gameMode === 'SEASON' ? 'Season setup' : gameMode === 'DYNASTY' ? 'Choose your Dynasty team' : 'Choose teams') : 'Team matchup'}
+                <div className="min-w-0">
+                  <h2 id="team-selector-title" className="text-xs sm:text-base font-extrabold leading-tight text-[#1b3026] truncate">
+                    {!hasKickedOff ? (gameMode === 'SEASON' ? 'SEC Season Setup' : gameMode === 'DYNASTY' ? 'Choose Dynasty Program' : 'Choose Teams') : 'Team Matchup'}
                   </h2>
-                  <p className="mt-0.5 text-xs text-[#66756b]">{gameMode === 'SEASON' ? '9-Game SEC season + SEC Championship' : gameMode === 'DYNASTY' ? 'Select one program to preview Dynasty - coming soon' : 'Single matchup'}</p>
+                  <div className="flex items-center gap-1.5 text-[10px] sm:text-[11px] text-[#55635a]">
+                    <span className="font-bold flex items-center gap-1">
+                      <span className="h-1.5 w-1.5 sm:h-2 sm:w-2 rounded-full inline-block shrink-0" style={{ backgroundColor: p1TeamState.primaryColor }} />
+                      You: <b className="text-[#1b3026] truncate max-w-[75px] sm:max-w-none">{p1TeamState.name}</b>
+                    </span>
+                    {gameMode !== 'DYNASTY' && (
+                      <>
+                        <span className="text-[#88968d]">vs</span>
+                        <span className="font-bold flex items-center gap-1">
+                          <span className="h-1.5 w-1.5 sm:h-2 sm:w-2 rounded-full inline-block shrink-0" style={{ backgroundColor: p2TeamState.primaryColor }} />
+                          CPU: <b className="text-[#1b3026] truncate max-w-[75px] sm:max-w-none">{p2TeamState.name}</b>
+                        </span>
+                      </>
+                    )}
+                  </div>
                 </div>
               </div>
-              <div className="flex items-center gap-2">
+
+              {/* Action Controls: Assignment toggle, Search, Close */}
+              <div className="flex items-center gap-1.5 sm:gap-2 ml-auto">
+                {gameMode === 'ONE_GAME' && (
+                  <div className="flex rounded-md border border-[#dce3dd] p-0.5 bg-[#f4f7f4] text-[11px] sm:text-xs font-bold" role="group" aria-label="Choose which side to assign">
+                    <button
+                      type="button"
+                      aria-pressed={teamSelectionSide === 'P1'}
+                      onClick={() => setTeamSelectionSide('P1')}
+                      className={`px-2 py-0.5 sm:px-2.5 sm:py-1 rounded transition text-[11px] sm:text-xs font-bold cursor-pointer ${teamSelectionSide === 'P1' ? 'bg-[#246344] text-white shadow-sm' : 'text-[#59685f] hover:text-[#1b3026]'}`}
+                    >
+                      Pick for You
+                    </button>
+                    <button
+                      type="button"
+                      aria-pressed={teamSelectionSide === 'P2'}
+                      onClick={() => setTeamSelectionSide('P2')}
+                      className={`px-2 py-0.5 sm:px-2.5 sm:py-1 rounded transition text-[11px] sm:text-xs font-bold cursor-pointer ${teamSelectionSide === 'P2' ? 'bg-[#b45435] text-white shadow-sm' : 'text-[#59685f] hover:text-[#1b3026]'}`}
+                    >
+                      Pick for CPU
+                    </button>
+                  </div>
+                )}
+
+                <label className="flex w-28 sm:w-44 items-center gap-1 sm:gap-1.5 rounded-md border border-[#dce3dd] bg-[#f9faf9] px-1.5 sm:px-2 py-0.5 sm:py-1 text-[#718077] focus-within:border-[#7da78a] focus-within:bg-white text-xs">
+                  <Search size={12} aria-hidden="true" />
+                  <input
+                    type="search"
+                    aria-label="Search SEC teams"
+                    placeholder="Search..."
+                    value={teamSearch}
+                    onChange={event => setTeamSearch(event.target.value)}
+                    className="min-w-0 flex-1 bg-transparent text-[11px] sm:text-xs text-[#253a2d] outline-none placeholder:text-[#87928a]"
+                  />
+                </label>
+
                 <button
                   onClick={() => {
                     if (hasKickedOff) setShowTeamModal(false);
                     else setSetupStep('MODE');
                   }}
-                  className="rounded-md p-2 text-[#66756b] transition hover:bg-[#edf1ed] hover:text-[#1b3026]"
+                  className="rounded-md p-1 sm:p-1.5 text-[#66756b] transition hover:bg-[#edf1ed] hover:text-[#1b3026] cursor-pointer"
                   title={hasKickedOff ? 'Close team selector' : 'Back to game modes'}
                   aria-label={hasKickedOff ? 'Close team selector' : 'Back to game modes'}
                 >
-                  {hasKickedOff ? <X size={18} /> : <ArrowLeft size={18} />}
+                  {hasKickedOff ? <X size={16} /> : <ArrowLeft size={16} />}
                 </button>
               </div>
-            </div>
-
-            <div className="team-selector-summary grid shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-3 border-b border-[#dce3dd] bg-[#e9efea] px-4 py-3 sm:px-6">
-              <div className="min-w-0">
-                <span className="mb-1 block text-[11px] font-bold uppercase text-[#246344]">You</span>
-                <span className="flex items-center gap-2 truncate text-sm font-bold sm:text-base">
-                  <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ backgroundColor: p1TeamState.primaryColor }} />
-                  {p1TeamState.name}
-                </span>
-              </div>
-              {gameMode !== 'DYNASTY' && <span className="rounded bg-white px-2 py-1 text-[11px] font-bold text-[#6b786f]">VS</span>}
-              {gameMode !== 'DYNASTY' && (
-              <div className="min-w-0 text-right">
-                <span className="mb-1 block text-[11px] font-bold uppercase text-[#b45435]">CPU</span>
-                <span className="flex items-center justify-end gap-2 truncate text-sm font-bold sm:text-base">
-                  {p2TeamState.name}
-                  <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ backgroundColor: p2TeamState.primaryColor }} />
-                </span>
-              </div>
-              )}
-            </div>
-
-            <div className="team-selector-controls flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-[#dce3dd] bg-white px-4 py-3 sm:px-6">
-              <div className="flex gap-2" role="group" aria-label="Choose which side to assign">
-                <button
-                  type="button"
-                  aria-pressed={teamSelectionSide === 'P1'}
-                  onClick={() => setTeamSelectionSide('P1')}
-                  className={`min-w-28 rounded-md border px-3 py-2 text-left transition ${teamSelectionSide === 'P1' ? 'border-[#246344] bg-[#e8f0ea] text-[#1e573b]' : 'border-[#dce3dd] bg-white text-[#59685f] hover:bg-[#f5f7f5]'}`}
-                >
-                  <span className="block text-xs font-bold">You</span>
-                  <span className="block text-[11px]">{p1TeamState.name}</span>
-                </button>
-                {gameMode === 'ONE_GAME' && (
-                  <button
-                    type="button"
-                    aria-pressed={teamSelectionSide === 'P2'}
-                    onClick={() => setTeamSelectionSide('P2')}
-                    className={`min-w-28 rounded-md border px-3 py-2 text-left transition ${teamSelectionSide === 'P2' ? 'border-[#b45435] bg-[#f7ece7] text-[#93442c]' : 'border-[#dce3dd] bg-white text-[#59685f] hover:bg-[#f5f7f5]'}`}
-                  >
-                    <span className="block text-xs font-bold">CPU</span>
-                    <span className="block text-[11px]">{p2TeamState.name}</span>
-                  </button>
-                )}
-              </div>
-              <span className="text-xs text-[#758178]">
-                {gameMode === 'SEASON' ? `Next opponent: ${p2TeamState.name}` : gameMode === 'DYNASTY' ? 'Choose your program' : `Assigning to ${teamSelectionSide === 'P1' ? 'You' : 'CPU'}`}
-              </span>
             </div>
 
             <div className="team-selector-list min-h-0 flex-1 overflow-y-auto overscroll-y-contain">
-              <div className="p-3 sm:p-5">
-                {/* Step 2: SEC Teams Selection */}
-                <div className="mb-3 flex items-center justify-between gap-3">
-                  <h3 className="text-sm font-bold text-[#253a2d]">Step 2: SEC teams <span className="ml-1 text-xs font-normal text-[#718077]">{getAllTeams().length}</span></h3>
-                  <label className="flex w-44 items-center gap-2 rounded-md border border-[#dce3dd] bg-white px-2.5 py-2 text-[#718077] focus-within:border-[#7da78a] sm:w-56">
-                    <Search size={15} aria-hidden="true" />
-                    <input
-                      type="search"
-                      aria-label="Search SEC teams"
-                      placeholder="Search teams"
-                      value={teamSearch}
-                      onChange={event => setTeamSearch(event.target.value)}
-                      className="min-w-0 flex-1 bg-transparent text-xs text-[#253a2d] outline-none placeholder:text-[#87928a]"
-                    />
-                  </label>
-                </div>
-                <div className="team-selector-grid grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="p-2 sm:p-4">
+                <div className="team-selector-grid grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 gap-1.5 sm:gap-2">
                   {visibleTeams.map((team) => {
                     const isP1 = p1TeamState.id === team.id;
                     const isP2 = p2TeamState.id === team.id;
@@ -1875,7 +1816,7 @@ export default function App() {
                     return (
                       <div
                         key={team.id}
-                        className={`team-selector-card flex items-center justify-between gap-1.5 rounded-lg border px-3 py-2 transition-all ${
+                        className={`team-selector-card flex items-center justify-between gap-1 sm:gap-1.5 rounded-lg border px-2 py-1 sm:py-1.5 sm:px-2.5 transition-all ${
                           isActiveSide
                             ? 'border-[#246344] bg-[#e8f0ea] text-[#1e573b] shadow-sm ring-2 ring-[#246344]/50'
                             : 'border-[#dce3dd] bg-white text-[#1b3026] hover:bg-[#f8faf8] hover:border-neutral-400'
@@ -1891,12 +1832,12 @@ export default function App() {
                               handleSelectP2Team(team.id);
                             }
                           }}
-                          className="flex flex-1 items-center gap-2 text-left text-sm font-bold min-w-0 cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#246344]"
+                          className="flex flex-1 items-center gap-1.5 sm:gap-2 text-left text-xs sm:text-sm font-bold min-w-0 cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#246344]"
                         >
                           <HelmetSpritePreview team={team} />
-                          <span className="team-selector-name min-w-0 truncate">{team.name}</span>
+                          <span className="team-selector-name min-w-0 truncate text-[11px] sm:text-xs">{team.name}</span>
                           {isActiveSide && (
-                            <span className="shrink-0 rounded bg-[#246344] text-white px-1.5 py-0.5 text-[9px] font-black uppercase ml-auto">
+                            <span className="shrink-0 rounded bg-[#246344] text-white px-1 sm:px-1.5 py-0.5 text-[7px] sm:text-[9px] font-black uppercase ml-auto">
                               {teamSelectionSide === 'P1' ? 'YOU' : 'CPU'}
                             </span>
                           )}
@@ -1904,11 +1845,11 @@ export default function App() {
                         <button
                           type="button"
                           onClick={() => setPendingTeam(team)}
-                          className="shrink-0 rounded p-1 text-neutral-400 hover:text-neutral-800 hover:bg-black/5 transition cursor-pointer"
+                          className="shrink-0 rounded p-0.5 sm:p-1 text-neutral-400 hover:text-neutral-800 hover:bg-black/5 transition cursor-pointer"
                           title={`View ${team.name} scouting report`}
                           aria-label={`View ${team.name} scouting report`}
                         >
-                          <Info size={15} />
+                          <Info size={13} />
                         </button>
                       </div>
                     );
@@ -1921,16 +1862,16 @@ export default function App() {
             </div>
 
             {/* Sticky, Always-Visible Footer with Prominent Kick Off Game Button */}
-            <div className="team-selector-footer shrink-0 sticky bottom-0 z-30 border-t-2 border-[#cbd6cd] bg-white px-4 py-3 sm:px-6 shadow-xl">
-              <div className="team-selector-footer-actions flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-                <span className="text-xs font-bold text-[#59685f]">{gameMode === 'ONE_GAME' ? 'One Game' : gameMode === 'SEASON' ? 'Season' : 'Dynasty preview'}</span>
+            <div className="team-selector-footer shrink-0 sticky bottom-0 z-30 border-t border-[#cbd6cd] bg-white px-3 py-2 sm:px-6 sm:py-2.5 shadow-xl">
+              <div className="team-selector-footer-actions flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 sm:gap-3">
+                <span className="text-[11px] sm:text-xs font-bold text-[#59685f]">{gameMode === 'ONE_GAME' ? 'One Game' : gameMode === 'SEASON' ? 'Season' : 'Dynasty preview'}</span>
 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5 sm:gap-2">
                   {hasKickedOff && (
                     <button
                       type="button"
                       onClick={() => setShowTeamModal(false)}
-                      className="rounded-md border border-[#cbd6cd] bg-white px-3 py-2.5 text-xs font-bold text-[#405047] transition hover:bg-[#edf1ed] cursor-pointer"
+                      className="rounded-md border border-[#cbd6cd] bg-white px-2.5 py-1.5 sm:px-3 sm:py-2 text-xs font-bold text-[#405047] transition hover:bg-[#edf1ed] cursor-pointer"
                     >
                       Save & resume
                     </button>
@@ -1939,9 +1880,9 @@ export default function App() {
                     <button
                       type="button"
                       onClick={() => handleStartNewSeason(p1TeamState.id)}
-                      className="rounded-md border border-[#cbd6cd] bg-white px-3 py-2.5 text-xs font-bold text-[#59685f] transition hover:bg-[#f2f5f2] cursor-pointer"
+                      className="rounded-md border border-[#cbd6cd] bg-white px-2.5 py-1.5 sm:px-3 sm:py-2 text-xs font-bold text-[#59685f] transition hover:bg-[#f2f5f2] cursor-pointer"
                     >
-                      <RotateCcw size={13} className="inline mr-1" /> Start new season
+                      <RotateCcw size={12} className="inline mr-1" /> Start new season
                     </button>
                   )}
                   <button
@@ -1972,7 +1913,7 @@ export default function App() {
                         );
                       }
                     }}
-                    className="flex-1 sm:flex-initial flex items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-[#c44d2b] to-[#bd5635] px-6 py-3 text-sm sm:text-base font-black uppercase tracking-wider text-white shadow-xl transition hover:from-[#b03f1f] hover:to-[#a9492d] active:scale-95 cursor-pointer ring-2 ring-[#bd5635]/40"
+                    className="flex-1 sm:flex-initial flex items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-[#c44d2b] to-[#bd5635] px-4 sm:px-6 py-2 sm:py-2.5 text-xs sm:text-sm font-black uppercase tracking-wider text-white shadow-xl transition hover:from-[#b03f1f] hover:to-[#a9492d] active:scale-95 cursor-pointer ring-2 ring-[#bd5635]/40"
                   >
                     <span>
                       {gameMode === 'SEASON'
@@ -1983,7 +1924,7 @@ export default function App() {
                                 : '🏈 Kick off game · Start season'))
                         : gameMode === 'DYNASTY' ? 'Preview Dynasty' : '🏈 Kick off game'}
                     </span>
-                    <ArrowRight size={18} />
+                    <ArrowRight size={16} />
                   </button>
                 </div>
               </div>

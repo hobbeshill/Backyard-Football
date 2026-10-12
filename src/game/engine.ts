@@ -110,16 +110,15 @@ export function getCanvasRenderScale(availableWidth: number, availableHeight: nu
   return Math.max(1, Math.min(3, layoutScale * deviceScale));
 }
 
-export function getResponsiveCanvasSize(availableWidth: number, availableHeight: number, baseWidth = 450, baseHeight = 340) {
-  const viewportRatio = availableWidth / availableHeight;
-  const logicalWidth = viewportRatio > baseWidth / baseHeight
-    ? baseHeight * viewportRatio
-    : baseWidth;
-  const scale = Math.min(availableWidth / logicalWidth, availableHeight / baseHeight);
+export function getResponsiveCanvasSize(availableWidth: number, availableHeight: number, _baseWidth = 450, baseHeight = 340) {
+  const safeHeight = Math.max(1, availableHeight);
+  const safeWidth = Math.max(1, availableWidth);
+  const scale = safeHeight / baseHeight;
+  const logicalWidth = Math.max(1, safeWidth / scale);
   return {
     logicalWidth,
-    displayWidth: logicalWidth * scale,
-    displayHeight: baseHeight * scale
+    displayWidth: safeWidth,
+    displayHeight: safeHeight
   };
 }
 
@@ -286,6 +285,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   const cameraWorldBottom = fieldHeight + cameraRunoff;
 
   let cameraY = 0;
+  let playSnapCameraY: number | null = null;
   const cameraScale = 1.0;
   const cameraOffsetX = 0;
   let cameraPerspectiveMode: CameraPerspectiveMode = (() => {
@@ -584,7 +584,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         toX: transition.toX, toY: transition.toY
       })),
       userPlayHistory, cpuPlayHistory, userDefenseHistory, playClock, cpuScrambleDecisionMade,
-      qbScrambleReactionTimer, userControlledDefenderIndex, cameraY
+      qbScrambleReactionTimer, userControlledDefenderIndex, cameraY,
+      playSnapCameraY
     };
   }
 
@@ -683,6 +684,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       qbScrambleReactionTimer = state.qbScrambleReactionTimer;
       userControlledDefenderIndex = state.userControlledDefenderIndex ?? 0;
       cameraY = state.cameraY;
+      playSnapCameraY = typeof state.playSnapCameraY === 'number' ? state.playSnapCameraY : state.cameraY;
       lastClockFrameTime = null;
       isSessionActive = true;
       if (phase === 'PRE_SNAP' && !isKickoffPhase && normalizeTeamCalls()) {
@@ -1245,9 +1247,9 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
   function resizeGame() {
     if (!canvas) return;
-    const bounds = canvas.parentElement?.getBoundingClientRect();
-    const availableHeight = Math.max(1, bounds?.height || (typeof window !== 'undefined' ? window.innerHeight - 8 : 600));
-    const availableWidth = Math.max(1, bounds?.width || (typeof window !== 'undefined' ? window.innerWidth - 8 : 340));
+    const bounds = canvas.parentElement?.getBoundingClientRect() || canvas.getBoundingClientRect?.();
+    const availableHeight = Math.max(1, bounds?.height || (typeof window !== 'undefined' ? window.innerHeight - 8 : 340));
+    const availableWidth = Math.max(1, bounds?.width || (typeof window !== 'undefined' ? window.innerWidth - 8 : 450));
     const layout = getResponsiveCanvasSize(availableWidth, availableHeight, 450, logicalCanvasHeight);
     logicalCanvasWidth = layout.logicalWidth;
     const devicePixelRatio = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
@@ -1259,6 +1261,14 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     if (canvas.style) {
       canvas.style.width = layout.displayWidth + 'px';
       canvas.style.height = layout.displayHeight + 'px';
+    }
+
+    if (phase === 'PRE_SNAP' || isKickoffPhase) {
+      cameraY = Math.max(cameraWorldTop, Math.min(
+        cameraWorldBottom - logicalCanvasWidth,
+        getSideScrollCameraYForLineOfScrimmage(lineOfScrimmageY, logicalCanvasWidth, getCameraPitchFactor(), activeOffense === 'P1')
+      ));
+      playSnapCameraY = cameraY;
     }
   }
 
@@ -2538,6 +2548,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       cameraWorldBottom - logicalCanvasWidth,
       getSideScrollCameraYForLineOfScrimmage(lineOfScrimmageY, logicalCanvasWidth, getCameraPitchFactor(), activeOffense === 'P1')
     ));
+    playSnapCameraY = cameraY;
     setDownDistanceText(`KICKOFF - ${kickTeam.name.toUpperCase()} KICKING`);
     setIsKickoffState?.(true, kickingTeam, receivingTeam);
     setIs4thDownState?.(false);
@@ -2850,6 +2861,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       cameraWorldBottom - logicalCanvasWidth,
       getSideScrollCameraYForLineOfScrimmage(lineOfScrimmageY, logicalCanvasWidth, getCameraPitchFactor(), activeOffense === 'P1')
     ));
+    playSnapCameraY = cameraY;
     updateDownDisplay();
 
     if (activeOffense === 'P2' && !onlineGuestControlsP2) {
@@ -3594,6 +3606,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     tutorialAimFrames = 0;
     completeTutorialAction(1);
     completeTutorialAction(5);
+    playSnapCameraY = getSideScrollCameraYForLineOfScrimmage(lineOfScrimmageY, logicalCanvasWidth, getCameraPitchFactor(), activeOffense === 'P1');
+    cameraY = playSnapCameraY;
 
     // Tecmo Super Bowl Matchup Evaluation
     const offKey = activeOffense === 'P1' ? p1OffPlay : p2OffPlay;
@@ -4489,7 +4503,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       // 1. If on offense, check if user tapped/dragged an interactive player (RB, WR, Center) FIRST! (ELITE mode only)
       if (isLocalOffense() && currentTacticalMode === 'ELITE') {
         // RB tap / line gesture: checked before the snap zone so tapping the RB never starts the play.
-        if (rb && Math.hypot(rb.x - px, rb.y - py) < rb.radius + receiverHitPadding) {
+        if (rb && Math.hypot(rb.x - px, rb.y - py) < rb.radius + receiverHitPadding + 40) {
           gestureEntity = rb;
           showPlayerScout(rb);
           gestureRole = 'RB';
@@ -4571,6 +4585,12 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       }
 
       if (isLocalDefense()) {
+        if (touchedJoystick) {
+          startReadyPlay();
+          activateJoystick(e.pointerId, screenPos);
+          return;
+        }
+
         // Record start position for open field / bottom of screen formation swiping
         preSnapFieldSwipeStartX = px;
         preSnapFieldSwipeStartY = py;
@@ -4619,12 +4639,6 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
             isPullingDefender = false;
             return;
           }
-        }
-
-        if (touchedJoystick) {
-          startReadyPlay();
-          activateJoystick(e.pointerId, screenPos);
-          return;
         }
 
         return;
@@ -5061,17 +5075,57 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   }
 
   function updateCamera() {
-    const focusY = ball?.y ?? fumbleBall?.y ?? (
-      phase === 'RUNNING' ? activeEntity?.y :
-      phase === 'HANDOFF' ? qb.y :
-      undefined
-    );
-    if (focusY === undefined) return;
+    if (phase === 'PRE_SNAP') {
+      const snapTarget = getSideScrollCameraYForLineOfScrimmage(lineOfScrimmageY, logicalCanvasWidth, getCameraPitchFactor(), activeOffense === 'P1');
+      playSnapCameraY = snapTarget;
+      cameraY = snapTarget;
+      return;
+    }
 
-    const targetCameraY = Math.max(cameraWorldTop, Math.min(
-      cameraWorldBottom - logicalCanvasWidth,
-      getCameraYForAction(focusY, logicalCanvasWidth, getCameraPitchFactor())
-    ));
+    const snapAnchorY = playSnapCameraY ?? getSideScrollCameraYForLineOfScrimmage(lineOfScrimmageY, logicalCanvasWidth, getCameraPitchFactor(), activeOffense === 'P1');
+
+    // On kickoff or punt: track the ball downfield
+    if (isKickoffPhase || (ball && (ball.isKickoff || ball.isPunt))) {
+      const focusY = ball?.y ?? fumbleBall?.y ?? activeEntity?.y;
+      if (focusY !== undefined) {
+        const targetCameraY = Math.max(cameraWorldTop, Math.min(
+          cameraWorldBottom - logicalCanvasWidth,
+          getCameraYForAction(focusY, logicalCanvasWidth, getCameraPitchFactor())
+        ));
+        cameraY += (targetCameraY - cameraY) * 0.12;
+      }
+      return;
+    }
+
+    // Live play from scrimmage:
+    // DO NOT PULL BACK THE CAMERA into the backfield or change view when the ball snaps!
+    // Start right at the line of scrimmage view.
+    if (phase === 'HANDOFF' || phase === 'QB_DROP') {
+      cameraY = snapAnchorY;
+      return;
+    }
+
+    const focusY = ball?.y ?? fumbleBall?.y ?? (phase === 'RUNNING' ? activeEntity?.y : undefined);
+    if (focusY === undefined) {
+      cameraY = snapAnchorY;
+      return;
+    }
+
+    const actionCameraY = getCameraYForAction(focusY, logicalCanvasWidth, getCameraPitchFactor());
+
+    // Never pull back behind the line of scrimmage snap anchor!
+    // If attackDirection === -1 (offense advancing towards lower Y):
+    // Pulling back would mean actionCameraY > snapAnchorY. So targetCameraY <= snapAnchorY.
+    // If attackDirection === 1 (offense advancing towards higher Y):
+    // Pulling back would mean actionCameraY < snapAnchorY. So targetCameraY >= snapAnchorY.
+    let targetCameraY = snapAnchorY;
+    if (attackDirection === -1) {
+      targetCameraY = Math.min(snapAnchorY, actionCameraY);
+    } else {
+      targetCameraY = Math.max(snapAnchorY, actionCameraY);
+    }
+
+    targetCameraY = Math.max(cameraWorldTop, Math.min(cameraWorldBottom - logicalCanvasWidth, targetCameraY));
     cameraY += (targetCameraY - cameraY) * 0.12;
   }
 
