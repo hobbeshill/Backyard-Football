@@ -420,6 +420,15 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   let p1Team: TeamProfile = getTeam('ALABAMA');
   let p2Team: TeamProfile = getTeam('GEORGIA');
 
+  function isTecmoCall(key?: string): boolean {
+    if (!key) return false;
+    return Boolean(offensivePlaybook[key] && (
+      getTecmoPlaysForTeam(p1Team.id).some(p => p.id === key) ||
+      getTecmoPlaysForTeam(p2Team.id).some(p => p.id === key) ||
+      Object.values(SEC_TEAM_TECMO_PLAYS).some(plays => plays.some(p => p.id === key))
+    ));
+  }
+
   let tacticalMode: TacticalMode = 'ELITE';
   let userControlledDefenderIndex = 0;
   let userTurboMeter = 100;
@@ -1262,7 +1271,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     p2OffPlay = normalizeOffense(p2OffPlay, p2Team);
     p1DefPlay = normalizeDefense(p1DefPlay, p1Team);
     p2DefPlay = normalizeDefense(p2DefPlay, p2Team);
-    if (previousOffense !== p1OffPlay) {
+    if (previousOffense !== p1OffPlay && offensivePlaybook[p1OffPlay]) {
       p1OffFormation = offensivePlaybook[p1OffPlay].alignment ?? 'SPREAD';
       callbacks.setP1OffFormationState?.(p1OffFormation);
     }
@@ -1326,7 +1335,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   function getCpuDefensivePlayCall(): string {
     const offenseTeam = activeOffense === 'P1' ? p1Team : p2Team;
     const offensePlay = activeOffense === 'P1' ? p1OffPlay : p2OffPlay;
-    const isTecmoOffense = getTecmoPlaysForTeam(offenseTeam.id).some(play => play.id === offensePlay);
+    const isTecmoOffense = isTecmoCall(offensePlay) || getTecmoPlaysForTeam(offenseTeam.id).some(play => play.id === offensePlay);
     return isTecmoOffense ? getCpuDefensiveChoice() : getAdaptiveDefensiveCall();
   }
 
@@ -1838,7 +1847,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     if (rb && !rb.isBlocker && defenders[4] && !defenders[4].passRusher && !defenders[4].assignedReceiver) {
       defenders[4].assignedReceiver = rb;
     }
-    if (activeDefense === 'P2' && tacticalMode !== 'PRO') {
+    const isTecmoDefense = isTecmoCall(activeDefKey);
+    if (activeDefense === 'P2' && !isTecmoDefense && tacticalMode !== 'PRO') {
       defenseOverrides = chooseCpuDefensiveAssignments(
         defenders,
         [...receivers, centerReceiver, rb].filter((receiver): receiver is Entity => receiver !== null),
@@ -1855,7 +1865,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     if (assignRBDefender) positionRBDefender();
     separateDefenderAlignments(defenders, fieldWidth, touchOptimized ? 20 : 10);
     constrainDefendersToFieldSide(defenders, lineOfScrimmageY, attackDirection, fieldHeight, fieldWidth);
-    if (activeDefense === 'P1' && defenders[0] && tacticalMode !== 'PRO' && userControlledDefenderIndex === 0) {
+    if (activeDefense === 'P1' && defenders[0] && !isTecmoDefense && tacticalMode !== 'PRO' && userControlledDefenderIndex === 0) {
       const centerDef = defenders[0];
       centerDef.defenseAssignment = 'USER';
       centerDef.assignedReceiver = null;
@@ -2404,7 +2414,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     normalizeTeamCalls();
     isKickoffPhase = true;
     if (p1OffPlay === 'FIELD_GOAL' || p1OffPlay === 'PUNT') {
-      p1OffPlay = tacticalMode === 'PRO' ? 'PRO_QUICK_SLANTS' : 'SHORT_PASS';
+      p1OffPlay = getTecmoPlaysForTeam(p1Team.id)[0]?.id || (tacticalMode === 'PRO' ? 'PRO_QUICK_SLANTS' : 'SHORT_PASS');
       callbacks.setP1OffPlayState?.(p1OffPlay);
     }
     callbacks.setFieldGoalMeterState?.(null);
@@ -2683,7 +2693,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       isKickoffPhase = true;
       kickoffKickingTeam = kickingTeam;
       kickoffReceivingTeam = defendingTeam;
-      p1OffPlay = tacticalMode === 'PRO' ? 'PRO_QUICK_SLANTS' : 'SHORT_PASS';
+      p1OffPlay = getTecmoPlaysForTeam(p1Team.id)[0]?.id || (tacticalMode === 'PRO' ? 'PRO_QUICK_SLANTS' : 'SHORT_PASS');
       callbacks.setP1OffPlayState?.(p1OffPlay);
       callbacks.setFieldGoalMeterState?.(null);
       fgMeterStage = 'AIM';
@@ -2728,7 +2738,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         firstDownMarkerY = lineOfScrimmageY + (100 * attackDirection);
       }
       updateDownDisplay();
-      p1OffPlay = tacticalMode === 'PRO' ? 'PRO_QUICK_SLANTS' : 'SHORT_PASS';
+      p1OffPlay = getTecmoPlaysForTeam(p1Team.id)[0]?.id || (tacticalMode === 'PRO' ? 'PRO_QUICK_SLANTS' : 'SHORT_PASS');
       callbacks.setP1OffPlayState?.(p1OffPlay);
       callbacks.setFieldGoalMeterState?.(null);
       fgMeterStage = 'AIM';
@@ -3262,21 +3272,29 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     },
     selectDefense: (key: string) => {
       if (options.tutorial && tutorialStep !== 4) return;
-      const isTecmoDefendPlay = getTecmoPlaysForTeam(p2Team.id).some(p => p.id === key);
-      if (!isTecmoDefendPlay && !defensePlays(p1Team).includes(key)) {
-        showAnnouncement(`${p1Team.nickname.toUpperCase()}: SCHEME NOT IN TEAM PLAYBOOK`, '#ffcc00');
+      const oppTeam = activeDefense === 'P1' ? p2Team : p1Team;
+      const defTeam = activeDefense === 'P1' ? p1Team : p2Team;
+      const isTecmoDefendPlay = getTecmoPlaysForTeam(oppTeam.id).some(p => p.id === key);
+      if (!isTecmoDefendPlay && !defensePlays(defTeam).includes(key)) {
+        showAnnouncement(`${defTeam.nickname.toUpperCase()}: SCHEME NOT IN TEAM PLAYBOOK`, '#ffcc00');
         return;
       }
-      if (activeDefense === 'P1' && phase === 'PRE_SNAP' && !isKickoffPhase && (allDefensivePlaybook[key] || isTecmoDefendPlay)) {
+      if (phase === 'PRE_SNAP' && !isKickoffPhase && (allDefensivePlaybook[key] || isTecmoDefendPlay)) {
         lastDefenseSelectTime = Date.now();
         const previousPositions = defenders.map(({ x, y }) => ({ x, y }));
-        p1DefPlay = key;
-        callbacks.setP1DefPlayState(key);
+        if (activeDefense === 'P1') {
+          p1DefPlay = key;
+          callbacks.setP1DefPlayState(key);
+        } else {
+          p2DefPlay = key;
+          callbacks.setP2DefPlayState(key);
+        }
         defenseOverrides.clear();
         applyDefensiveAlignment();
         startFormationTransition(defenders, previousPositions);
-        if (isTecmoDefendPlay && offensivePlaybook[key]) {
-          showAnnouncement(`DEFENDING: ${offensivePlaybook[key].name.toUpperCase()} (${offensivePlaybook[key].isRun ? 'RUN' : 'PASS'}) 🛡️`, '#00ffff');
+        const targetPlay = offensivePlaybook[key];
+        if (targetPlay) {
+          showAnnouncement(`DEFENDING: ${targetPlay.name.toUpperCase()} (${targetPlay.isRun ? 'RUN' : 'PASS'}) 🛡️`, '#00ffff');
         }
         if (tacticalMode === 'PRO') requiresProPlaybookSelection = false;
         completeTutorialAction(4);

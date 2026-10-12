@@ -1,5 +1,5 @@
 import type { DefensiveAssignment, Entity } from './types';
-import { allDefensivePlaybook } from './playbook';
+import { allDefensivePlaybook, offensivePlaybook } from './playbook';
 
 export interface CpuDefenseSituation {
   down: number;
@@ -266,7 +266,33 @@ export function alignDefenders(
 
   const isEightMan = defenders.length >= 8;
 
-  if (playKey === 'COVER2' || playKey === 'PRO_COVER2_HARD_FLAT') {
+  const tecmoTargetPlay = offensivePlaybook[playKey];
+  const isTecmoRunDef = Boolean(tecmoTargetPlay && ['ISO', 'POWER', 'SWEEP'].includes(tecmoTargetPlay.type));
+  const isTecmoPassDef = Boolean(tecmoTargetPlay && tecmoTargetPlay.type === 'PASS');
+
+  if (isTecmoRunDef) {
+    placeDefender(0, 135, 20, 20, 'DL', true);
+    placeDefender(1, 65, 24, 24, 'DL');
+    placeDefender(2, 275, 24, 24, 'DL');
+    placeDefender(3, 105, 22, 22, 'LB');
+    placeDefender(4, 170, 22, 22, 'LB');
+    placeDefender(5, 235, 22, 22, 'LB');
+    placeDefender(6, 170, 130, 160, 'DB');
+    if (isEightMan) {
+      placeDefender(7, 205, 20, 20, 'DL', true);
+    }
+  } else if (isTecmoPassDef) {
+    placeDefender(0, 170, 24, 24, 'DL', true);
+    placeDefender(1, 55, 45, 75, 'DB');
+    placeDefender(2, 285, 45, 75, 'DB');
+    placeDefender(3, 115, 65, 110, 'LB');
+    placeDefender(4, 225, 65, 110, 'LB');
+    placeDefender(5, 110, 185, 260, 'DB');
+    placeDefender(6, 230, 185, 260, 'DB');
+    if (isEightMan) {
+      placeDefender(7, 170, 80, 150, 'DB');
+    }
+  } else if (playKey === 'COVER2' || playKey === 'PRO_COVER2_HARD_FLAT') {
     placeDefender(1, 55, 32, 60, 'CB');
     placeDefender(2, 285, 32, 60, 'CB');
     placeDefender(3, 125, 70, 112, 'LB');
@@ -413,6 +439,13 @@ export function alignDefenders(
     defenders[1].startX = clampX(leftReceiverX);
     defenders[2].startX = clampX(rightReceiverX);
     defenders[4].startX = clampX(slotReceiverX);
+  } else if (isTecmoRunDef) {
+    // Keep heavy run-stop front tightly packed between the tackles
+    defenders[1].startX = clampX(65);
+    defenders[2].startX = clampX(275);
+    defenders[3].startX = clampX(105);
+    defenders[4].startX = clampX(170);
+    defenders[5].startX = clampX(235);
   } else {
     defenders[1].startX = clampX(leftReceiverX);
     defenders[2].startX = clampX(rightReceiverX);
