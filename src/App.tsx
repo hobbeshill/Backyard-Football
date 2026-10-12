@@ -188,6 +188,45 @@ export default function App() {
     }
   ) => {
     const upper = text.toUpperCase();
+
+    // 1. Remove the announcement of what play is called
+    if (
+      upper.includes('DEFENDING:') ||
+      upper.includes('PLAY NOT IN TEAM PLAYBOOK') ||
+      upper.includes('SCHEME NOT IN TEAM PLAYBOOK') ||
+      upper.includes('DEFENSE CALLED') ||
+      upper.includes('DEFENSE ANTICIPATED') ||
+      upper.includes('SPECIAL TEAMS:') ||
+      upper.includes('PASS ROUTE:') ||
+      upper.includes('PASS PROTECTION:') ||
+      upper.includes('RUN PLAY:') ||
+      upper.includes('AUDIBLE') ||
+      upper.includes('TEAM PLAYBOOK UPDATED')
+    ) {
+      return;
+    }
+
+    // 2. Change the announcements of the results to only announce first downs and touchdowns
+    const isResultAnnouncement =
+      meta?.category === 'SACK' ||
+      meta?.category === 'SAFETY' ||
+      meta?.category === 'TURNOVER' ||
+      meta?.category === 'FUMBLE' ||
+      upper.includes('SACK!') ||
+      upper.includes('PASS INCOMPLETE') ||
+      upper.includes('GAIN OF ') ||
+      upper.includes('TURNOVER ON DOWNS') ||
+      upper.includes('INTERCEPTION') ||
+      upper.includes('RETURN FOR ') ||
+      upper.includes('TOUCHBACK!') ||
+      upper.includes('PUNT COMPLETE') ||
+      upper.includes('FUMBLE OUT OF BOUNDS') ||
+      upper.includes('RECOVERS OWN FUMBLE');
+
+    if (isResultAnnouncement && !upper.includes('FIRST DOWN') && !upper.includes('TOUCHDOWN')) {
+      return;
+    }
+
     let category = meta?.category;
     let priority = 1;
     let defaultDuration = 2800;
@@ -949,7 +988,6 @@ export default function App() {
   const currentWeekNumber = seasonForDisplay.results.length + 1;
   const isUserPreSnapPhase = hasKickedOff && phaseState === 'PRE_SNAP' && !isKickoffActive;
   const isTacticalModeLocked = hasKickedOff;
-  const showPuntAction = tacticalMode !== 'PRO' && isUserPreSnapPhase && activeOffenseState === 'P1' && is4thDown;
   const userTeamPlaybook = getTeamPlaybook(p1TeamState.id);
   const onlinePlayerSide = onlineRole === 'host' ? 'P1' : 'P2';
   const isOnlinePlayerOnOffense = activeOffenseState === onlinePlayerSide;
@@ -1056,17 +1094,6 @@ export default function App() {
             >
               <Settings size={12} />
             </button>
-            {isUserPreSnapPhase && !onlineRole && (
-              <button
-                type="button"
-                onClick={() => setShowPlaybookCards(true)}
-                className="p-0.5 sm:p-1 text-amber-300 hover:text-white transition cursor-pointer"
-                title="Team playbook"
-                aria-label="Team playbook"
-              >
-                <BookOpen size={12} />
-              </button>
-            )}
             {hasKickedOff ? (
               <button
                 type="button"
@@ -1101,103 +1128,16 @@ export default function App() {
         </div>
       </header>
 
-      {/* Pre-Snap Floating Tecmo Playcall Status Bar */}
-      {isUserPreSnapPhase && !onlineRole && !isKickoffActive && !showPauseMenu && (
-        <div className="absolute top-9 sm:top-10 left-1/2 -translate-x-1/2 flex items-center justify-between gap-1.5 max-w-[95vw] px-2 py-1 bg-black/90 border border-neutral-700/80 rounded-lg text-[0.62rem] z-20 shadow-xl backdrop-blur-sm pointer-events-auto">
-          {activeOffenseState === 'P1' ? (
-            <>
-              <button
-                type="button"
-                onClick={() => setShowPlaybookCards(true)}
-                className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-amber-950/80 border border-amber-500/60 text-amber-200 hover:bg-amber-900 transition active:scale-95 cursor-pointer"
-                title="Tap to change offensive play card"
-              >
-                <BookOpen size={11} className="text-amber-400 shrink-0" />
-                <span className="font-black truncate max-w-[170px]">
-                  PLAY: {offensivePlaybook[p1OffPlayState]?.name ?? p1OffPlayState} ({offensivePlaybook[p1OffPlayState]?.isRun ? 'RUN' : 'PASS'})
-                </span>
-                <span className="text-[9px] text-amber-400/80 font-bold underline">CHANGE</span>
-              </button>
-              <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-red-950/60 border border-red-500/50 text-red-300">
-                <Shield size={11} className="text-red-400 shrink-0" />
-                <span className="font-bold">CPU DEFENSE: SCHEME LOCKED 🔒</span>
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-amber-950/60 border border-amber-500/50 text-amber-300">
-                <BookOpen size={11} className="text-amber-400 shrink-0" />
-                <span className="font-bold">CPU OFFENSE: READY</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowPlaybookCards(true)}
-                className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-red-950/80 border border-red-500/60 text-red-200 hover:bg-red-900 transition active:scale-95 cursor-pointer"
-                title="Tap to change what play to defend"
-              >
-                <Shield size={11} className="text-red-400 shrink-0" />
-                <span className="font-black truncate max-w-[170px]">
-                  DEFENDING: {offensivePlaybook[p1DefPlayState]?.name ?? p1DefPlayState}
-                </span>
-                <span className="text-[9px] text-red-400/80 font-bold underline">CHANGE</span>
-              </button>
-            </>
-          )}
-        </div>
-      )}
-
-      {isUserPreSnapPhase && onlineRole && !isKickoffActive && !showPauseMenu && (
-        <div className="absolute top-9 sm:top-10 left-1/2 -translate-x-1/2 max-w-[95vw] px-2 py-1 z-20 pointer-events-auto">
+      {/* Field Goal Meter Lock Action Controls */}
+      {!onlineRole && isUserPreSnapPhase && !isKickoffActive && activeOffenseState === 'P1' && p1OffPlayState === 'FIELD_GOAL' && fgMeterState !== null && (
+        <div className="absolute top-9 sm:top-10 left-1/2 -translate-x-1/2 flex items-center justify-center gap-2 z-25 max-w-[95vw] px-2 pointer-events-auto">
           <button
             type="button"
-            onClick={() => setShowPlaybookCards(true)}
-            className={`flex w-full items-center justify-between gap-2 rounded-lg border px-3 py-1.5 text-left text-[0.62rem] shadow-xl backdrop-blur-sm ${
-              isOnlinePlayerOnOffense
-                ? 'border-amber-500/60 bg-amber-950/90 text-amber-200'
-                : 'border-red-500/60 bg-red-950/90 text-red-200'
-            }`}
-            title={isOnlinePlayerOnOffense ? 'Choose your offensive play' : 'Choose your defensive call'}
+            onClick={() => engineRef.current?.lockFieldGoalMeter?.()}
+            className="min-w-0 px-4 py-1.5 rounded-lg border-2 border-amber-300 bg-gradient-to-r from-emerald-600 to-teal-500 text-xs font-black uppercase text-white shadow-xl transition hover:from-emerald-500 hover:to-teal-400 active:scale-95 animate-pulse cursor-pointer"
           >
-            <span className="truncate font-black uppercase">
-              {isOnlinePlayerOnOffense ? 'YOUR PLAY' : 'YOUR DEFENSE'}: {offensivePlaybook[onlineSelectedPlay]?.name ?? onlineSelectedPlay}
-            </span>
-            <span className="shrink-0 text-[9px] font-bold underline">CHANGE</span>
+            {fgMeterState.stage === 'POWER' ? '⚡ KICK! (LOCK DISTANCE)' : '🎯 LOCK DIRECTION'}
           </button>
-        </div>
-      )}
-
-      {/* 4th Down Special Teams Punt / Field Goal Action Controls */}
-      {!onlineRole && ((showPuntAction && p1OffPlayState !== 'PUNT' && p1OffPlayState !== 'FIELD_GOAL') ||
-        (isUserPreSnapPhase && !isKickoffActive && activeOffenseState === 'P1' && p1OffPlayState === 'FIELD_GOAL' && fgMeterState !== null)) && (
-        <div className="absolute top-9 sm:top-10 left-1/2 -translate-x-1/2 flex items-center justify-center gap-2 z-25 max-w-[95vw] px-2 pointer-events-auto">
-          {showPuntAction && p1OffPlayState !== 'PUNT' && p1OffPlayState !== 'FIELD_GOAL' && (
-            <>
-              <button
-                type="button"
-                onClick={() => engineRef.current?.callFieldGoal?.()}
-                className="min-w-0 px-3 py-1.5 rounded-lg border-2 border-amber-300 bg-gradient-to-r from-amber-600 to-yellow-500 text-xs font-black uppercase text-white shadow-xl transition hover:from-amber-500 hover:to-yellow-400 active:scale-95 flex items-center gap-1 cursor-pointer"
-              >
-                <span>FIELD GOAL</span>
-                <span className="text-[0.65rem] opacity-90">({engineRef.current?.getFieldGoalDistance?.() ?? fgMeterState?.distanceYards ?? 40} YD)</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => engineRef.current?.callPunt?.()}
-                className="min-w-0 px-3.5 py-1.5 rounded-lg border-2 border-cyan-300 bg-gradient-to-r from-cyan-600 to-blue-600 text-xs font-black uppercase text-white shadow-xl transition hover:from-cyan-500 hover:to-blue-500 active:scale-95 cursor-pointer"
-              >
-                PUNT
-              </button>
-            </>
-          )}
-          {isUserPreSnapPhase && !isKickoffActive && activeOffenseState === 'P1' && p1OffPlayState === 'FIELD_GOAL' && fgMeterState !== null && (
-            <button
-              type="button"
-              onClick={() => engineRef.current?.lockFieldGoalMeter?.()}
-              className="min-w-0 px-4 py-1.5 rounded-lg border-2 border-amber-300 bg-gradient-to-r from-emerald-600 to-teal-500 text-xs font-black uppercase text-white shadow-xl transition hover:from-emerald-500 hover:to-teal-400 active:scale-95 animate-pulse cursor-pointer"
-            >
-              {fgMeterState.stage === 'POWER' ? '⚡ KICK! (LOCK DISTANCE)' : '🎯 LOCK DIRECTION'}
-            </button>
-          )}
         </div>
       )}
 

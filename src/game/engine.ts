@@ -54,6 +54,7 @@ export interface GameEngineHandle {
   isKickoffActive: () => boolean;
   is4thDown: () => boolean;
   triggerPlayEnd?: (endingY: number, resultType: string, customMessage?: string, customColor?: string) => void;
+  flushPostPlayAnnouncement?: () => void;
   setPossessionForTest?: (team: 'P1' | 'P2') => void;
   set4thDownForTest?: () => void;
   getDefenders?: () => Entity[];
@@ -358,6 +359,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   let isSessionActive = false;
   let lastSessionSaveTime = 0;
   let drillResetTimer: ReturnType<typeof setTimeout> | null = null;
+  let postPlayAnnouncementTimer: ReturnType<typeof setTimeout> | null = null;
+  let pendingPostPlayAnnouncement: (() => void) | null = null;
   let tutorialStep = 0;
   let tutorialAimFrames = 0;
 
@@ -2034,7 +2037,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     });
   }
 
-  function checkFirstDownOrTurnover() {
+  function checkFirstDownOrTurnover(): boolean {
     const reachedFirstDown = (attackDirection === -1 && lineOfScrimmageY <= firstDownMarkerY) || (attackDirection === 1 && lineOfScrimmageY >= firstDownMarkerY);
 
     if (reachedFirstDown) {
@@ -2046,44 +2049,41 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         }
       });
       const offTeamName = (activeOffense === 'P1' ? p1Team : p2Team).name.toUpperCase();
-      showAnnouncement("FIRST DOWN! 🎯", "#00ffaa", true, {
-        category: 'FIRST_DOWN',
-        subtext: `${offTeamName} MOVES THE CHAINS • 1ST & 10`,
-        possessionTeam: activeOffense,
-        durationMs: 3800
-      });
+      const currentActiveOffense = activeOffense;
+      if (postPlayAnnouncementTimer) clearTimeout(postPlayAnnouncementTimer);
+      pendingPostPlayAnnouncement = () => {
+        showAnnouncement("FIRST DOWN! 🎯", "#00ffaa", true, {
+          category: 'FIRST_DOWN',
+          subtext: `${offTeamName} MOVES THE CHAINS • 1ST & 10`,
+          possessionTeam: currentActiveOffense,
+          durationMs: 3800
+        });
+      };
+      postPlayAnnouncementTimer = setTimeout(() => {
+        postPlayAnnouncementTimer = null;
+        if (pendingPostPlayAnnouncement) {
+          const cb = pendingPostPlayAnnouncement;
+          pendingPostPlayAnnouncement = null;
+          cb();
+        }
+      }, 2000);
       sounds.playWhistle();
       currentDown = 1;
       yardsToGo = 10;
       firstDownMarkerY = lineOfScrimmageY + (100 * attackDirection);
       updateDownDisplay();
+      return true;
     } else if (currentDown > 4) {
-      const defendingSide: 'P1' | 'P2' = activeDefense === 'P1' ? 'P1' : 'P2';
-      const defendingName = (defendingSide === 'P1' ? p1Team : p2Team).name.toUpperCase();
-      const nextOffenseSide: 'P1' | 'P2' = activeOffense === 'P1' ? 'P2' : 'P1';
-      const nextOffenseName = (nextOffenseSide === 'P1' ? p1Team : p2Team).name.toUpperCase();
-      const isUserStop = defendingSide === 'P1';
-      showAnnouncement(
-        "TURNOVER ON DOWNS! 🛑",
-        isUserStop ? '#00ffaa' : '#ff4444',
-        true,
-        {
-          category: 'TURNOVER',
-          subtext: isUserStop
-            ? `4TH DOWN STOP BY ${defendingName}! YOU TAKE OVER ON DOWNS! (1ST & 10)`
-            : `STOPPED ON 4TH DOWN! ${nextOffenseName} TAKES OVER ON DOWNS (1ST & 10)`,
-          possessionTeam: nextOffenseSide,
-          durationMs: 5500
-        }
-      );
       sounds.playWhistle();
       swapPossession();
+      return false;
     } else {
       updateDownDisplay();
+      return false;
     }
   }
 
-  function scheduleDrillReset() {
+  function scheduleDrillReset(delayMs = 1600) {
     if (drillResetTimer) clearTimeout(drillResetTimer);
     drillResetTimer = setTimeout(() => {
       drillResetTimer = null;
@@ -2094,7 +2094,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         return;
       }
       resetDrill();
-    }, 1600);
+    }, delayMs);
   }
 
   function handlePlayEnd(endingY: number, resultType: string, customMessage?: string, customColor?: string, interceptionTouchback = false) {
@@ -2231,6 +2231,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       if (rosterKey === rb?.rosterKey) rb.stamina = rosterStamina[rosterKey];
     });
 
+    let reachedFirstDown = false;
     if (isSafety(endingY, attackDirection, fieldHeight, endZoneHeight, resultType)) {
       gameClockRunning = false;
       sounds.playWhistle();
@@ -2244,12 +2245,6 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         p2QuarterScores[quarter - 1] += 2;
         setCpuScore(p2Score);
       }
-      showAnnouncement('SAFETY! 2 POINTS!', scoringTeam === 'P1' ? '#00ffff' : '#ff3333', true, {
-        category: 'SAFETY',
-        subtext: `${(scoringTeam === 'P1' ? p1Team : p2Team).name.toUpperCase()} SCORES 2 • ${endedOffense === 'P1' ? p1Team.name.toUpperCase() : p2Team.name.toUpperCase()} TO KICK OFF`,
-        possessionTeam: scoringTeam,
-        durationMs: 5500
-      });
       applyMomentum(1);
       isKickoffPhase = true;
       kickoffKickingTeam = endedOffense;
@@ -2265,41 +2260,50 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         p1Score += 7;
         p1QuarterScores[quarter - 1] += 7;
         setUserScore(p1Score);
-        showAnnouncement(
-          endedInterceptionReturn
-            ? `PICK-SIX! INTERCEPTION RETURNED FOR ${yardsGained} YARDS! TOUCHDOWN P1!`
-            : endedSpecialTeamsReturn
-              ? `${endedSpecialTeamsType} RETURN TOUCHDOWN P1! 🏈 (+7 Points)`
-              : "TOUCHDOWN P1! (+7 Points)",
-          "#00ffff",
-          true,
-          {
-            category: 'TOUCHDOWN',
-            subtext: `${p1Team.name.toUpperCase()} (P1) SCORES! +7 POINTS • KICKOFF UPCOMING`,
-            possessionTeam: 'P1',
-            durationMs: 5500
-          }
-        );
       } else {
         p2Score += 7;
         p2QuarterScores[quarter - 1] += 7;
         setCpuScore(p2Score);
-        showAnnouncement(
-          endedInterceptionReturn
+      }
+      const tdText = scoringTeam === 'P1'
+        ? (endedInterceptionReturn
+            ? `PICK-SIX! INTERCEPTION RETURNED FOR ${yardsGained} YARDS! TOUCHDOWN P1!`
+            : endedSpecialTeamsReturn
+              ? `${endedSpecialTeamsType} RETURN TOUCHDOWN P1! 🏈 (+7 Points)`
+              : "TOUCHDOWN P1! (+7 Points)")
+        : (endedInterceptionReturn
             ? `PICK-SIX! INTERCEPTION RETURNED FOR ${yardsGained} YARDS! TOUCHDOWN P2!`
             : endedSpecialTeamsReturn
               ? `${endedSpecialTeamsType} RETURN TOUCHDOWN P2 / CPU! 🏈 (+7 Points)`
-              : "TOUCHDOWN P2 / CPU! (+7 Points)",
-          "#ff3333",
+              : "TOUCHDOWN P2 / CPU! (+7 Points)");
+      const tdColor = scoringTeam === 'P1' ? '#00ffff' : '#ff3333';
+      const tdSubtext = scoringTeam === 'P1'
+        ? `${p1Team.name.toUpperCase()} (P1) SCORES! +7 POINTS • KICKOFF UPCOMING`
+        : `${p2Team.name.toUpperCase()} (CPU) SCORES! +7 POINTS • KICKOFF UPCOMING`;
+
+      if (postPlayAnnouncementTimer) clearTimeout(postPlayAnnouncementTimer);
+      pendingPostPlayAnnouncement = () => {
+        showAnnouncement(
+          tdText,
+          tdColor,
           true,
           {
             category: 'TOUCHDOWN',
-            subtext: `${p2Team.name.toUpperCase()} (CPU) SCORES! +7 POINTS • KICKOFF UPCOMING`,
-            possessionTeam: 'P2',
+            subtext: tdSubtext,
+            possessionTeam: scoringTeam,
             durationMs: 5500
           }
         );
-      }
+      };
+      postPlayAnnouncementTimer = setTimeout(() => {
+        postPlayAnnouncementTimer = null;
+        if (pendingPostPlayAnnouncement) {
+          const cb = pendingPostPlayAnnouncement;
+          pendingPostPlayAnnouncement = null;
+          cb();
+        }
+      }, 2000);
+
       // Standard Football Video Game Rule: Scoring team kicks off to opponent after TD
       isKickoffPhase = true;
       kickoffKickingTeam = scoringTeam;
@@ -2307,22 +2311,6 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     } else if (resultType === 'INT') {
       gameClockRunning = false;
       sounds.playWhistle();
-      const interceptingSide: 'P1' | 'P2' = activeOffense === 'P1' ? 'P2' : 'P1';
-      const interceptingName = (interceptingSide === 'P1' ? p1Team : p2Team).name.toUpperCase();
-      const isUser = interceptingSide === 'P1';
-      showAnnouncement(
-        customMessage || "INTERCEPTION! TURNOVER ON THE PLAY! 🛡️",
-        customColor || (isUser ? "#00ffff" : "#ff3333"),
-        true,
-        {
-          category: 'TURNOVER',
-          subtext: isUser
-            ? `YOU (P1) INTERCEPTED! TAKES OVER POSSESSION • 1ST & 10`
-            : `CPU (P2) INTERCEPTED! TURNOVER ON THE PLAY • 1ST & 10`,
-          possessionTeam: interceptingSide,
-          durationMs: 5500
-        }
-      );
       swapPossessionOnPlay(endingY);
     } else if (resultType === 'SACK') {
       gameClockRunning = false;
@@ -2331,17 +2319,13 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       yardsToGo = calculateYardsToGo(lineOfScrimmageY, firstDownMarkerY, attackDirection);
       currentDown++;
       applyMomentum(matchup.momentumDelta - 1);
-      const suffix = currentDown === 1 ? 'st' : currentDown === 2 ? 'nd' : currentDown === 3 ? 'rd' : 'th';
-      showAnnouncement(customMessage || `SACK! Loss of ${Math.abs(yardsGained)} yards. (${currentDown}${suffix} Down)`, customColor || "#ff3333");
-      checkFirstDownOrTurnover();
+      reachedFirstDown = checkFirstDownOrTurnover();
     } else if (resultType === 'INCOMPLETE' || resultType === 'DEFLECT' || resultType === 'BATTED_DOWN' || resultType === 'BROKEN_UP') {
       gameClockRunning = false;
       sounds.playWhistle();
       currentDown++;
       applyMomentum(matchup.momentumDelta - 1);
-      const messagePrefix = customMessage ? `${customMessage} • ` : 'PASS INCOMPLETE. ';
-      showAnnouncement(`${messagePrefix}(${currentDown} Down)`, customColor || "#aaaaaa");
-      checkFirstDownOrTurnover();
+      reachedFirstDown = checkFirstDownOrTurnover();
     } else {
       gameClockRunning = false;
       if (resultType === 'OUT_OF_BOUNDS') sounds.playWhistle();
@@ -2350,10 +2334,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       yardsToGo = calculateYardsToGo(lineOfScrimmageY, firstDownMarkerY, attackDirection);
       currentDown++;
       applyMomentum(Math.max(0, matchup.momentumDelta) + (yardsGained >= 12 ? 1 : 0) - (yardsGained <= 2 ? 1 : 0));
-      if (!endedInterceptionReturn && !endedSpecialTeamsReturn) {
-        showAnnouncement(customMessage || `Gain of ${yardsGained} yards. (${currentDown} Down, ${Math.max(0, yardsToGo)} yards to go)`, customColor || "#ffcc00");
-      }
-      checkFirstDownOrTurnover();
+      reachedFirstDown = checkFirstDownOrTurnover();
     }
 
     if (endedSpecialTeamsReturn && !playResult.isTouchdown) {
@@ -2362,29 +2343,11 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       yardsToGo = 10;
       firstDownMarkerY = lineOfScrimmageY + (100 * attackDirection);
       updateDownDisplay();
-      const returnYards = Math.abs(Math.round((endingY - (returnCatchY || endingY)) / 10));
-      showAnnouncement(`${endedSpecialTeamsType} RETURN FOR ${returnYards} YARDS • 1ST & 10`, '#00ffaa', true);
     } else if (endedInterceptionReturn && !playResult.isTouchdown) {
       currentDown = 1;
       yardsToGo = 10;
       firstDownMarkerY = lineOfScrimmageY + (100 * attackDirection);
       updateDownDisplay();
-      const newOffense = activeOffense;
-      const newOffenseName = (newOffense === 'P1' ? p1Team : p2Team).name.toUpperCase();
-      const isUser = newOffense === 'P1';
-      showAnnouncement(
-        interceptionTouchback ? 'INTERCEPTION TOUCHBACK! BALL AT THE 20-YARD LINE 🏈🛡️' : `INTERCEPTION RETURNED FOR ${yardsGained} YARDS! 🏈🛡️`,
-        isUser ? '#00ffff' : '#ff4444',
-        true,
-        {
-          category: 'TURNOVER',
-          subtext: isUser
-            ? `YOU (P1) ARE ON OFFENSE! 1ST & 10 FOR ${newOffenseName}`
-            : `CPU (P2) TAKES OVER POSSESSION • 1ST & 10 FOR ${newOffenseName}`,
-          possessionTeam: newOffense,
-          durationMs: 5500
-        }
-      );
     }
     isInterceptionReturn = false;
 
@@ -2428,7 +2391,13 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
     runCpuAiPlaySelection();
 
-    scheduleDrillReset();
+    if (playResult.isTouchdown) {
+      scheduleDrillReset(4500);
+    } else if (reachedFirstDown) {
+      scheduleDrillReset(3800);
+    } else {
+      scheduleDrillReset(1600);
+    }
   }
 
   function startFormationTransition(
@@ -2794,6 +2763,11 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   }
 
   function resetDrill(animateAlignment = false) {
+    if (postPlayAnnouncementTimer) {
+      clearTimeout(postPlayAnnouncementTimer);
+      postPlayAnnouncementTimer = null;
+    }
+    pendingPostPlayAnnouncement = null;
     normalizeTeamCalls();
     if (isKickoffPhase) {
       setupKickoff(kickoffKickingTeam, kickoffReceivingTeam);
@@ -3340,10 +3314,6 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         defenseOverrides.clear();
         applyDefensiveAlignment();
         startFormationTransition(defenders, previousPositions);
-        const targetPlay = offensivePlaybook[key];
-        if (targetPlay) {
-          showAnnouncement(`DEFENDING: ${targetPlay.name.toUpperCase()} (${targetPlay.isRun ? 'RUN' : 'PASS'}) 🛡️`, '#00ffff');
-        }
         if (tacticalMode === 'PRO') requiresProPlaybookSelection = false;
         completeTutorialAction(4);
       }
@@ -3369,7 +3339,6 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       callbacks.setP1OffPlayState?.('PUNT');
       resetDrill(true);
       requiresProPlaybookSelection = false;
-      showAnnouncement('4TH DOWN: SPECIAL TEAMS PUNT UNIT ON FIELD! 🏈', '#00ffff');
     },
     punt: (power?: number) => {
       if (activeOffense === 'P1' && currentDown === 4 && phase === 'PRE_SNAP' && !isKickoffPhase && !gameOver) {
@@ -3411,7 +3380,6 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         power: 0.5,
         distanceYards: fgDist
       });
-      showAnnouncement(`SPECIAL TEAMS: FIELD GOAL UNIT! (${fgDist} YDS) 🎯`, '#00ffff');
     },
     getFieldGoalDistance: () => {
       return getFieldGoalDistanceYards(lineOfScrimmageY, attackDirection, fieldHeight, endZoneHeight);
@@ -3483,6 +3451,17 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     is4thDown: () => currentDown === 4 && phase === 'PRE_SNAP',
     triggerPlayEnd: (endingY: number, resultType: string, customMessage?: string, customColor?: string) => {
       handlePlayEnd(endingY, resultType, customMessage, customColor);
+    },
+    flushPostPlayAnnouncement: () => {
+      if (postPlayAnnouncementTimer) {
+        clearTimeout(postPlayAnnouncementTimer);
+        postPlayAnnouncementTimer = null;
+      }
+      if (pendingPostPlayAnnouncement) {
+        const cb = pendingPostPlayAnnouncement;
+        pendingPostPlayAnnouncement = null;
+        cb();
+      }
     },
     setPossessionForTest: (team: 'P1' | 'P2') => {
       activeOffense = team;
@@ -3615,16 +3594,10 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     currentTecmoMatchup = evaluateTecmoMatchup(offKey, defKey, offensivePlaybook);
     if (currentTecmoMatchup) {
       if (currentTecmoMatchup.isExact) {
-        showAnnouncement(currentTecmoMatchup.announcement, '#ff0033');
         sounds.playJuke();
         screenShakeTimer = Math.max(screenShakeTimer, 14);
       } else if (currentTecmoMatchup.level === 'MISMATCH_BIT_ON_RUN') {
-        showAnnouncement(currentTecmoMatchup.announcement, '#00ffff');
         sounds.playJuke();
-      } else if (currentTecmoMatchup.level === 'MISMATCH_DROPPED_IN_COVERAGE') {
-        showAnnouncement(currentTecmoMatchup.announcement, '#00ffaa');
-      } else if (currentTecmoMatchup.level === 'CATEGORY_MATCH') {
-        showAnnouncement(currentTecmoMatchup.announcement, '#ffaa00');
       }
 
       // When the wrong play is called on defense (bit on run or wrong pass play),
@@ -7212,16 +7185,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
             ? getContactGainYards(activeEntity.player.ratings.power, d.player?.ratings.tackling, activeEntity.stamina)
             : 0;
           activeEntity.y += contactGain * 10 * attackDirection;
-          if (isBlitzer && isBehindLine) {
-            showAnnouncement("BLITZ TACKLE FOR LOSS! 💥🛑", "#ff3333");
-          } else if (isBlitzer) {
-            showAnnouncement("HARD TACKLE BY BLITZER! 💥", "#ff5555");
-          } else if (isBigHit) {
-            showAnnouncement('BIG HIT! BALL CARRIER STOPPED!', '#ff5555', true);
-          }
-          handlePlayEnd(activeEntity.y, playEndingType, contactGain >= 1
-            ? `#${activeEntity.player?.number} FALLS FORWARD! +${Math.round(contactGain)} YARDS THROUGH CONTACT`
-            : undefined);
+          handlePlayEnd(activeEntity.y, playEndingType);
         }
       });
     }
@@ -9086,6 +9050,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     callbacks.onEngineReady(null);
     safeCancelAnimationFrame(animationFrameId);
     if (drillResetTimer) clearTimeout(drillResetTimer);
+    if (postPlayAnnouncementTimer) clearTimeout(postPlayAnnouncementTimer);
+    pendingPostPlayAnnouncement = null;
     if (typeof window !== 'undefined') {
       window.removeEventListener('resize', resizeGame);
       window.removeEventListener('pagehide', handlePageHide);

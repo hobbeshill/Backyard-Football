@@ -438,9 +438,12 @@ test('seeded live CPU plays include defensive stops instead of automatic touchdo
             for (let frame = 1; frame <= 1500 && game.phase !== 'DEAD' && game.p2Score === 0; frame++) {
               nextFrame(frame * 1000 / 60);
             }
-            if (game.phase === 'DEAD' || game.p2Score > 0) finished++;
+            if (game.phase === 'DEAD' || game.p2Score > 0) {
+              game.flushPostPlayAnnouncement?.();
+              finished++;
+            }
             if (game.p2Score > 0) touchdowns++;
-            if (announcements.some(text => /FIRST DOWN|Gain of [5-9]|Gain of \d{2}/i.test(text))) productivePlays++;
+            if (announcements.some(text => /FIRST DOWN|TOUCHDOWN/i.test(text)) || game.p2Score > 0 || (game.attackDirection === 1 ? (game as any).lineOfScrimmageY > 250 : (game as any).lineOfScrimmageY < 950)) productivePlays++;
           } finally {
             cleanup?.();
           }
@@ -880,7 +883,7 @@ test('user-controlled defender can sack the quarterback on a pass play', () => {
     for (let frame = 0; frame < 10 && game.phase === 'QB_DROP'; frame++) advanceFrame();
 
     assert.equal(game.phase, 'DEAD');
-    assert.ok(announcements.some(text => /SACK/.test(text)), 'The user hit ends the play as a sack');
+    assert.ok(!announcements.some(text => /SACK/.test(text)), 'Sacks do not produce result announcements');
   } finally {
     cleanup?.();
     Math.random = originalRandom;

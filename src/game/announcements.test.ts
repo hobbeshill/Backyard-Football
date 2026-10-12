@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { mountFootballGame, type GameEngineHandle } from './engine';
 
-test('post-play announcements report actual results without Pro matchup commentary on either side', () => {
+test('play results only announce first downs and touchdowns, and are delayed 2 seconds', () => {
   const holder: { game?: GameEngineHandle } = {};
   const announcements: Array<{ text: string; color?: string }> = [];
   const cleanup = mountFootballGame(createMockCanvas(), {
@@ -25,17 +25,37 @@ test('post-play announcements report actual results without Pro matchup commenta
           const endingY = los + (result === 'SACK' ? -30 : 30) * game.attackDirection;
           announcements.length = 0;
           game.triggerPlayEnd?.(endingY, result);
-          assert.equal(announcements.length, 1, `${mode} ${side} ${result}: ${JSON.stringify(announcements)}`);
-          assert.match(announcements[0].text, result === 'SACK' ? /SACK! Loss of 3 yards/
-            : result === 'INCOMPLETE' ? /PASS INCOMPLETE/
-              : /Gain of 3 yards.*2 Down, 7 yards to go/);
-          assert.doesNotMatch(announcements[0].text, /MATCHUP|CONTAINMENT|COUNTER|neutralizes|limits|burns|ADVANTAGE/i);
+          // Immediately after play end: NO announcement yet (user sees end of play)
+          assert.equal(announcements.length, 0, `Immediate play end must have 0 announcements for ${mode} ${side} ${result}`);
+          // Flush post play announcement timer: sacks, incompletions, ordinary gains still have 0 announcements!
+          game.flushPostPlayAnnouncement?.();
+          assert.equal(announcements.length, 0, `Ordinary results (sacks, incompletions, short gains) must not announce results`);
         }
+
+        // Test FIRST DOWN: gaining 12 yards on 1st & 10 reaches first down!
+        game.setPossessionForTest?.(side);
+        game.resetDrill();
+        const los = side === 'P1' ? 950 : 250;
+        announcements.length = 0;
+        game.triggerPlayEnd?.(los + 120 * game.attackDirection, 'TACKLE');
+        // Immediately after play end: delayed 2 seconds, so 0 announcements
+        assert.equal(announcements.length, 0, 'First down announcement must be delayed 2 seconds');
+        // After delay / flushing: FIRST DOWN announcement appears
+        game.flushPostPlayAnnouncement?.();
+        assert.equal(announcements.length, 1, 'First down announcement appears after delay');
+        assert.match(announcements[0].text, /FIRST DOWN/);
+
+        // Test TOUCHDOWN:
         game.setPossessionForTest?.(side);
         game.resetDrill();
         announcements.length = 0;
-        game.triggerPlayEnd?.((side === 'P1' ? 950 : 250) + 30 * game.attackDirection, 'OUT_OF_BOUNDS', 'OUT OF BOUNDS - GAIN OF 3 YARDS', '#00ffaa');
-        assert.deepEqual(announcements, [{ text: 'OUT OF BOUNDS - GAIN OF 3 YARDS', color: '#00ffaa' }]);
+        game.triggerPlayEnd?.(side === 'P1' ? 50 : 1150, 'TD');
+        // Immediately: 0 announcements
+        assert.equal(announcements.length, 0, 'Touchdown announcement must be delayed 2 seconds');
+        // After delay: TOUCHDOWN announcement appears
+        game.flushPostPlayAnnouncement?.();
+        assert.equal(announcements.length, 1, 'Touchdown announcement appears after delay');
+        assert.match(announcements[0].text, /TOUCHDOWN/);
       }
     }
   } finally {
