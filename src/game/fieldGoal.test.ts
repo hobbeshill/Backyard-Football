@@ -15,6 +15,7 @@ import { mountFootballGame, GameEngineCallbacks, type GameEngineHandle } from '.
 import { TEAMS } from './teams';
 
 test('Field goals can be made from up to 60 yards out with accurate aim and power', () => {
+  assert.equal(GOALPOST_RIGHT_UPRIGHT_X - GOALPOST_LEFT_UPRIGHT_X, 56, 'Goal posts have a wider opening');
   // A 60-yard field goal attempt (aim dead center, full power)
   const fg60 = calculateFieldGoalFlight(60, 0.0, 0.98, -1, 1.0);
   assert.equal(fg60.isGood, true, '60-yard field goal should be good with center aim and 98% power');
@@ -44,15 +45,15 @@ test('End-zone interceptions spot the new offense at its own 20-yard line', () =
 });
 
 test('Field goals become more difficult as distance increases (lateral drift and power requirements scale with distance)', () => {
-  // Same aim offset (0.26) on a short 22-yard field goal vs a 60-yard field goal
-  const shortKick = calculateFieldGoalFlight(22, 0.26, 0.70, -1, 1.0);
-  const longKick = calculateFieldGoalFlight(60, 0.26, 0.98, -1, 1.0);
+  // Same aim offset (0.39) on a short 22-yard field goal vs a 60-yard field goal
+  const shortKick = calculateFieldGoalFlight(22, 0.39, 0.70, -1, 1.0);
+  const longKick = calculateFieldGoalFlight(60, 0.39, 0.98, -1, 1.0);
 
   // At 22 yards, slight deviation stays within the uprights
   assert.equal(shortKick.isGood, true, 'Slight aim deviation on a short 22-yard kick is forgiving and makes the FG');
   assert.ok(shortKick.targetX >= GOALPOST_LEFT_UPRIGHT_X && shortKick.targetX <= GOALPOST_RIGHT_UPRIGHT_X);
 
-  // At 60 yards, the exact same aim deviation drifts wide right because of increased flight distance
+  // At 60 yards, the same aim deviation drifts wide right because of increased flight distance
   assert.equal(longKick.isGood, false, 'The same aim deviation on a 60-yard kick carries wide and misses');
   assert.equal(longKick.missReason, 'WIDE_RIGHT');
   assert.ok(longKick.targetX > GOALPOST_RIGHT_UPRIGHT_X, 'Target X drifted past the right upright');
@@ -114,6 +115,38 @@ test('Offensive playbook includes SPECIAL TEAMS: FIELD GOAL play option', () => 
   assert.ok(fgPlay, 'Playbook must contain FIELD_GOAL');
   assert.equal(fgPlay.type, 'FIELD_GOAL');
   assert.ok(fgPlay.desc.includes('60 yards'), 'Description mentions 60 yards range');
+});
+
+test('team box score accumulates rushing yards and first downs', () => {
+  const handle: { game?: GameEngineHandle } = {};
+  const cleanup = mountFootballGame(createMockCanvas(), {
+    setP2OffPlayState: () => {}, setP2DefPlayState: () => {},
+    setDownDistanceText: () => {}, setActiveOffenseState: () => {},
+    setUserScore: () => {}, setCpuScore: () => {}, setP1DefPlayState: () => {},
+    setMomentumState: () => {}, setGameClockState: () => {}, showAnnouncement: () => {},
+    onEngineReady: game => { handle.game = game ?? undefined; }
+  });
+
+  try {
+    const game = handle.game;
+    assert.ok(game);
+    game.setPossessionForTest?.('P1');
+    game.resetDrill();
+    const snapshot = game.getNetworkSnapshot?.();
+    assert.ok(snapshot);
+    snapshot.activeEntityId = 'qb';
+    game.applyNetworkSnapshot?.(snapshot);
+
+    const endingY = snapshot.lineOfScrimmageY - 110;
+    game.triggerPlayEnd?.(endingY, 'TACKLE');
+    const stats = game.getNetworkSnapshot?.().p1GameStats;
+    assert.equal(stats.totalYards, 11);
+    assert.equal(stats.rushingYards, 11);
+    assert.equal(stats.rushAttempts, 1);
+    assert.equal(stats.firstDowns, 1);
+  } finally {
+    cleanup?.();
+  }
 });
 
 function createMockCanvas(): HTMLCanvasElement {
@@ -262,6 +295,7 @@ test('Field Goal two-stage skill meter: directional meter followed by up/down di
   // Lock Stage 2 (Distance / Power)
   engineHandle.lockFieldGoalMeter();
   assert.equal(engineHandle.phase, 'THROWN', 'Stage 2 locks distance and executes the kick into flight');
+    assert.equal(engineHandle.getNetworkSnapshot().p1GameStats.fieldGoalsAttempted, 1);
 
   if (cleanup) cleanup();
 });

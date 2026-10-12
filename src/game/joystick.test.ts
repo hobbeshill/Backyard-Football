@@ -35,13 +35,13 @@ test('idle joystick marker stays inside the field numbers at the RB formation de
   assert.ok(Math.abs((anchor.x - OFFENSE_JOYSTICK_INNER_RING_RADIUS) - FIELD_NUMBERS_INNER_EDGE_X) < 0.000001, 'Inner ring edge sits at the inside edge of the numbers');
   assert.equal(anchor.y, 364, 'Joystick marker sits just below the RB depth');
   assert.deepEqual(getOffenseJoystickAnchor(288), anchor, 'Anchor does not depend on RB alignment');
-  assert.equal(isOffenseJoystickStartZone(anchor.x, anchor.y, anchor.x, anchor.y), true);
-  assert.equal(isOffenseJoystickStartZone(anchor.x + 50, anchor.y + 40, anchor.x, anchor.y), true);
-  assert.equal(isOffenseJoystickStartZone(300, anchor.y, anchor.x, anchor.y), true);
+  assert.equal(isOffenseJoystickStartZone(84, anchor.y, anchor.x, anchor.y), true, 'Runtime joystick anchor stays inside the touch zone');
+  assert.equal(isOffenseJoystickStartZone(85, anchor.y, anchor.x, anchor.y), true, 'The right edge of the left quarter is included');
+  assert.equal(isOffenseJoystickStartZone(86, anchor.y, anchor.x, anchor.y), false, 'Taps beyond the left quarter remain available to select players');
   assert.equal(isOffenseJoystickStartZone(anchor.x, anchor.y - 56, anchor.x, anchor.y), false);
 });
 
-test('joystick touch area fills from the top of the outer circle down and all the way left to right', () => {
+test('joystick touch area fills from the top of the outer circle down within the left quarter', () => {
   for (const scale of [0.5, 1, 2]) {
     const width = 340 * scale;
     const height = 450 * scale;
@@ -50,12 +50,13 @@ test('joystick touch area fills from the top of the outer circle down and all th
     const contains = (x: number, y: number) =>
       isOffenseJoystickStartZone(x, y, anchor.x, anchor.y, width, height);
 
-    for (const x of [0, 10 * scale, anchor.x, width / 2, width * 0.8, width]) {
+    for (const x of [0, 10 * scale, width / 4]) {
       for (const y of [top, anchor.y, height - scale, height]) {
         assert.equal(contains(x, y), true, `The touch area includes (${x}, ${y}) at scale ${scale}`);
       }
     }
     assert.equal(contains(-scale, height), false);
+    assert.equal(contains(width / 4 + scale, height), false);
     assert.equal(contains(width + scale, height), false);
     assert.equal(contains(anchor.x, top - scale), false);
     assert.equal(contains(0, height + scale), false);
@@ -740,6 +741,139 @@ test('tapping a receiver to pass does not activate the joystick by itself', () =
   }
 });
 
+test('incomplete passes announce the result and leave the ball rolling on the field', () => {
+  const originalRequest = globalThis.requestAnimationFrame;
+  const originalCancel = globalThis.cancelAnimationFrame;
+  let nextFrame: FrameRequestCallback = () => {};
+  let timestamp = 0;
+  globalThis.requestAnimationFrame = callback => { nextFrame = callback; return 1; };
+  globalThis.cancelAnimationFrame = () => {};
+
+  const handle: { game?: GameEngineHandle } = {};
+  const announcements: string[] = [];
+  const cleanup = mountFootballGame(createMockCanvas(), {
+    setP2OffPlayState: () => {}, setP2DefPlayState: () => {},
+    setDownDistanceText: () => {}, setActiveOffenseState: () => {},
+    setUserScore: () => {}, setCpuScore: () => {}, setP1DefPlayState: () => {},
+    setMomentumState: () => {}, setGameClockState: () => {},
+    showAnnouncement: text => { announcements.push(text); },
+    onEngineReady: game => { handle.game = game ?? undefined; }
+  });
+
+  try {
+    const game = handle.game;
+    assert.ok(game);
+    game.setPossessionForTest?.('P1');
+    game.resetDrill();
+    const snapshot = game.getNetworkSnapshot?.();
+    assert.ok(snapshot);
+    const receiverId = snapshot.receiverIds[0];
+    const receiver = snapshot.entities[receiverId].data;
+    receiver.x = 170;
+    receiver.y = 500;
+    receiver.startX = 170;
+    receiver.startY = 500;
+    receiver.vx = 0;
+    receiver.vy = 0;
+    receiver.routeType = 'GO';
+    for (const id of [...snapshot.receiverIds, snapshot.centerReceiverId, snapshot.rbId]) {
+      if (!id) continue;
+      const routeRunner = snapshot.entities[id].data;
+      routeRunner.x = 45;
+      routeRunner.y = 750;
+      routeRunner.startX = 45;
+      routeRunner.startY = 750;
+      routeRunner.vx = 0;
+      routeRunner.vy = 0;
+      routeRunner.routeType = 'HITCH';
+      routeRunner.isBlocker = false;
+    }
+    snapshot.phase = 'THROWN';
+    snapshot.activeEntityId = 'qb';
+    snapshot.entities.qb.data.hasBall = false;
+    snapshot.ball = {
+      startX: 170, startY: 450, x: 170, y: 500, z: 14,
+      vx: 0, vy: 0, maxZ: 30, flightFrames: 20, currentFrame: 19,
+      targetX: 170, targetY: 500, intendedTargetId: null
+    };
+    snapshot.playEnding = false;
+    snapshot.formationTransitions = [];
+    snapshot.defenderIds.forEach((id: string) => {
+      snapshot.entities[id].data.x = 30;
+      snapshot.entities[id].data.y = 250;
+      snapshot.entities[id].data.isEngagedWithBlocker = false;
+    });
+    game.applyNetworkSnapshot?.(snapshot);
+    assert.equal(game.phase, 'THROWN', 'The test snapshot must restore as an in-flight pass');
+
+    for (let frame = 0; frame < 4 && (game.phase as string) !== 'DEAD'; frame++) {
+      timestamp += 1000 / 60;
+      nextFrame(timestamp);
+    }
+
+    assert.equal(game.phase, 'DEAD', `Unexpected pass result: ${announcements.join(' | ')}`);
+    assert.ok(announcements.some(text => text.startsWith('INCOMPLETE!')));
+    assert.ok(game.getNetworkSnapshot?.().deadPassBall, 'The dropped ball remains visible as it rolls away');
+  } finally {
+    cleanup?.();
+    globalThis.requestAnimationFrame = originalRequest;
+    globalThis.cancelAnimationFrame = originalCancel;
+  }
+});
+
+test('user can steer their player toward a fumble while AI teammates chase it', () => {
+  const originalRequest = globalThis.requestAnimationFrame;
+  const originalCancel = globalThis.cancelAnimationFrame;
+  let nextFrame: FrameRequestCallback = () => {};
+  globalThis.requestAnimationFrame = callback => { nextFrame = callback; return 1; };
+  globalThis.cancelAnimationFrame = () => {};
+
+  const handle: { game?: GameEngineHandle } = {};
+  const cleanup = mountFootballGame(createMockCanvas(), {
+    setP2OffPlayState: () => {}, setP2DefPlayState: () => {},
+    setDownDistanceText: () => {}, setActiveOffenseState: () => {},
+    setUserScore: () => {}, setCpuScore: () => {}, setP1DefPlayState: () => {},
+    setMomentumState: () => {}, setGameClockState: () => {}, showAnnouncement: () => {},
+    onEngineReady: game => { handle.game = game ?? undefined; }
+  });
+
+  try {
+    const game = handle.game;
+    assert.ok(game);
+    game.setPossessionForTest?.('P1');
+    game.resetDrill();
+    const snapshot = game.getNetworkSnapshot?.();
+    assert.ok(snapshot);
+    const runnerId = snapshot.rbId;
+    snapshot.entities[runnerId].data.x = 170;
+    snapshot.entities[runnerId].data.y = 500;
+    snapshot.entities[runnerId].data.team = 'P1';
+    snapshot.activeEntityId = runnerId;
+    snapshot.phase = 'FUMBLE';
+    snapshot.fumbleBall = { x: 250, y: 500, z: 0, vx: 0, vy: 0, timer: 1, fumblingTeam: 'P1' };
+    snapshot.playEnding = false;
+    snapshot.formationTransitions = [];
+    game.applyNetworkSnapshot?.(snapshot);
+
+    const qbBefore = game.getNetworkSnapshot?.().entities.qb.data;
+    const qbDistanceBefore = Math.hypot(qbBefore.x - 250, qbBefore.y - 500);
+    game.applyLocalInput?.(0, 1, true);
+    nextFrame(0);
+    nextFrame(1000 / 60);
+
+    const after = game.getNetworkSnapshot?.();
+    assert.ok(after);
+    assert.ok(after.entities[runnerId].data.x > 170, 'Joystick input steers the controlled runner toward the ball');
+    const qbAfter = after.entities.qb.data;
+    assert.ok(Math.hypot(qbAfter.x - 250, qbAfter.y - 500) < qbDistanceBefore, 'AI teammates also pursue the loose ball');
+    assert.ok(after.fumbleBall, 'The loose ball remains live during recovery');
+  } finally {
+    cleanup?.();
+    globalThis.requestAnimationFrame = originalRequest;
+    globalThis.cancelAnimationFrame = originalCancel;
+  }
+});
+
 test('a safety awards two points to the defense and sends the conceding team to kick off', () => {
   let p1Score = 0;
   let p2Score = 0;
@@ -815,6 +949,48 @@ test('relative joystick controls the unassigned defender when user is on defense
   }
 });
 
+test('camera holds its current position after a play ends', () => {
+  const originalRequest = globalThis.requestAnimationFrame;
+  const originalCancel = globalThis.cancelAnimationFrame;
+  let nextFrame: FrameRequestCallback | null = null;
+  globalThis.requestAnimationFrame = callback => { nextFrame = callback; return 1; };
+  globalThis.cancelAnimationFrame = () => {};
+
+  const handle: { game?: GameEngineHandle } = {};
+  const cleanup = mountFootballGame(createMockCanvas(), {
+    setP2OffPlayState: () => {}, setP2DefPlayState: () => {},
+    setDownDistanceText: () => {}, setActiveOffenseState: () => {},
+    setUserScore: () => {}, setCpuScore: () => {}, setP1DefPlayState: () => {},
+    setMomentumState: () => {}, setGameClockState: () => {}, showAnnouncement: () => {},
+    onEngineReady: game => { handle.game = game ?? undefined; }
+  });
+
+  try {
+    const game = handle.game;
+    assert.ok(game);
+    game.resetDrill();
+    const snapshot = game.getNetworkSnapshot?.();
+    assert.ok(snapshot);
+    snapshot.phase = 'DEAD';
+    snapshot.isKickoffPhase = false;
+    snapshot.ball = null;
+    snapshot.fumbleBall = null;
+    snapshot.playEnding = false;
+    snapshot.cameraY = snapshot.playSnapCameraY + 60;
+    game.applyNetworkSnapshot?.(snapshot);
+
+    const cameraY = snapshot.cameraY;
+    const frame = nextFrame as FrameRequestCallback | null;
+    assert.ok(frame);
+    frame(1000 / 60);
+    assert.equal(game.getNetworkSnapshot?.().cameraY, cameraY);
+  } finally {
+    cleanup?.();
+    globalThis.requestAnimationFrame = originalRequest;
+    globalThis.cancelAnimationFrame = originalCancel;
+  }
+});
+
 test('user-controlled defender can sack the quarterback on a pass play', () => {
   const originalRequest = globalThis.requestAnimationFrame;
   const originalCancel = globalThis.cancelAnimationFrame;
@@ -883,7 +1059,7 @@ test('user-controlled defender can sack the quarterback on a pass play', () => {
     for (let frame = 0; frame < 10 && game.phase === 'QB_DROP'; frame++) advanceFrame();
 
     assert.equal(game.phase, 'DEAD');
-    assert.ok(!announcements.some(text => /SACK/.test(text)), 'Sacks do not produce result announcements');
+    assert.ok((userDefender.defensiveBigPlays || 0) > 0, 'The controlled defender receives credit for the sack');
   } finally {
     cleanup?.();
     Math.random = originalRandom;

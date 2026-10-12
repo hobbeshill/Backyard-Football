@@ -190,21 +190,21 @@ test('Pro mode allows players to pick every defensive scheme with valid counters
   }
 });
 
-test('Pro mode significantly boosts pass catch completion rate across all coverage levels', () => {
+test('Pro mode keeps tight catches contested while open passes remain reliable', () => {
   const tightContest = { effectiveDefDist: 20, effectiveBallDist: 20, isTargetSpammed: false, isRbFlatSpammed: false, isRb: false };
   const standardTightChance = getCatchCompletionChance(tightContest);
   const proTightChance = getCatchCompletionChance({ ...tightContest, isProMode: true });
 
   assert.ok(standardTightChance < 0.40, `Standard tight chance was ${standardTightChance}`);
-  assert.ok(proTightChance >= 0.60, `Pro mode tight chance should be >= 0.60, got ${proTightChance}`);
-  assert.ok(proTightChance > standardTightChance + 0.20, 'Pro mode provides a meaningful catch boost in tight coverage');
+  assert.ok(proTightChance < 0.45, `Pro mode tight chance should remain contested, got ${proTightChance}`);
+  assert.ok(proTightChance - standardTightChance <= 0.05, 'Pro mode should not erase the advantage of good coverage');
 
   const openContest = { effectiveDefDist: 60, effectiveBallDist: 60, isTargetSpammed: false, isRbFlatSpammed: false, isRb: false };
   const proOpenChance = getCatchCompletionChance({ ...openContest, isProMode: true });
   assert.ok(proOpenChance >= 0.90 && proOpenChance <= 0.94, `Pro mode open chance should be high but not automatic, got ${proOpenChance}`);
 
   // Test resolveCatchContestOutcome in Pro mode
-  const proOutcome = resolveCatchContestOutcome({ ...tightContest, isProMode: true, roll: 0.50 });
+  const proOutcome = resolveCatchContestOutcome({ ...tightContest, isProMode: true, roll: 0.80 });
   assert.equal(proOutcome.type, 'COMPLETE');
   assert.equal(proOutcome.caught, true);
   const proDrop = resolveCatchContestOutcome({ ...tightContest, isProMode: true, roll: 0.20 });

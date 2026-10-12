@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Volume2, VolumeX, RefreshCw, HelpCircle, X, Users, Shield, ArrowRight, Search, Pause, Play, Home, Hand, Crosshair, Trophy, Award, RotateCcw, Zap, BookOpen, SlidersHorizontal, Info, Settings, ArrowLeft, Copy, Check } from 'lucide-react';
 import { offensivePlaybook, defensivePlaybook } from './game/playbook';
 import { sounds } from './game/sound';
-import { hasSavedGameSession, mountFootballGame, type GameBoxScore, type GameEngineHandle } from './game/engine';
+import { createEmptyTeamGameStats, hasSavedGameSession, mountFootballGame, type GameBoxScore, type GameEngineHandle } from './game/engine';
 import { HelmetSpritePreview } from './game/HelmetSpritePreview';
 import { RealPlayTutorial } from './game/RealPlayTutorial';
 import { TEAM_KEYS, TEAMS, getAllTeams, getTeam, type TeamProfile } from './game/teams';
@@ -484,7 +484,12 @@ export default function App() {
           p1Score: p1FinalScore,
           p2Score: p2FinalScore,
           restored: Boolean(restored),
-          boxScore: boxScore ?? { p1Quarters: [0, 0, 0, 0], p2Quarters: [0, 0, 0, 0] }
+          boxScore: boxScore ?? {
+            p1Quarters: [0, 0, 0, 0],
+            p2Quarters: [0, 0, 0, 0],
+            p1Stats: createEmptyTeamGameStats(),
+            p2Stats: createEmptyTeamGameStats()
+          }
         });
       },
       setIsKickoffState: (isKickoff, kicking, receiving) => {
@@ -2113,6 +2118,38 @@ export default function App() {
                 </tr>
               </tbody>
             </table>
+
+            <div className="mt-4 overflow-x-auto rounded border border-white/10">
+              <table className="w-full table-fixed border-collapse text-[0.62rem] sm:text-[0.68rem]">
+                <thead>
+                  <tr className="border-b border-white/20 text-neutral-400">
+                    <th className="w-[45%] px-2 py-1.5 text-left">Team Stats</th>
+                    <th className="px-1 py-1.5 text-cyan-300">YOU</th>
+                    <th className="px-1 py-1.5 text-red-300">CPU</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {([
+                    ['Total yards', finishedGame.boxScore.p1Stats.totalYards, finishedGame.boxScore.p2Stats.totalYards],
+                    ['Passing', `${finishedGame.boxScore.p1Stats.completions}/${finishedGame.boxScore.p1Stats.passAttempts} · ${finishedGame.boxScore.p1Stats.passingYards}`, `${finishedGame.boxScore.p2Stats.completions}/${finishedGame.boxScore.p2Stats.passAttempts} · ${finishedGame.boxScore.p2Stats.passingYards}`],
+                    ['Rushing', `${finishedGame.boxScore.p1Stats.rushAttempts} · ${finishedGame.boxScore.p1Stats.rushingYards}`, `${finishedGame.boxScore.p2Stats.rushAttempts} · ${finishedGame.boxScore.p2Stats.rushingYards}`],
+                    ['First downs', finishedGame.boxScore.p1Stats.firstDowns, finishedGame.boxScore.p2Stats.firstDowns],
+                    ['Touchdowns', `${finishedGame.boxScore.p1Stats.touchdowns} (${finishedGame.boxScore.p1Stats.passingTouchdowns} P / ${finishedGame.boxScore.p1Stats.rushingTouchdowns} R)`, `${finishedGame.boxScore.p2Stats.touchdowns} (${finishedGame.boxScore.p2Stats.passingTouchdowns} P / ${finishedGame.boxScore.p2Stats.rushingTouchdowns} R)`],
+                    ['INT thrown / caught', `${finishedGame.boxScore.p1Stats.interceptionsThrown} / ${finishedGame.boxScore.p1Stats.interceptionsCaught}`, `${finishedGame.boxScore.p2Stats.interceptionsThrown} / ${finishedGame.boxScore.p2Stats.interceptionsCaught}`],
+                    ['Sacks made / allowed', `${finishedGame.boxScore.p1Stats.sacks} / ${finishedGame.boxScore.p1Stats.sacksAllowed}`, `${finishedGame.boxScore.p2Stats.sacks} / ${finishedGame.boxScore.p2Stats.sacksAllowed}`],
+                    ['Fumbles / lost', `${finishedGame.boxScore.p1Stats.fumbles} / ${finishedGame.boxScore.p1Stats.fumblesLost}`, `${finishedGame.boxScore.p2Stats.fumbles} / ${finishedGame.boxScore.p2Stats.fumblesLost}`],
+                    ['Returns', `${finishedGame.boxScore.p1Stats.returns} · ${finishedGame.boxScore.p1Stats.returnYards}`, `${finishedGame.boxScore.p2Stats.returns} · ${finishedGame.boxScore.p2Stats.returnYards}`],
+                    ['Field goals', `${finishedGame.boxScore.p1Stats.fieldGoalsMade}/${finishedGame.boxScore.p1Stats.fieldGoalsAttempted}`, `${finishedGame.boxScore.p2Stats.fieldGoalsMade}/${finishedGame.boxScore.p2Stats.fieldGoalsAttempted}`]
+                  ] as const).map(([label, p1Value, p2Value]) => (
+                    <tr key={label} className="border-b border-white/5 last:border-0">
+                      <th className="px-2 py-1 text-left font-medium text-neutral-400">{label}</th>
+                      <td className="px-1 py-1 text-center tabular-nums text-neutral-100">{p1Value}</td>
+                      <td className="px-1 py-1 text-center tabular-nums text-neutral-100">{p2Value}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
 
             {/* Rivalry Trophy celebration */}
             {currentRivalry && finishedGame.p1Score > finishedGame.p2Score && (

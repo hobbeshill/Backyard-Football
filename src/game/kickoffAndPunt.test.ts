@@ -429,6 +429,75 @@ test('game engine publishes phase changes from the opening kickoff', (context) =
   if (cleanup) cleanup();
 });
 
+test('kickoff camera tracks the kicker, ball flight, and receiving returner', (context) => {
+  const originalRequest = globalThis.requestAnimationFrame;
+  const originalCancel = globalThis.cancelAnimationFrame;
+  const frameCallbacks: FrameRequestCallback[] = [];
+  context.after(() => {
+    globalThis.requestAnimationFrame = originalRequest;
+    globalThis.cancelAnimationFrame = originalCancel;
+  });
+  globalThis.requestAnimationFrame = callback => {
+    frameCallbacks.push(callback);
+    return frameCallbacks.length;
+  };
+  globalThis.cancelAnimationFrame = () => {};
+
+  const handle: { game?: GameEngineHandle } = {};
+  const cleanup = mountFootballGame(createMockCanvas(), {
+    setP2OffPlayState: () => {}, setP2DefPlayState: () => {},
+    setDownDistanceText: () => {}, setActiveOffenseState: () => {},
+    setUserScore: () => {}, setCpuScore: () => {}, setP1DefPlayState: () => {},
+    setMomentumState: () => {}, setGameClockState: () => {}, showAnnouncement: () => {},
+    onEngineReady: value => { handle.game = value ?? undefined; }
+  });
+  let timestamp = 0;
+  const advanceFrame = () => {
+    const frame = frameCallbacks.shift();
+    assert.ok(frame);
+    timestamp += 1000 / 60;
+    frame(timestamp);
+  };
+
+  try {
+    const game = handle.game;
+    assert.ok(game);
+    advanceFrame();
+    const snapshot = game.getNetworkSnapshot?.();
+    assert.ok(snapshot);
+    const staleReceiverId = snapshot.receiverIds[0];
+    snapshot.entities[staleReceiverId].data.y = 150;
+    snapshot.activeEntityId = staleReceiverId;
+    game.applyNetworkSnapshot?.(snapshot);
+    advanceFrame();
+
+    const kickerPosition = game.getQuarterbackScreenPositionForTest?.();
+    assert.ok(kickerPosition);
+    assert.ok(Math.abs(kickerPosition.x - 225) < 1, 'The kicker remains centered before launch');
+    const cameraBeforeKick = game.getNetworkSnapshot?.().cameraY;
+
+    game.kickoff(0.35);
+    for (let frame = 0; frame < 20; frame++) advanceFrame();
+    let flightState = game.getNetworkSnapshot?.();
+    assert.ok(flightState?.ball);
+    assert.ok(flightState.cameraY > cameraBeforeKick, 'Camera advances with the kicked ball');
+
+    for (let frame = 0; frame < 160 && game.phase !== 'RUNNING'; frame++) advanceFrame();
+    assert.equal(game.phase, 'RUNNING', 'The receiving team fields the short kickoff');
+    for (let frame = 0; frame < 20; frame++) advanceFrame();
+
+    flightState = game.getNetworkSnapshot?.();
+    assert.ok(flightState);
+    const returner = flightState.entities[flightState.activeEntityId].data;
+    assert.ok(
+      Math.abs(flightState.cameraY - (returner.y - 225)) < 100,
+      'Camera continues following the receiving returner instead of snapping to the kickoff line'
+    );
+  } finally {
+    cleanup?.();
+  }
+});
+
 test('PUNT calls are ignored before 4th down', () => {
   let engineInstance: GameEngineHandle | null = null;
   let p1OffPlay = '';
@@ -466,6 +535,42 @@ test('PUNT calls are ignored before 4th down', () => {
   assert.ok(!announcement.includes('SPECIAL TEAMS PUNT UNIT'));
 
   if (cleanup) cleanup();
+});
+
+test('punt setup shows the receiving returner and punter before launch', () => {
+  const handle: { game?: GameEngineHandle } = {};
+  const cleanup = mountFootballGame(createMockCanvas(), {
+    setP2OffPlayState: () => {}, setP2DefPlayState: () => {},
+    setDownDistanceText: () => {}, setActiveOffenseState: () => {},
+    setUserScore: () => {}, setCpuScore: () => {}, setP1DefPlayState: () => {},
+    setMomentumState: () => {}, setGameClockState: () => {}, showAnnouncement: () => {},
+    onEngineReady: game => { handle.game = game ?? undefined; }
+  });
+
+  try {
+    const game = handle.game;
+    assert.ok(game);
+    game.setPossessionForTest?.('P1');
+    game.set4thDownForTest?.();
+    game.callPunt();
+
+    const snapshot = game.getNetworkSnapshot?.();
+    assert.ok(snapshot);
+    const returnerIndex = snapshot.defenderIds.findIndex((id: string) => snapshot.entities[id].data.isReturner);
+    assert.ok(returnerIndex >= 0, 'The receiving unit has a designated punt returner');
+    const returner = snapshot.entities[snapshot.defenderIds[returnerIndex]].data;
+    assert.equal(returner.team, 'P2');
+    assert.equal(Boolean(returner.isBlocker), false);
+
+    const punterPosition = game.getQuarterbackScreenPositionForTest?.();
+    const returnerPosition = game.getDefenderScreenPositionForTest?.(returnerIndex);
+    assert.ok(punterPosition && returnerPosition);
+    for (const position of [punterPosition, returnerPosition]) {
+      assert.ok(position.x >= 0 && position.x <= 450, `Punt unit at screen x=${position.x}; camera=${snapshot.cameraY}, LOS=${snapshot.lineOfScrimmageY}, play=${snapshot.p1OffPlay}, punterY=${snapshot.entities.qb.data.y}, returnerY=${returner.y}`);
+    }
+  } finally {
+    cleanup?.();
+  }
 });
 
 test('skill meter power controls punt distance and allows returns when not a touchback', () => {

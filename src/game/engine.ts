@@ -160,7 +160,7 @@ export function isOffenseJoystickStartZone(
   height = 450
 ): boolean {
   const top = anchorY - OFFENSE_JOYSTICK_RADIUS * (width / 340);
-  return x >= 0 && x <= width && y >= top && y <= height;
+  return x >= 0 && x <= width / 4 && y >= top && y <= height;
 }
 
 export function getPlayerForwardDirection(
@@ -237,6 +237,56 @@ export interface GameEngineCallbacks {
 export interface GameBoxScore {
   p1Quarters: number[];
   p2Quarters: number[];
+  p1Stats: TeamGameStats;
+  p2Stats: TeamGameStats;
+}
+
+export interface TeamGameStats {
+  totalYards: number;
+  passingYards: number;
+  completions: number;
+  passAttempts: number;
+  rushingYards: number;
+  rushAttempts: number;
+  firstDowns: number;
+  touchdowns: number;
+  passingTouchdowns: number;
+  rushingTouchdowns: number;
+  interceptionsThrown: number;
+  interceptionsCaught: number;
+  sacks: number;
+  sacksAllowed: number;
+  fumbles: number;
+  fumblesLost: number;
+  returns: number;
+  returnYards: number;
+  fieldGoalsMade: number;
+  fieldGoalsAttempted: number;
+}
+
+export function createEmptyTeamGameStats(): TeamGameStats {
+  return {
+    totalYards: 0,
+    passingYards: 0,
+    completions: 0,
+    passAttempts: 0,
+    rushingYards: 0,
+    rushAttempts: 0,
+    firstDowns: 0,
+    touchdowns: 0,
+    passingTouchdowns: 0,
+    rushingTouchdowns: 0,
+    interceptionsThrown: 0,
+    interceptionsCaught: 0,
+    sacks: 0,
+    sacksAllowed: 0,
+    fumbles: 0,
+    fumblesLost: 0,
+    returns: 0,
+    returnYards: 0,
+    fieldGoalsMade: 0,
+    fieldGoalsAttempted: 0
+  };
 }
 
 const GAME_SESSION_STORAGE_KEY = 'backyard-football-game-session-v1';
@@ -301,6 +351,17 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     return 1.0;
   }
 
+  function getPreSnapCameraY(): number {
+    const activePlayName = activeOffense === 'P1' ? p1OffPlay : p2OffPlay;
+    const focusY = activePlayName === 'PUNT'
+      ? lineOfScrimmageY + ((380 - 55) / 2) * attackDirection
+      : lineOfScrimmageY;
+    return Math.max(cameraWorldTop, Math.min(
+      cameraWorldBottom - logicalCanvasWidth,
+      getSideScrollCameraYForLineOfScrimmage(focusY, logicalCanvasWidth, getCameraPitchFactor(), activeOffense === 'P1')
+    ));
+  }
+
   function setCameraPerspective(mode: CameraPerspectiveMode) {
     cameraPerspectiveMode = mode;
     try {
@@ -324,6 +385,15 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   let p2Score = 0;
   let p1QuarterScores = [0, 0, 0, 0];
   let p2QuarterScores = [0, 0, 0, 0];
+  let p1GameStats = createEmptyTeamGameStats();
+  let p2GameStats = createEmptyTeamGameStats();
+  const getTeamGameStats = (team: 'P1' | 'P2') => team === 'P1' ? p1GameStats : p2GameStats;
+  const getGameBoxScore = (): GameBoxScore => ({
+    p1Quarters: [...p1QuarterScores],
+    p2Quarters: [...p2QuarterScores],
+    p1Stats: { ...p1GameStats },
+    p2Stats: { ...p2GameStats }
+  });
 
   function triggerScreenShake(duration: number, strength = 6): void {
     screenShakeTimer = Math.max(screenShakeTimer, duration);
@@ -430,6 +500,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   let linemen: Entity[] = [];
   let defenders: Entity[] = [];
   let ball: Ball | null = null;
+  let deadPassBall: { x: number; y: number; z: number; vx: number; vy: number; framesRemaining: number } | null = null;
+  let fieldGoalResultAnimation: { x: number; y: number; z: number; isGood: boolean; framesRemaining: number } | null = null;
   let snapBall: { center: Entity; frame: number } | null = null;
   let ballPressureDefenders: Entity[] = [];
   let fumbleBall: FumbleBall | null = null;
@@ -566,7 +638,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       rbId: idFor(rb),
       linemanIds: linemen.map(idFor),
       defenderIds: defenders.map(idFor),
-      p1Score, p2Score, p1QuarterScores, p2QuarterScores, lineOfScrimmageY, firstDownMarkerY, attackDirection,
+      p1Score, p2Score, p1QuarterScores, p2QuarterScores, p1GameStats, p2GameStats, lineOfScrimmageY, firstDownMarkerY, attackDirection,
       currentDown, yardsToGo, quarter, gameClockSeconds, gameClockRemainderMs,
       gameClockRunning, pendingQuarterEnd, quarterBreakRemainingMs,
       halftimeAnnouncementPending, gameOver, phase, activeOffense, activeDefense,
@@ -576,6 +648,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       kickoffKickingTeam, kickoffReceivingTeam, kickMeterPower, kickMeterDirection,
       cpuKickoffDelayTimer, isSpecialTeamsReturn, specialTeamsReturnType, returnCatchY,
       ball: ball ? { ...ball, intendedTarget: undefined, intendedTargetId: idFor(ball.intendedTarget) } : null,
+      deadPassBall,
       snapBall: snapBall ? { centerId: idFor(snapBall.center), frame: snapBall.frame } : null,
       ballPressureDefenderIds: ballPressureDefenders.map(idFor), fumbleBall, brokenTackleEffect,
       momentum, rosterStamina, defenseOverrides: [...defenseOverrides.entries()], coverageMistakeEvaluated,
@@ -639,6 +712,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       p1Score = state.p1Score; p2Score = state.p2Score;
       p1QuarterScores = Array.from({ length: 4 }, (_, index) => Number(state.p1QuarterScores?.[index] ?? 0));
       p2QuarterScores = Array.from({ length: 4 }, (_, index) => Number(state.p2QuarterScores?.[index] ?? 0));
+      p1GameStats = { ...createEmptyTeamGameStats(), ...(state.p1GameStats ?? {}) };
+      p2GameStats = { ...createEmptyTeamGameStats(), ...(state.p2GameStats ?? {}) };
       lineOfScrimmageY = state.lineOfScrimmageY; firstDownMarkerY = state.firstDownMarkerY;
       attackDirection = state.attackDirection; currentDown = state.currentDown; yardsToGo = state.yardsToGo;
       quarter = state.quarter; gameClockSeconds = state.gameClockSeconds;
@@ -670,7 +745,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       }
       snapBall = state.snapBall ? { center: entityFor(state.snapBall.centerId) ?? qb, frame: state.snapBall.frame } : null;
       ballPressureDefenders = state.ballPressureDefenderIds.map((id: string) => entityFor(id)).filter((entity: Entity | null): entity is Entity => Boolean(entity));
-      fumbleBall = state.fumbleBall; brokenTackleEffect = state.brokenTackleEffect;
+      fumbleBall = state.fumbleBall; deadPassBall = state.deadPassBall ?? null; brokenTackleEffect = state.brokenTackleEffect;
       momentum = state.momentum; rosterStamina = state.rosterStamina ?? {}; defenseOverrides = new Map(state.defenseOverrides);
       assignRosterPlayers();
       coverageMistakeEvaluated = state.coverageMistakeEvaluated; playEnding = state.playEnding;
@@ -708,7 +783,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       setIsKickoffState?.(isKickoffPhase, kickoffKickingTeam, kickoffReceivingTeam);
       setIs4thDownState?.(currentDown === 4 && phase === 'PRE_SNAP');
       setKickMeterPowerState?.(kickMeterPower);
-      if (gameOver) callbacks.onGameOver?.(p1Score, p2Score, true, { p1Quarters: [...p1QuarterScores], p2Quarters: [...p2QuarterScores] });
+      if (gameOver) callbacks.onGameOver?.(p1Score, p2Score, true, getGameBoxScore());
       return true;
     } catch {
       if (!snapshotOverride) window.localStorage.removeItem(GAME_SESSION_STORAGE_KEY);
@@ -1267,10 +1342,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     }
 
     if (phase === 'PRE_SNAP' || isKickoffPhase) {
-      cameraY = Math.max(cameraWorldTop, Math.min(
-        cameraWorldBottom - logicalCanvasWidth,
-        getSideScrollCameraYForLineOfScrimmage(lineOfScrimmageY, logicalCanvasWidth, getCameraPitchFactor(), activeOffense === 'P1')
-      ));
+      cameraY = getPreSnapCameraY();
       playSnapCameraY = cameraY;
     }
   }
@@ -1779,7 +1851,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     if (quarter === 4) {
       gameOver = true;
       showAnnouncement('END OF 4TH QUARTER - FINAL', '#ffcc00');
-      callbacks.onGameOver?.(p1Score, p2Score, false, { p1Quarters: [...p1QuarterScores], p2Quarters: [...p2QuarterScores] });
+      callbacks.onGameOver?.(p1Score, p2Score, false, getGameBoxScore());
     } else {
       for (const key of Object.keys(rosterStamina)) {
         if (!key.includes(':wr-')) rosterStamina[key] = Math.min(100, rosterStamina[key] + (quarter === 2 ? 35 : 18));
@@ -1961,6 +2033,10 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   }
 
   function startInterceptionReturn(x: number, y: number, message: string, color: string): void {
+    const throwingSide = activeOffense;
+    const defendingSide = throwingSide === 'P1' ? 'P2' : 'P1';
+    getTeamGameStats(throwingSide).interceptionsThrown++;
+    getTeamGameStats(defendingSide).interceptionsCaught++;
     const returner = defenders.reduce<Entity | null>((closest, defender) => {
       if (!closest) return defender;
       return Math.hypot(defender.x - x, defender.y - y) < Math.hypot(closest.x - x, closest.y - y)
@@ -2351,6 +2427,36 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     }
     isInterceptionReturn = false;
 
+    const offenseStats = getTeamGameStats(endedOffense);
+    const playType = offensivePlaybook[endedPlayKey]?.type;
+    const isReturnPlay = endedInterceptionReturn || endedSpecialTeamsReturn;
+    const isCompletedPass = playType === 'PASS' && activeEntity !== qb && Boolean(activeEntity?.caught);
+    const isQbRun = activeEntity === qb && resultType !== 'SACK' && (resultType === 'TACKLE' || resultType === 'TD');
+    const isRushingPlay = (playType !== 'PASS' && playType !== 'PUNT' && playType !== 'FIELD_GOAL') || isQbRun;
+
+    if (isReturnPlay) {
+      offenseStats.returns++;
+      offenseStats.returnYards += yardsGained;
+    } else if (resultType !== 'INT') {
+      offenseStats.totalYards += yardsGained;
+      if (resultType === 'SACK') {
+        offenseStats.passingYards += yardsGained;
+        offenseStats.sacksAllowed++;
+        getTeamGameStats(endedOffense === 'P1' ? 'P2' : 'P1').sacks++;
+      } else if (isCompletedPass) {
+        offenseStats.passingYards += yardsGained;
+      } else if (isRushingPlay) {
+        offenseStats.rushingYards += yardsGained;
+        offenseStats.rushAttempts++;
+      }
+      if (reachedFirstDown) offenseStats.firstDowns++;
+    }
+    if (playResult.isTouchdown) offenseStats.touchdowns++;
+    if (playResult.isTouchdown && !isReturnPlay) {
+      if (isCompletedPass) offenseStats.passingTouchdowns++;
+      else if (isRushingPlay) offenseStats.rushingTouchdowns++;
+    }
+
     if (endedOffense === 'P1') {
       const isQbRun = Boolean(activeEntity === qb);
       const isRbPlay = Boolean(activeEntity === rb || lastTargetWasRb);
@@ -2475,6 +2581,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     qb.y = lineOfScrimmageY;
     qb.vx = 0;
     qb.vy = 0;
+    activeEntity = qb;
     qb.color = kickTeam.primaryColor;
     qb.isKicker = true;
     qb.hasBall = false;
@@ -2603,6 +2710,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   }
 
   function executeFieldGoal(puntingTeam: 'P1' | 'P2', fgAttackDir: number, aim = fgAimVal, power = fgPowerVal) {
+    getTeamGameStats(puntingTeam).fieldGoalsAttempted++;
     setIs4thDownState?.(false);
     p1OffPlay = tacticalMode === 'PRO' ? 'PRO_QUICK_SLANTS' : 'SHORT_PASS';
     callbacks.setP1OffPlayState?.(p1OffPlay);
@@ -2651,6 +2759,13 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
   function resolveFieldGoalResult() {
     if (!ball || !ball.isFieldGoal) return;
+    fieldGoalResultAnimation = {
+      x: ball.targetX ?? ball.x,
+      y: ball.targetY ?? ball.y,
+      z: ball.fgArrivalZ ?? ball.z,
+      isGood: Boolean(ball.fgIsGood),
+      framesRemaining: 24
+    };
     if (options.tutorial && tutorialStep === 8) {
       const endingY = ball.y;
       showAnnouncement(ball.fgIsGood ? 'FIELD GOAL IS GOOD!' : 'FIELD GOAL NO GOOD! Try adjusting direction and power next time.', '#ffcc00');
@@ -2666,6 +2781,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     const defendingTeam = kickingTeam === 'P1' ? 'P2' : 'P1';
 
     if (isGood) {
+      getTeamGameStats(kickingTeam).fieldGoalsMade++;
       gameClockRunning = false;
       sounds.playTouchdown();
       applyMomentum(kickingTeam === 'P1' ? 2 : -2);
@@ -2784,6 +2900,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     isInterceptionReturn = false;
     isAllBlocking = false;
     ball = null;
+    deadPassBall = null;
     snapBall = null;
     ballPressureDefenders = [];
     fumbleBall = null;
@@ -2831,10 +2948,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     qb.jukeCooldownTimer = 0;
     qb.jukeTimer = 0;
     qb.hasBall = false;
-    cameraY = Math.max(cameraWorldTop, Math.min(
-      cameraWorldBottom - logicalCanvasWidth,
-      getSideScrollCameraYForLineOfScrimmage(lineOfScrimmageY, logicalCanvasWidth, getCameraPitchFactor(), activeOffense === 'P1')
-    ));
+    cameraY = getPreSnapCameraY();
     playSnapCameraY = cameraY;
     updateDownDisplay();
 
@@ -2892,7 +3006,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       centerReceiver = { startX: 130, startY: lineOfScrimmageY - (25 * attackDirection), x: 130, y: lineOfScrimmageY - (25 * attackDirection), vx: 0, vy: 0, radius: 10, routeType: 'BLOCK', color: offTeam.primaryColor, archetype: 'BLOCKER', speedMultiplier: 0.95, isBlocker: true };
       rb = { startX: 210, startY: lineOfScrimmageY - (25 * attackDirection), x: 210, y: lineOfScrimmageY - (25 * attackDirection), vx: 0, vy: 0, radius: 10, routeType: 'BLOCK', color: offTeam.primaryColor, archetype: 'BLOCKER', speedMultiplier: 0.95, isBlocker: true };
 
-      const returnerDeepY = Math.max(endZoneHeight + 60, Math.min(fieldHeight - endZoneHeight - 60, lineOfScrimmageY + (420 * attackDirection)));
+      const returnerDeepY = Math.max(endZoneHeight + 60, Math.min(fieldHeight - endZoneHeight - 60, lineOfScrimmageY + (380 * attackDirection)));
       const puntBlockLineY = returnerDeepY - (55 * attackDirection);
       const puntBlockerXs = [45, 95, 145, 195, 245, 295];
       defenders = [
@@ -3219,6 +3333,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       p2Score = 0;
       p1QuarterScores = [0, 0, 0, 0];
       p2QuarterScores = [0, 0, 0, 0];
+      p1GameStats = createEmptyTeamGameStats();
+      p2GameStats = createEmptyTeamGameStats();
       quarter = 1;
       gameClockSeconds = 120;
       gameClockRemainderMs = 0;
@@ -4384,6 +4500,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     const vx = (targetX - qb.x) / totalFlightFrames;
     const vy = (targetY - qb.y) / totalFlightFrames;
 
+    getTeamGameStats(activeOffense).passAttempts++;
     ball = {
       startX: qb.x,
       startY: qb.y,
@@ -4654,7 +4771,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     }
 
     // Relative Virtual Joystick / Movement activation (Fluid one-finger control on mobile)
-    const isLiveMovementPhase = (phase === 'QB_DROP' || phase === 'HANDOFF' || phase === 'RUNNING');
+    const isLiveMovementPhase = (phase === 'QB_DROP' || phase === 'HANDOFF' || phase === 'RUNNING' || phase === 'FUMBLE');
     if (typeof joystick !== 'undefined' && isLiveMovementPhase && !joystick.active) {
       if (isLocalDefense()) {
         // On defense: Check if player tapped directly on a teammate defender to switch to them immediately
@@ -4675,7 +4792,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         }
         // One-finger control: touching anywhere on screen anchors the virtual joystick under their finger
         activateJoystick(e.pointerId, screenPos);
-      } else if (isLocalOffense() && (touchedJoystick || phase === 'RUNNING')) {
+      } else if (isLocalOffense() && (touchedJoystick || phase === 'RUNNING' || phase === 'FUMBLE')) {
         activateJoystick(e.pointerId, screenPos);
       }
     }
@@ -5021,6 +5138,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
   function triggerFumble(carrier: Entity) {
     phase = 'FUMBLE';
+    getTeamGameStats(activeOffense).fumbles++;
     triggerScreenShake(32, 12);
     sounds.playFumble();
     fumbleBall = createFumbleBall(carrier, attackDirection, activeOffense);
@@ -5048,8 +5166,10 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   }
 
   function updateCamera() {
+    if (phase === 'DEAD') return;
+
     if (phase === 'PRE_SNAP') {
-      const snapTarget = getSideScrollCameraYForLineOfScrimmage(lineOfScrimmageY, logicalCanvasWidth, getCameraPitchFactor(), activeOffense === 'P1');
+      const snapTarget = getPreSnapCameraY();
       playSnapCameraY = snapTarget;
       cameraY = snapTarget;
       return;
@@ -5058,8 +5178,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     const snapAnchorY = playSnapCameraY ?? getSideScrollCameraYForLineOfScrimmage(lineOfScrimmageY, logicalCanvasWidth, getCameraPitchFactor(), activeOffense === 'P1');
 
     // On kickoff or punt: track the ball downfield
-    if (isKickoffPhase || (ball && (ball.isKickoff || ball.isPunt))) {
-      const focusY = ball?.y ?? fumbleBall?.y ?? activeEntity?.y;
+    if (isKickoffPhase || isSpecialTeamsReturn || (ball && (ball.isKickoff || ball.isPunt))) {
+      const focusY = ball?.y ?? fumbleBall?.y ?? (phase === 'KICKOFF' ? qb.y : activeEntity?.y);
       if (focusY !== undefined) {
         const targetCameraY = Math.max(cameraWorldTop, Math.min(
           cameraWorldBottom - logicalCanvasWidth,
@@ -5134,6 +5254,17 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     const positions = entities.map(entity => ({ x: entity.x, y: entity.y }));
     const livePlay = !['PRE_SNAP', 'DEAD', 'KICKOFF'].includes(phase);
     updateGameplay();
+    if (deadPassBall) {
+      deadPassBall.x += deadPassBall.vx;
+      deadPassBall.y += deadPassBall.vy;
+      deadPassBall.z = Math.max(0, deadPassBall.z - 1.4);
+      deadPassBall.vx *= 0.92;
+      deadPassBall.vy *= 0.92;
+      deadPassBall.framesRemaining--;
+      if (deadPassBall.framesRemaining <= 0 || (Math.abs(deadPassBall.vx) + Math.abs(deadPassBall.vy) < 0.08 && deadPassBall.z === 0)) {
+        deadPassBall = null;
+      }
+    }
     updateCamera();
     const activeKeys = new Set<string>();
     entities.forEach((entity, index) => {
@@ -5318,8 +5449,25 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
       // All nearby players rush to recover loose ball
       const recoveryEligible = [qb, rb, centerReceiver, ...receivers, ...linemen, ...defenders].filter(Boolean) as Entity[];
+      const userRecoveryPlayer = isLocalDefense()
+        ? getControlledDefender()
+        : isLocalOffense() ? activeEntity : null;
       recoveryEligible.forEach(p => {
-        moveToward(p, fumbleBall!.x, fumbleBall!.y, 0.28, 1.8);
+        if (p === userRecoveryPlayer) {
+          const controlSide = isLocalDefense() ? activeDefense : activeOffense;
+          const joy = getEffectiveJoystickInput(controlSide);
+          if (joy.active && (joy.x !== 0 || joy.y !== 0)) {
+            const direction = getDirectionalInput(joy.x, joy.y);
+            p.x += direction.x * 1.9;
+            p.y += direction.y * 1.9;
+            p.x = Math.max(20, Math.min(fieldWidth - 20, p.x));
+            p.y = Math.max(30, Math.min(fieldHeight - 30, p.y));
+          } else {
+            moveToward(p, fumbleBall!.x, fumbleBall!.y, 0.28, 1.8);
+          }
+        } else {
+          moveToward(p, fumbleBall!.x, fumbleBall!.y, 0.28, 1.8);
+        }
       });
 
       // Recovery check after 12 frames
@@ -5328,6 +5476,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           const dist = Math.hypot(p.x - fumbleBall.x, p.y - fumbleBall.y);
           if (dist < (p.radius || 10) + 9) {
             const isDefender = isInterceptionReturn ? !defenders.includes(p) : defenders.includes(p);
+            const fumblingSide = fumbleBall.fumblingTeam as 'P1' | 'P2';
             const recoveryY = fumbleBall.y;
             fumbleBall = null;
             phase = 'DEAD';
@@ -5335,6 +5484,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
             if (isDefender) {
               // Turnover!
+              getTeamGameStats(fumblingSide).fumblesLost++;
               screenShakeTimer = 30;
               swapPossessionOnPlay(recoveryY);
               const recoveringSide = activeOffense;
@@ -5380,11 +5530,13 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         const isDefender = closestPlayer
           ? (isInterceptionReturn ? !defenders.includes(closestPlayer) : defenders.includes(closestPlayer))
           : false;
+        const fumblingSide = fumbleBall.fumblingTeam as 'P1' | 'P2';
         const recoveryY = fumbleBall.y;
         fumbleBall = null;
         phase = 'DEAD';
         sounds.playWhistle();
         if (isDefender) {
+          getTeamGameStats(fumblingSide).fumblesLost++;
           swapPossessionOnPlay(recoveryY);
           const recoveringSide = activeOffense;
           const recTeamName = (recoveringSide === 'P1' ? p1Team : p2Team).name.toUpperCase();
@@ -5709,6 +5861,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         const vy = dy / T;
         const maxZ = getPassArcMaxHeight(targetDist, isDeepRoute);
 
+        getTeamGameStats('P2').passAttempts++;
         ball = {
           startX: qb.x,
           startY: qb.y,
@@ -6195,7 +6348,6 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
               activeEntity.jukeTimer = 6;
               activeEntity.jukeVx = (cpuMove.lateralVx || 0) > 0 ? 1.6 : -1.6;
               sounds.playJuke();
-              showAnnouncement(cpuMove.announcement || 'CPU JUKE MOVE! 💨', '#00ffff');
             } else if (cpuMove.moveType === 'TRUCK') {
               activeEntity.powerBoostTimer = 40;
               sounds.playPowerBoost();
@@ -6601,6 +6753,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         defenders.forEach(d => {
           if (phase !== 'QB_DROP') return;
           if (!d) return;
+          if (isUserDefense() && d === getControlledDefender()) return;
           const distToQb = Math.hypot(qb.x - d.x, qb.y - d.y);
           const sackThreshold = (qb.radius || 10) + (d.radius || 10) + 3;
           if (distToQb <= sackThreshold) {
@@ -7489,9 +7642,10 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
             // Coverage contest evaluation
             const routeRepeatCount = getReceiverRouteRepeatCount(c);
             const isRb = (c === rb);
-            const recentRbPassCount = userPlayHistory.slice(-4).filter(p => p.targetWasRb || p.isFlatPass || p.routes?.rb === 'FLAT').length;
+            const recentOffensePlays = activeOffense === 'P1' ? userPlayHistory : cpuPlayHistory;
+            const recentRbPassCount = recentOffensePlays.slice(-4).filter(p => p.targetWasRb || p.isFlatPass || p.routes?.rb === 'FLAT').length;
             const isRbFlatSpammed = isRb && (recentRbPassCount >= 1 || routeRepeatCount >= 1);
-            const isTargetSpammed = (activeOffense === 'P1') && (routeRepeatCount >= 1 || isRbFlatSpammed);
+            const isTargetSpammed = routeRepeatCount >= 1 || isRbFlatSpammed;
             let effectiveDefDist = minDefDist;
             let effectiveBallDist = defDistToBall;
             let effectiveDefenderCount = defenderCount;
@@ -7555,6 +7709,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
             }
 
             if (outcome.type === 'COMPLETE') {
+              getTeamGameStats(activeOffense).completions++;
               playResolved = true;
               c.caught = true;
               activeEntity = c;
@@ -7573,12 +7728,25 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
               screenShakeTimer = 10;
               phase = 'DEAD';
               sounds.playWhistle();
+              if (outcome.type === 'DROP') {
+                deadPassBall = {
+                  x: activeBall.x,
+                  y: activeBall.y,
+                  z: activeBall.z,
+                  vx: activeBall.vx * 0.65 + (Math.random() - 0.5) * 0.5,
+                  vy: activeBall.vy * 0.65,
+                  framesRemaining: 48
+                };
+              }
+              showAnnouncement(`INCOMPLETE! ${outcome.announcement}`, outcome.color);
               handlePlayEnd(c.y, outcome.resultType, outcome.announcement, outcome.color);
               ball = null;
             } else if (outcome.type === 'BATTED_DOWN') {
               playResolved = true;
               screenShakeTimer = 16;
               phase = 'DEAD';
+              deadPassBall = { x: activeBall.x, y: activeBall.y, z: activeBall.z, vx: activeBall.vx * 0.5, vy: activeBall.vy * 0.5, framesRemaining: 48 };
+              showAnnouncement(`INCOMPLETE! ${outcome.announcement}`, outcome.color);
               handlePlayEnd(c.y, outcome.resultType, outcome.announcement, outcome.color);
               ball = null;
             } else if (outcome.type === 'BROKEN_UP') {
@@ -7586,6 +7754,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
               screenShakeTimer = 18;
               phase = 'DEAD';
               sounds.playTackle();
+              deadPassBall = { x: activeBall.x, y: activeBall.y, z: activeBall.z, vx: activeBall.vx * 0.5, vy: activeBall.vy * 0.5, framesRemaining: 48 };
+              showAnnouncement(`INCOMPLETE! ${outcome.announcement}`, outcome.color);
               handlePlayEnd(c.y, outcome.resultType, defenderCount >= 2
                 ? 'DOUBLE COVERAGE BREAKS UP THE PASS!'
                 : `TIGHT COVERAGE! PASS BROKEN UP (COV ${coverageRating})`, outcome.color);
@@ -7615,6 +7785,17 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         phase = 'DEAD';
         const isOob = (ball.x <= 20 || ball.x >= fieldWidth - 20);
         const incompleteMsg = isOob ? 'PASS OUT OF BOUNDS! ❌ Over the sideline!' : 'PASS INCOMPLETE! 🏈 Hit the turf!';
+        if (!isOob) {
+          deadPassBall = {
+            x: ball.x,
+            y: ball.y,
+            z: ball.z,
+            vx: ball.vx * 0.65 + (Math.random() - 0.5) * 0.5,
+            vy: ball.vy * 0.65,
+            framesRemaining: 48
+          };
+        }
+        showAnnouncement(`INCOMPLETE! ${incompleteMsg}`, '#aaaaaa');
         handlePlayEnd(qb.y, 'INCOMPLETE', incompleteMsg, '#aaaaaa');
         ball = null;
       }
@@ -7624,7 +7805,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     if (phase === 'RUNNING' && activeEntity && reachedEndZone) {
       screenShakeTimer = 40;
       phase = 'DEAD';
-      handlePlayEnd(attackDirection === -1 ? endZoneHeight : fieldHeight - endZoneHeight, 'TD');
+      handlePlayEnd(activeEntity.y, 'TD');
     }
 
     if (screenShakeTimer > 0) screenShakeTimer--;
@@ -7699,6 +7880,23 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       ? { vx: -forwardDirection, vy: 0 }
       : { vx: -(entity.vy || 0), vy: entity.vx || 0 };
     drawHelmetSprite(ctx!, { ...entity, ...facingVelocity }, design, forwardDirection, (touchOptimized ? 1.23 : 1.08) * buildScale, 'THREE_QUARTER', faceForwardDirection);
+    ctx!.restore();
+  }
+
+  function drawPlayerEnergyMeter(entity: Entity): void {
+    const energy = Math.max(0, Math.min(100, entity.stamina ?? 100));
+    const pitch = getCameraPitchFactor();
+    const meterWidth = 28 / (cameraScale * pitch);
+    const meterHeight = 3 / cameraScale;
+    const meterTop = ((entity.radius || 10) + 5) / cameraScale;
+
+    ctx!.save();
+    ctx!.translate(entity.x, entity.y);
+    ctx!.rotate(-Math.PI / 2);
+    ctx!.fillStyle = 'rgba(0, 0, 0, 0.78)';
+    ctx!.fillRect(-meterWidth / 2 - 1 / cameraScale, meterTop - 1 / cameraScale, meterWidth + 2 / cameraScale, meterHeight + 2 / cameraScale);
+    ctx!.fillStyle = energy <= 30 ? '#ef4444' : energy <= 60 ? '#f59e0b' : '#4ade80';
+    ctx!.fillRect(-meterWidth / 2, meterTop, meterWidth * energy / 100, meterHeight);
     ctx!.restore();
   }
 
@@ -8030,6 +8228,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         const faceTeamTravel = phase === 'PRE_SNAP' || (entity === qb && phase === 'QB_DROP');
         drawHelmet(entity, getEntityHelmet(entity, role), forwardDirection, faceTeamTravel, phase === 'PRE_SNAP');
       });
+    playersByDepth.forEach(({ entity }) => drawPlayerEnergyMeter(entity));
 
     if (activeEntity === qb || (qb.powerBoostTimer || 0) > 0) {
       ctx.strokeStyle = (qb.powerBoostTimer || 0) > 0 ? '#00ffff' : '#ff00ff';
@@ -8499,6 +8698,32 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       ctx.stroke();
       ctx.restore();
       drawFootball(ballDrawX, ball.y, Math.atan2(ball.vy, ball.vx), 8.5);
+    }
+
+    if (fieldGoalResultAnimation) {
+      const { x, y, z, isGood, framesRemaining } = fieldGoalResultAnimation;
+      const fade = framesRemaining / 24;
+      ctx.save();
+      ctx.globalAlpha = fade;
+      ctx.strokeStyle = isGood ? '#4ade80' : '#fb7185';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.arc(x, y, 9 + (24 - framesRemaining) * 0.6, 0, Math.PI * 2);
+      ctx.stroke();
+      drawFootball(x - z, y, 0, 8.5);
+      ctx.restore();
+      fieldGoalResultAnimation.framesRemaining--;
+      if (fieldGoalResultAnimation.framesRemaining <= 0) fieldGoalResultAnimation = null;
+    }
+
+    if (deadPassBall) {
+      ctx.save();
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.30)';
+      ctx.beginPath();
+      ctx.ellipse(deadPassBall.x, deadPassBall.y + 3, 8, 3, 0, 0, Math.PI * 2);
+      ctx.fill();
+      drawFootball(deadPassBall.x - deadPassBall.z, deadPassBall.y, Math.atan2(deadPassBall.vy, deadPassBall.vx));
+      ctx.restore();
     }
 
     // Loose Fumble Football

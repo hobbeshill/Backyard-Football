@@ -265,18 +265,14 @@ export function getCatchCompletionChance(params: CatchContestParams): number {
   const positionPenalty = params.ballSideDefender ? 0.08 : 0;
   const reachPenalty = Math.max(0, (params.distanceToCatch ?? 0) - 12) * 0.008;
   const playerMatchup = ((params.handsRating ?? 70) - (params.coverageRating ?? 70)) * 0.003 * (1 - coverageCurve);
+  const proBonus = params.isProMode ? 0.04 : 0;
+  const targetSpamPenalty = params.isRbFlatSpammed ? 0.12 : params.isTargetSpammed ? 0.06 : 0;
 
-  if (params.isProMode) {
-    const proBase = 0.62;
-    const proOpenBoost = 0.30 * coverageCurve;
-    const handsMod = params.archetype === 'POSSESSION' || params.archetype === 'TIGHT_END' ? 0.05 : 0;
-    const fatigueMod = Math.max(0, (50 - (params.stamina ?? 100)) / 50) * 0.03;
-    const doubleCovMod = Math.min(2, Math.max(0, (params.defenderCount ?? 1) - 1)) * 0.04;
-    const reachMod = Math.max(0, (params.distanceToCatch ?? 0) - 16) * 0.004;
-    return Math.max(0.28, Math.min(0.94, proBase + proOpenBoost + handsMod + playerMatchup - fatigueMod - doubleCovMod - reachMod - (params.ballSideDefender ? 0.08 : 0)));
-  }
-
-  return Math.max(0.10, Math.min(0.905, 0.30 + 0.605 * coverageCurve + playerMatchup + (handsBonus - fatiguePenalty - doubleCoveragePenalty - positionPenalty) * (1 - coverageCurve) - reachPenalty));
+  return Math.max(0.10, Math.min(0.94,
+    0.30 + 0.605 * coverageCurve + playerMatchup +
+    (handsBonus - fatiguePenalty - doubleCoveragePenalty - positionPenalty) * (1 - coverageCurve) -
+    reachPenalty + proBonus - targetSpamPenalty
+  ));
 }
 
 export function resolveCatchContestOutcome(params: CatchContestParams): CatchContestResult {
@@ -296,12 +292,11 @@ export function resolveCatchContestOutcome(params: CatchContestParams): CatchCon
   const contested = separation < 45;
   const completionChance = getCatchCompletionChance(params);
   if (roll < 1 - completionChance) {
-    const isPro = Boolean(params.isProMode);
-    const interceptionChance = contested ? (params.ballSideDefender ? (isPro ? 0.02 : 0.08) : (isPro ? 0.01 : 0.04)) : 0;
+    const interceptionChance = contested ? (params.ballSideDefender ? 0.18 : 0.08) : 0;
     if (roll < interceptionChance) {
       return { type: 'INTERCEPTED', caught: false, announcement: 'INTERCEPTED AT THE CATCH POINT!', color: '#ff3333', resultType: 'INT' };
     }
-    if (contested && roll >= (isPro ? 0.04 : 0.095)) {
+    if (contested && roll >= 0.18) {
       return { type: 'BROKEN_UP', caught: false, announcement: 'PASS BROKEN UP ON CONTACT!', color: '#ff8888', resultType: 'DEFLECT' };
     }
     return { type: 'DROP', caught: false, announcement: roll >= 0.075 ? 'RECEIVER SLIPPED ON TURF! INCOMPLETE!' : 'DROPPED PASS!', color: '#ff9999', resultType: 'INCOMPLETE' };
@@ -470,8 +465,8 @@ export function getKickoffLineY(
 }
 
 export const GOALPOST_CENTER_X = 170;
-export const GOALPOST_LEFT_UPRIGHT_X = 151;
-export const GOALPOST_RIGHT_UPRIGHT_X = 189;
+export const GOALPOST_LEFT_UPRIGHT_X = 142;
+export const GOALPOST_RIGHT_UPRIGHT_X = 198;
 export const GOALPOST_CROSSBAR_HEIGHT_Z = 22;
 
 export interface FieldGoalFlightResult {
@@ -524,8 +519,8 @@ export function calculateFieldGoalFlight(
     : Math.max(0, GOALPOST_CROSSBAR_HEIGHT_Z + distanceMargin * 4.2);
 
   // Lateral drift: As distance increases, aim deviations carry wider over the long flight
-  // At 20 yds: driftScale ~ 42 (requires Math.abs(aim) <= 0.45 to stay inside 151-189)
-  // At 60 yds: driftScale ~ 82 (requires Math.abs(aim) <= 0.23 to stay inside 151-189)
+  // At 22 yds: driftScale ~ 45 (requires Math.abs(aim) <= 0.62 to stay inside 142-198)
+  // At 60 yds: driftScale ~ 82 (requires Math.abs(aim) <= 0.34 to stay inside 142-198)
   const distanceRatio = Math.max(0, Math.min(1, (clampedDistance - 15) / 45));
   const driftScale = 38 + distanceRatio * 44;
   const lateralDrift = clampedAim * driftScale;

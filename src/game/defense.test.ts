@@ -29,7 +29,8 @@ test('double coverage, ball-side positioning, receiver hands and fatigue affect 
   assert.ok(getCatchCompletionChance({ ...contest, ballSideDefender: true }) < baseline);
   assert.ok(getCatchCompletionChance({ ...contest, archetype: 'POSSESSION' }) > getCatchCompletionChance({ ...contest, archetype: 'SPEEDSTER' }));
   assert.ok(getCatchCompletionChance({ ...contest, stamina: 0 }) < baseline);
-  assert.equal(getCatchCompletionChance({ ...contest, isTargetSpammed: true, isRbFlatSpammed: true }), baseline);
+  assert.ok(getCatchCompletionChance({ ...contest, isTargetSpammed: true }) < baseline);
+  assert.ok(getCatchCompletionChance({ ...contest, isRbFlatSpammed: true }) < getCatchCompletionChance({ ...contest, isTargetSpammed: true }));
   assert.equal(getCatchCompletionChance({ ...contest, effectiveDefDist: 80, effectiveBallDist: 80, stamina: 0 }), 0.905);
 });
 
@@ -53,6 +54,20 @@ test('catch outcomes favor breakups over picks and boundary decisions use actual
   assert.ok(outcomes.filter(outcome => outcome.type === 'BROKEN_UP').length > outcomes.filter(outcome => outcome.type === 'INTERCEPTED').length * 5);
   assert.equal(resolveCatchContestOutcome({ ...contest, receiverX: 29, fieldWidth: 340, roll: 0.99 }).type, 'OUT_OF_BOUNDS');
   assert.equal(resolveCatchContestOutcome({ ...contest, receiverX: 30, fieldWidth: 340, roll: 0.99 }).type, 'COMPLETE');
+});
+
+test('covered catches carry meaningful interception risk in both modes while open throws stay reliable', () => {
+  for (const isProMode of [false, true]) {
+    const covered = { effectiveDefDist: 20, effectiveBallDist: 20, isTargetSpammed: false, isRbFlatSpammed: false, isRb: false, isProMode, ballSideDefender: true };
+    const completionChance = getCatchCompletionChance(covered);
+    assert.ok(completionChance >= 0.25 && completionChance <= 0.45, `Covered completion chance was ${completionChance}`);
+    assert.equal(resolveCatchContestOutcome({ ...covered, roll: 0.10 }).type, 'INTERCEPTED');
+
+    const open = { ...covered, effectiveDefDist: 80, effectiveBallDist: 80, ballSideDefender: false };
+    assert.ok(getCatchCompletionChance(open) >= 0.90);
+    assert.equal(resolveCatchContestOutcome({ ...open, roll: 0.01 }).type, 'DROP');
+    assert.equal(resolveCatchContestOutcome({ ...open, roll: 0.50 }).type, 'COMPLETE');
+  }
 });
 
 test('route movement applies the speed bonus once and fatigue slows receivers', () => {
@@ -79,8 +94,8 @@ test('defender run pursuit starts at base speed and ramps up over time', () => {
   assert.equal(maxed.acceleration, 0.4);
 });
 
-test('user-controlled players get a modest speed edge while max pursuit remains faster', () => {
-  assert.equal(USER_CONTROL_SPEED_MULTIPLIER, 1.12);
+test('user-controlled players keep a slight speed edge while max pursuit remains faster', () => {
+  assert.equal(USER_CONTROL_SPEED_MULTIPLIER, 1.06);
 
   const maxPursuitSpeed = getRunPursuitMovement(0.88, 1000).speed * 0.68 * GAME_SPEED_SCALE;
   const boostedCarrierSpeed = getBallCarrierRunSpeed(false, true) * 0.78 * GAME_SPEED_SCALE * USER_CONTROL_SPEED_MULTIPLIER;
@@ -1171,6 +1186,7 @@ test('AI ball carrier executes intelligent lateral juke when defender closes in'
   assert.equal(result.moveType, 'JUKE');
   assert.ok((result.lateralVx || 0) < 0, 'Should juke left away from defender on right');
   assert.ok((carrier.tackleImmunity || 0) > 0, 'Carrier should receive tackle immunity');
+  assert.equal(result.announcement, undefined, 'Jukes should not emit a CPU move announcement');
 });
 
 test('AI ball carrier executes power truck boost in critical short-yardage situation', async () => {

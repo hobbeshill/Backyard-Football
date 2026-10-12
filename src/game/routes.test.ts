@@ -38,8 +38,8 @@ test('route depths include intermediate targets, long shots and short checkdowns
   for (const route of ['FLAG-L', 'FLAG-R', 'POST-L', 'POST-R', 'GO', 'FLY', 'WHEEL']) {
     assert.ok(depth(route) >= 30, `${route} should reach at least 30 yards`);
   }
-  assert.equal(depth('GO'), 60, 'Go route reaches the opponent goal line');
-  assert.equal(depth('FLY'), 60, 'Fly route reaches the opponent goal line');
+  assert.equal(depth('GO'), 65, 'Go route advances into the opponent end zone');
+  assert.equal(depth('FLY'), 65, 'Fly route advances into the opponent end zone');
 });
 
 test('playbook travel direction matches the side-view screen', () => {

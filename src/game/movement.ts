@@ -1,7 +1,7 @@
 import type { Entity } from './types';
 
 export const GAME_SPEED_SCALE = 0.90;
-export const USER_CONTROL_SPEED_MULTIPLIER = 1.12;
+export const USER_CONTROL_SPEED_MULTIPLIER = 1.06;
 
 export function getFatigueSpeedMultiplier(stamina = 100): number {
   return 1 - Math.min(1, Math.max(0, (70 - stamina) / 70)) * 0.35;
@@ -485,7 +485,7 @@ export function getRouteWaypoints(
     case 'HITCH': offsets = [[0, 70], [0, 60]]; break;
     case 'WHEEL': offsets = [[x < fieldWidth / 2 ? -40 : 40, 40], [x < fieldWidth / 2 ? -40 : 40, 320]]; break;
     case 'GO': case 'FLY': {
-      const depthToEndZone = attackDirection === -1 ? y - 100 : fieldHeight - 100 - y;
+      const depthToEndZone = attackDirection === -1 ? y - 50 : fieldHeight - 50 - y;
       offsets = [[0, Math.max(0, depthToEndZone)]];
       break;
     }

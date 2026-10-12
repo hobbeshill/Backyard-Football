@@ -599,7 +599,6 @@ export function evaluateCpuBallCarrierMoves(
     carrier.jukeCooldownTimer = 140;
     result.moveType = 'JUKE';
     result.lateralVx = safeJukeDir * 1.8;
-    result.announcement = 'CPU JUKE MOVE! 💨';
     return result;
   }
 
