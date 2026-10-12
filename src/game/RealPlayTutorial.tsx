@@ -4,16 +4,16 @@ import { mountFootballGame, type GameEngineHandle } from './engine';
 import { ProPlaybookCards } from './ProPlaybookCards';
 
 const steps = [
-  ['Offense', 'Choose a Pro play card', 'Read down and distance at the top of the playbook. Pick a passing play; long routes stretch coverage and blue short routes offer checkdowns. The RB stays in pass protection.'],
-  ['Offense', 'Snap the ball', 'Touch the field to snap. Drag left or right to run downfield and up or down to move across the field. On keyboard, press Space to snap.'],
-  ['Offense', 'Throw the ball', 'Tap an eligible receiver to pass, or drag back from the QB and release. Look for an open target; use a short checkdown if deep coverage holds.'],
-  ['Offense', 'Finish the play', 'The live pass and tackle rules resolve the play. After a catch, drag the joystick to steer your runner.'],
-  ['Defense', 'Choose a defensive scheme card', 'Pick a scheme from the Pro playbook. Deep zones protect against long passes; man coverage and pressure attack shorter plays.'],
-  ['Defense', 'Start the defensive play', 'Touch the field to start. Pro mode assigns your teammates from the chosen scheme; you control the highlighted free defender once the play starts. Space also starts the play.'],
-  ['Defense', 'Control the free defender', 'Drag left or right to run along the field and up or down to move across it. Tap or quickly swipe the field to dive-tackle; Space also dives on defense.'],
-  ['Special teams', 'Choose a kick from the playbook', 'Punt and Field Goal are in the offensive Pro playbook, not the pause menu. Open the playbook below. Punt is available on fourth down; field goals show the attempt distance.'],
-  ['Special teams', 'Execute your kick', 'For a field goal, lock direction first, then power. For a punt, touch the field or press Space to launch.'],
-  ['Complete', 'Ready for Pro football', 'You called plays, used a checkdown-ready offense, chose a defense, controlled the free defender, and tried special teams. Choose One Game, Season, or the Dynasty preview, then your teams.']
+  ['Offense', 'Choose a Pro play card', 'Check the down and distance, then choose a pass or run card. The card shows the routes and blocking plan. Your call sets the formation and receiver routes before the snap.'],
+  ['Offense', 'Snap the ball', 'Tap the lower-left joystick zone to snap, or press Space. Keep dragging from that touch to control the quarterback: left or right moves upfield, up or down moves across the field. WASD and arrow keys also move.'],
+  ['Offense', 'Throw to a receiver', 'Tap an eligible WR, Center, or RB on the field to throw. The pass is led toward the target. Separation creates a safer catch; tight or double coverage can break up or intercept the pass.'],
+  ['Offense', 'Run after the catch', 'A completed pass puts you in control of the receiver. Steer with the floating joystick or WASD/arrow keys. The play ends on a tackle, sideline, or touchdown. An incomplete pass is dead; there is no second throw.'],
+  ['Defense', 'Call a defensive scheme', 'Open the defensive playbook and choose a coverage or pressure card before the snap. That call assigns your teammates; choose a scheme to match the opponent’s likely pass or run.'],
+  ['Defense', 'Snap on defense', 'Tap the lower-left joystick zone or press Space to start the play. Tapping elsewhere does not snap. Your teammates follow the called scheme while you control the highlighted defender.'],
+  ['Defense', 'Pursue and tackle', 'Steer the highlighted defender with the floating joystick or WASD/arrow keys. Close on the quarterback to sack, or meet the ball carrier to tackle. Tap or quickly swipe during live play to dive.'],
+  ['Special teams', 'Choose a kick from the playbook', 'Open the offensive playbook and choose Punt or Field Goal. Punts are available on fourth down. The field-goal card shows the attempt distance.'],
+  ['Special teams', 'Use the kick meters', 'For a field goal, lock the aim meter, then lock power to kick. For a punt, tap the lower-left joystick zone or press Space to launch.'],
+  ['Complete', 'Ready to play', 'Choose an offensive card before each drive, snap from the lower-left zone or with Space, and tap a receiver to pass. On defense, call a scheme before the snap, then control the highlighted defender.']
 ];
 
 export function RealPlayTutorial({ onFinish }: { onFinish: () => void }) {
