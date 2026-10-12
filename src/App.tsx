@@ -1528,20 +1528,20 @@ export default function App() {
 
       {/* Franchise & Team Selector Modal */}
       {showTeamModal && !hasKickedOff && setupStep === 'MODE' && (
-        <section role="dialog" aria-modal="true" aria-labelledby="game-mode-title" className="fixed inset-0 z-[100] flex items-center justify-center bg-[#07110a] p-4">
-          <div className="w-full max-w-2xl rounded-xl border border-neutral-700 bg-[#0d1710] p-5 shadow-2xl sm:p-8">
+        <section role="dialog" aria-modal="true" aria-labelledby="game-mode-title" className="mobile-main-menu-overlay fixed inset-0 z-[100] flex items-center justify-center overflow-y-auto bg-[#07110a] p-4">
+          <div className="mobile-main-menu w-full max-w-2xl rounded-xl border border-neutral-700 bg-[#0d1710] p-5 shadow-2xl sm:p-8">
             <h1 id="game-mode-title" className="text-center text-2xl font-black uppercase text-amber-300 sm:text-3xl">Backyard Football</h1>
             <p className="mt-2 text-center text-sm text-neutral-300">Choose how you want to play. Pick your teams next.</p>
-            <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4" role="group" aria-label="Game mode">
+            <div className="mobile-mode-grid mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4" role="group" aria-label="Game mode">
               {([
                 ['ONE_GAME', 'One Game', 'Pick your team and the CPU opponent for a single matchup.'],
                 ['SEASON', 'Season', 'Choose your SEC team for a 9-game season and a shot at the championship.'],
                 ['DYNASTY', 'Dynasty', 'Choose your program and preview the coming-soon Dynasty mode.']
               ] as const).map(([mode, label, description]) => (
-                <button key={mode} type="button" onClick={() => handleGameModeChange(mode)} className="rounded-lg border border-neutral-600 bg-[#15251b] p-4 text-left transition hover:border-amber-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-400">
+                <button key={mode} type="button" onClick={() => handleGameModeChange(mode)} className="mobile-mode-option rounded-lg border border-neutral-600 bg-[#15251b] p-4 text-left transition hover:border-amber-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-400">
                   <span className="block text-lg font-black text-white">{label}</span>
                   {mode === 'DYNASTY' && <span className="mt-1 block text-[10px] font-bold uppercase text-amber-300">Coming soon</span>}
-                  <span className="mt-2 block text-xs leading-5 text-neutral-300">{description}</span>
+                  <span className="mobile-mode-description mt-2 block text-xs leading-5 text-neutral-300">{description}</span>
                 </button>
               ))}
               <button
@@ -1550,13 +1550,13 @@ export default function App() {
                   setOnlineError('');
                   setShowOnlineLobby(true);
                 }}
-                className="rounded-lg border border-cyan-500/70 bg-[#10232a] p-4 text-left transition hover:border-cyan-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-300"
+                className="mobile-mode-option rounded-lg border border-cyan-500/70 bg-[#10232a] p-4 text-left transition hover:border-cyan-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-300"
               >
                 <div className="flex items-center justify-between">
                   <span className="block text-lg font-black text-white">Online Versus</span>
                   <span className="rounded bg-cyan-400/20 px-1.5 py-0.5 text-[9px] font-black uppercase text-cyan-300">Live</span>
                 </div>
-                <span className="mt-2 block text-xs leading-5 text-neutral-300">Create an invite code or join a friend for a live head-to-head game.</span>
+                <span className="mobile-mode-description mt-2 block text-xs leading-5 text-neutral-300">Create an invite code or join a friend for a live head-to-head game.</span>
               </button>
             </div>
             {seasonProgress && (
@@ -1766,7 +1766,7 @@ export default function App() {
       {showTeamModal && (hasKickedOff || setupStep === 'TEAMS') && (
         <div
           onPointerDown={(e) => e.stopPropagation()}
-          className="fixed inset-0 z-[100] flex flex-col items-center justify-start sm:justify-center bg-[#101713]/90 sm:p-3 backdrop-blur-sm overflow-hidden"
+          className="team-selector-overlay fixed inset-0 z-[100] flex flex-col items-center justify-start sm:justify-center bg-[#101713]/90 sm:p-3 backdrop-blur-sm overflow-hidden"
         >
           <div
             role="dialog"
@@ -1774,7 +1774,7 @@ export default function App() {
             aria-labelledby="team-selector-title"
             className="team-selector-panel flex flex-col h-full sm:h-auto sm:max-h-[94vh] w-full max-w-5xl rounded-none sm:rounded-xl border-0 sm:border border-[#d5ded7] bg-[#f2f5f2] text-left text-[#1b3026] shadow-2xl overflow-hidden"
           >
-            <div className="flex shrink-0 items-center justify-between border-b border-[#dce3dd] bg-white px-4 py-3 sm:px-6">
+            <div className="team-selector-header flex shrink-0 items-center justify-between border-b border-[#dce3dd] bg-white px-4 py-3 sm:px-6">
               <div className="flex items-center gap-3">
                 <span className="flex h-10 w-10 items-center justify-center rounded-md bg-[#e8f0ea] text-[#246344]">
                   <Users size={20} />
@@ -1801,7 +1801,7 @@ export default function App() {
               </div>
             </div>
 
-            <div className="grid shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-3 border-b border-[#dce3dd] bg-[#e9efea] px-4 py-3 sm:px-6">
+            <div className="team-selector-summary grid shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-3 border-b border-[#dce3dd] bg-[#e9efea] px-4 py-3 sm:px-6">
               <div className="min-w-0">
                 <span className="mb-1 block text-[11px] font-bold uppercase text-[#246344]">You</span>
                 <span className="flex items-center gap-2 truncate text-sm font-bold sm:text-base">
@@ -1821,7 +1821,7 @@ export default function App() {
               )}
             </div>
 
-            <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-[#dce3dd] bg-white px-4 py-3 sm:px-6">
+            <div className="team-selector-controls flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-[#dce3dd] bg-white px-4 py-3 sm:px-6">
               <div className="flex gap-2" role="group" aria-label="Choose which side to assign">
                 <button
                   type="button"
@@ -1849,7 +1849,7 @@ export default function App() {
               </span>
             </div>
 
-            <div className="min-h-0 flex-1 overflow-y-auto">
+            <div className="team-selector-list min-h-0 flex-1 overflow-y-auto overscroll-y-contain">
               <div className="p-3 sm:p-5">
                 {/* Step 2: SEC Teams Selection */}
                 <div className="mb-3 flex items-center justify-between gap-3">
@@ -1866,7 +1866,7 @@ export default function App() {
                     />
                   </label>
                 </div>
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                <div className="team-selector-grid grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
                   {visibleTeams.map((team) => {
                     const isP1 = p1TeamState.id === team.id;
                     const isP2 = p2TeamState.id === team.id;
@@ -1875,7 +1875,7 @@ export default function App() {
                     return (
                       <div
                         key={team.id}
-                        className={`flex items-center justify-between gap-1.5 rounded-lg border px-3 py-2 transition-all ${
+                        className={`team-selector-card flex items-center justify-between gap-1.5 rounded-lg border px-3 py-2 transition-all ${
                           isActiveSide
                             ? 'border-[#246344] bg-[#e8f0ea] text-[#1e573b] shadow-sm ring-2 ring-[#246344]/50'
                             : 'border-[#dce3dd] bg-white text-[#1b3026] hover:bg-[#f8faf8] hover:border-neutral-400'
@@ -1894,7 +1894,7 @@ export default function App() {
                           className="flex flex-1 items-center gap-2 text-left text-sm font-bold min-w-0 cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#246344]"
                         >
                           <HelmetSpritePreview team={team} />
-                          <span>{team.name}</span>
+                          <span className="team-selector-name min-w-0 truncate">{team.name}</span>
                           {isActiveSide && (
                             <span className="shrink-0 rounded bg-[#246344] text-white px-1.5 py-0.5 text-[9px] font-black uppercase ml-auto">
                               {teamSelectionSide === 'P1' ? 'YOU' : 'CPU'}
@@ -1921,8 +1921,8 @@ export default function App() {
             </div>
 
             {/* Sticky, Always-Visible Footer with Prominent Kick Off Game Button */}
-            <div className="shrink-0 sticky bottom-0 z-30 border-t-2 border-[#cbd6cd] bg-white px-4 py-3 sm:px-6 shadow-xl">
-              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+            <div className="team-selector-footer shrink-0 sticky bottom-0 z-30 border-t-2 border-[#cbd6cd] bg-white px-4 py-3 sm:px-6 shadow-xl">
+              <div className="team-selector-footer-actions flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
                 <span className="text-xs font-bold text-[#59685f]">{gameMode === 'ONE_GAME' ? 'One Game' : gameMode === 'SEASON' ? 'Season' : 'Dynasty preview'}</span>
 
                 <div className="flex items-center gap-2">

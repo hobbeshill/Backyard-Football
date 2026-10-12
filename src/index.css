@@ -19,6 +19,131 @@
 	animation: team-selector-enter 180ms ease-out;
 }
 
+@media (orientation: portrait) and (max-width: 640px) {
+	.mobile-main-menu-overlay {
+		align-items: stretch;
+		padding: 12px;
+	}
+
+	.mobile-main-menu {
+		max-height: calc(100dvh - 24px);
+		margin: auto 0;
+		overflow-y: auto;
+		padding: 16px;
+	}
+
+	.mobile-mode-grid {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 8px;
+	}
+
+	.mobile-mode-option {
+		min-width: 0;
+		padding: 10px;
+	}
+
+	.mobile-mode-option > span:first-child,
+	.mobile-mode-option > div:first-child > span:first-child {
+		font-size: 0.9rem;
+	}
+
+	.mobile-mode-description {
+		display: none;
+	}
+
+	.team-selector-overlay {
+		align-items: stretch;
+		padding: 0;
+	}
+
+	.team-selector-panel {
+		width: 100%;
+		max-height: 100dvh;
+		height: 100dvh;
+		border: 0;
+		border-radius: 0;
+	}
+
+	.team-selector-header {
+		padding: 8px 12px;
+	}
+
+	.team-selector-summary {
+		gap: 8px;
+		padding: 7px 12px;
+	}
+
+	.team-selector-controls {
+		gap: 8px;
+		padding: 7px 12px;
+	}
+
+	.team-selector-controls [role="group"] {
+		gap: 6px;
+	}
+
+	.team-selector-controls [role="group"] button {
+		min-width: 0;
+		padding: 6px 8px;
+	}
+
+	.team-selector-list {
+		min-height: 0;
+		overflow-y: auto;
+		overscroll-behavior-y: contain;
+		-webkit-overflow-scrolling: touch;
+		touch-action: pan-y;
+	}
+
+	.team-selector-list > div {
+		padding: 10px;
+	}
+
+	.team-selector-grid {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 6px;
+	}
+
+	.team-selector-card {
+		min-width: 0;
+		gap: 4px;
+		padding: 6px;
+		border-radius: 6px;
+	}
+
+	.team-selector-card > button:first-child {
+		gap: 6px;
+		font-size: 0.7rem;
+	}
+
+	.team-selector-name {
+		line-height: 1.2;
+	}
+
+	.team-selector-footer {
+		padding: 8px 10px;
+	}
+
+	.team-selector-footer-actions {
+		flex-direction: row;
+		align-items: center;
+		gap: 8px;
+	}
+
+	.team-selector-footer-actions > span {
+		font-size: 0.65rem;
+	}
+
+	.team-selector-footer-actions > div {
+		min-width: 0;
+	}
+
+	.team-selector-footer-actions button {
+		padding: 8px 10px;
+		font-size: 0.65rem;
+	}
+}
+
 @media (orientation: landscape) {
 	.game-shell {
 		justify-content: flex-start !important;

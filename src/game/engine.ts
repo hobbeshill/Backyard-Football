@@ -1247,8 +1247,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   function resizeGame() {
     if (!canvas) return;
     const bounds = canvas.parentElement?.getBoundingClientRect();
-    const availableHeight = Math.max(240, bounds?.height || (typeof window !== 'undefined' ? window.innerHeight - 8 : 600));
-    const availableWidth = Math.max(320, bounds?.width || (typeof window !== 'undefined' ? window.innerWidth - 8 : 340));
+    const availableHeight = Math.max(1, bounds?.height || (typeof window !== 'undefined' ? window.innerHeight - 8 : 600));
+    const availableWidth = Math.max(1, bounds?.width || (typeof window !== 'undefined' ? window.innerWidth - 8 : 340));
     const layout = getResponsiveCanvasSize(availableWidth, availableHeight, 450, logicalCanvasHeight);
     logicalCanvasWidth = layout.logicalWidth;
     const devicePixelRatio = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
@@ -1266,6 +1266,10 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   if (typeof window !== 'undefined') {
     window.addEventListener('resize', resizeGame);
   }
+  const canvasResizeObserver = typeof ResizeObserver !== 'undefined' && canvas?.parentElement
+    ? new ResizeObserver(resizeGame)
+    : null;
+  canvasResizeObserver?.observe(canvas!.parentElement!);
   resizeGame();
 
   // Adaptive CPU Defensive Counter-Calling (Tendency Countering)
@@ -6188,6 +6192,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         d.defenseAssignment === 'BLITZ' ||
         (d === userDef && isUserAdvancing)
       ));
+      const exactPassCounter = Boolean(currentTecmoMatchup?.isExact && !currentTecmoMatchup.offenseIsRun);
       const hasExtraBlitzer = passRushers.length >= 2;
       const baseBlockHoldFrames = getPassBlockBaseHoldFrames();
       const extraPassBlockers = [rb, centerReceiver].filter((b): b is Entity => Boolean(b && (b.isBlocker || b.routeType === 'BLOCK')));
@@ -6224,17 +6229,21 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
         });
 
         // Enforce 3 OL blocking wall against all defenders attempting to run through the line
-        defenders.forEach(d => {
-          if (!d) return;
-          checkOffensiveLineWall(d, linemen, lineOfScrimmageY, attackDirection);
-        });
+        if (!exactPassCounter) {
+          defenders.forEach(d => {
+            if (!d) return;
+            checkOffensiveLineWall(d, linemen, lineOfScrimmageY, attackDirection);
+          });
+        }
 
         // Pass Rush vs Pass Protection engagement
         passRushers.forEach((rusher) => {
           const isUserRusher = isUserDefense() && rusher === getControlledDefender();
 
           // Find engaging blocker
-          const engagingBlocker = allPassBlockers.find(b => canEngagePassBlock(b, rusher));
+          const engagingBlocker = exactPassCounter
+            ? undefined
+            : allPassBlockers.find(b => canEngagePassBlock(b, rusher));
 
           if (engagingBlocker) {
             let holdFrames = getPassBlockHoldFrames(
@@ -9069,6 +9078,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     }
+    canvasResizeObserver?.disconnect();
     canvas.removeEventListener('pointerdown', handlePointerDown);
     canvas.removeEventListener('pointermove', handlePointerMove);
     canvas.removeEventListener('pointerup', handlePointerUp);

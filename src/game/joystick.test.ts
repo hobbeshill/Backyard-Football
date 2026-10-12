@@ -103,6 +103,11 @@ test('landscape canvas layout fills the viewport without distorting its logical 
   assert.ok(portrait.displayWidth <= 390);
   assert.ok(portrait.displayHeight <= 844);
   assert.equal(portrait.logicalWidth, 450);
+
+  const compact = getResponsiveCanvasSize(220, 140);
+  assert.ok(Math.abs(compact.displayWidth - 220) < 0.001);
+  assert.ok(Math.abs(compact.displayHeight - 140) < 0.001);
+  assert.ok(300 * (compact.displayHeight / 340) <= compact.displayHeight, 'Both sidelines fit inside the measured canvas height');
 });
 
 test('simulation runs at 60 Hz regardless of display refresh rate', () => {
