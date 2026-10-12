@@ -967,7 +967,7 @@ export default function App() {
         {/* Relocated Footer / Game Status Bar */}
         <footer className="mb-1 text-[0.52rem] text-[#adff2f] text-center z-20 px-2 w-full max-w-[430px] flex items-center justify-between gap-2 shrink-0">
           <span className="font-bold opacity-90 whitespace-nowrap">
-            v2.9.0 • 8v8 Football (3 OL Pocket Protection)
+            BACKYARD GRIDIRON • SIDE VIEW • 8v8
             {gameMode === 'SEASON' && (
               <span className="text-emerald-400 font-bold ml-1">
                 • {isChampionshipWeek ? '🏆 SEC TITLE' : `WK ${currentWeekNumber} (${getSeasonRecord(seasonForDisplay).wins}-${getSeasonRecord(seasonForDisplay).losses})`}
@@ -987,8 +987,8 @@ export default function App() {
               ? (activeOffenseState === 'P1'
                   ? 'Choose a Play Card • Touch Joystick to Snap'
                   : 'Pick Defender to Control • Touch Joystick to Start')
-              : (activeOffenseState === 'P1'
-                  ? 'Draw Routes • Swipe RB Left/Right for Run Play • Touch Joystick to Start'
+                : (activeOffenseState === 'P1'
+                  ? 'Draw Routes • Swipe RB Up/Down for Run Play • Touch Field to Start'
                   : 'Pick Defender to Control • Touch Joystick to Start')}
           </span>
         </footer>
@@ -1369,6 +1369,7 @@ export default function App() {
       <div className="relative flex-1 flex flex-col items-center justify-end min-h-0 w-full overflow-hidden pb-0">
         <canvas
           ref={canvasRef}
+          aria-label="Side-view football field"
           className="bg-[#176620] shadow-[0_8px_30px_rgba(0,0,0,0.9)] rounded-md border-2 border-white touch-none"
         />
       </div>
@@ -1397,7 +1398,7 @@ export default function App() {
                     <li>Choose One Game, Season, or the Dynasty preview first, then select your team. One Game also lets you choose the CPU team.</li>
                     <li>Read down and distance at the top of the playbook. Select an offensive play or defensive scheme card before every snap.</li>
                     <li>Intermediate and deep routes stretch coverage. Some plays include a short slot hitch for a checkdown; the RB stays in pass protection.</li>
-                    <li>Touch the floating joystick area at the bottom of the screen or press Space, WASD, or an arrow key to start. On defense, steer the highlighted free defender while teammates execute the chosen scheme.</li>
+                    <li>Touch the field or press Space to snap. Use left and right to move along the field, and up and down to move across it. On defense, steer the highlighted free defender while teammates execute the chosen scheme.</li>
                     <li>Punt and Field Goal are in the offensive playbook. Punts require fourth down; field goals use direction and power meters.</li>
                     <li>Elite freeform gameplay is an optional setting under the top-right Settings button before kickoff.</li>
                   </ul>
@@ -1408,7 +1409,7 @@ export default function App() {
                 <ul className="list-disc list-inside space-y-1 text-neutral-300">
                   <li><b className="text-white">Draw Routes & Defensive Assignments in the Dirt:</b> Touch any player and draw a line in the direction you want them to play:
                     <ul className="list-disc list-inside ml-2 text-neutral-300">
-                      <li><b className="text-[#00ffaa]">Running Back (RB):</b> Swipe left or right on the RB to call a <b>Designed Run Play</b> (QB hands off to RB)! Straight forward line calls a <b>FLY / GO</b> route streaking deep downfield!</li>
+                      <li><b className="text-[#00ffaa]">Running Back (RB):</b> Swipe up or down on the RB to call a <b>Designed Run Play</b> (QB hands off to RB)! Swipe toward the opponent end zone for a <b>FLY / GO</b> route.</li>
                       <li><b className="text-[#00ffff]">Receivers (WR / Center):</b> Straight line = Fly, Inside diagonal = Slant, Horizontal = Cross, Outside diagonal = Corner, Pull back = Curl!</li>
                       <li><b className="text-[#ffcc00]">Defenders:</b> Swipe forward toward LOS = <b>BLITZ / RUSH</b> 💥, Swipe deep back = <b>ZONE COVERAGE</b> 🛡️, Swipe left/right = <b>MAN COVERAGE</b> 👤, Short swipe = <b>RB SPY</b> 🕵️‍♂️! Drag center defender to reposition anywhere!</li>
                     </ul>
@@ -1425,7 +1426,7 @@ export default function App() {
                 <span className="text-[#ffcc00] font-bold block mb-1">2. TAP TO THROW & RELATIVE JOYSTICK CONTROLS:</span>
                 <ul className="list-disc list-inside space-y-1 text-neutral-300">
                   <li><b className="text-white">Tap to Throw:</b> Tap any eligible receiver downfield (WR, Center, or RB) to launch a crisp pass with smart lead targeting so they catch the ball in stride!</li>
-                  <li><b className="text-white">Relative Virtual Joystick:</b> Touch anywhere in the bottom control area—from the top of the joystick outer ring to the bottom of the screen, all the way left to right—to start the play. The stick appears where you touch; drag it to control your player! On keyboard, press Space, WASD, or any Arrow key to start snaps, kickoffs, and punts; WASD / Arrow keys also move your player.</li>
+                  <li><b className="text-white">Side-View Controls:</b> Touch the field to start the play, then drag left or right to run along the field and up or down to move across it. On keyboard, press Space to snap; WASD or arrow keys move your player in the same screen directions.</li>
                   <li><b className="text-white">Quarterback Control:</b> Maneuver the QB in the pocket, step up to avoid blitzers, roll out, or cross the line of scrimmage to scramble!</li>
                   <li><b className="text-white">Ball Carrier Control:</b> Steer the Running Back through holes, cut laterally, or slow down behind lead blockers!</li>
                   <li><b className="text-white">Edge Rusher on Defense:</b> Take control of the edge rusher with the joystick, bend around the tackle, collapse the pocket, and deliver a bone-crushing sack!</li>

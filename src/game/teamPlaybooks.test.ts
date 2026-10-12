@@ -189,7 +189,7 @@ test('team Pro cards show only legal offense and defense with scouting identity'
 
 function canvas(): HTMLCanvasElement {
   return {
-    width: 340, height: 450, style: {},
+    width: 450, height: 340, style: {},
     getContext: () => ({ scale() {} }),
     addEventListener() {}, removeEventListener() {}
   } as unknown as HTMLCanvasElement;

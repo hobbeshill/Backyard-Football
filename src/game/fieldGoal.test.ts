@@ -118,10 +118,10 @@ test('Offensive playbook includes SPECIAL TEAMS: FIELD GOAL play option', () => 
 
 function createMockCanvas(): HTMLCanvasElement {
   return {
-    width: 340,
-    height: 450,
-    clientWidth: 340,
-    clientHeight: 450,
+    width: 450,
+    height: 340,
+    clientWidth: 450,
+    clientHeight: 340,
     getContext: () => ({
       save: () => {},
       restore: () => {},
@@ -148,7 +148,7 @@ function createMockCanvas(): HTMLCanvasElement {
     }),
     addEventListener: () => {},
     removeEventListener: () => {},
-    getBoundingClientRect: () => ({ left: 0, top: 0, width: 340, height: 450 })
+    getBoundingClientRect: () => ({ left: 0, top: 0, width: 450, height: 340 })
   } as unknown as HTMLCanvasElement;
 }
 

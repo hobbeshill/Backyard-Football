@@ -36,8 +36,8 @@ function createMockCanvas() {
       quadraticCurveTo: () => {},
       bezierCurveTo: () => {}
     }),
-    width: 340,
-    height: 450,
+    width: 450,
+    height: 340,
     style: {},
     addEventListener: () => {},
     removeEventListener: () => {}
@@ -52,7 +52,7 @@ test('fourth-down Go For It waits for a deliberate pass after the snap', (contex
   globalThis.cancelAnimationFrame = () => {};
   const handlers = new Map<string, EventListener>();
   const canvas = createMockCanvas();
-  canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 340, height: 450 } as DOMRect);
+  canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 450, height: 340 } as DOMRect);
   canvas.addEventListener = ((name: string, handler: EventListener) => handlers.set(name, handler)) as typeof canvas.addEventListener;
   let engine: GameEngineHandle | null = null;
   let selectedPlay = '';
@@ -86,14 +86,14 @@ test('fourth-down Go For It waits for a deliberate pass after the snap', (contex
       assert.ok(handler);
       handler({ clientX: x, clientY: y } as PointerEvent);
     };
-    send('pointerdown', 90, 364);
+    send('pointerdown', 90, 264);
     assert.equal(game.phase, 'QB_DROP');
-    send('pointermove', 220, 404);
-    send('pointerup', 220, 404);
+    send('pointermove', 220, 304);
+    send('pointerup', 220, 304);
     assert.equal(game.phase, 'QB_DROP', 'Moving the joystick should control the drop, not throw');
     game.resetDrill();
-    send('pointerdown', 90, 364);
-    send('pointerup', 220, 404);
+    send('pointerdown', 90, 264);
+    send('pointerup', 220, 304);
     assert.equal(game.phase, 'QB_DROP');
     const receiverPosition = game.getReceiverScreenPositionForTest?.(0);
     assert.ok(receiverPosition);
@@ -175,7 +175,7 @@ test(`Pro tutorial follows play cards, joystick snaps, passing, scheme cards, de
   canvas.getContext = (() => new Proxy(drawing, {
     get: (target, key) => Reflect.get(target, key) ?? (() => {})
   })) as unknown as typeof canvas.getContext;
-  canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 340, height: 450 } as DOMRect);
+  canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 450, height: 340 } as DOMRect);
   canvas.addEventListener = ((name: string, handler: EventListener) => handlers.set(name, handler)) as typeof canvas.addEventListener;
   let engine: GameEngineHandle | null = null;
   let step = -1;
@@ -204,14 +204,14 @@ test(`Pro tutorial follows play cards, joystick snaps, passing, scheme cards, de
     const game = engine as GameEngineHandle;
     assert.equal(game.getTacticalMode?.(), 'PRO');
     assert.equal(step, 0);
-    tap(90, 364);
+    tap(90, 264);
     assert.equal(step, 0, 'Snapping cannot skip playbook selection');
     game.selectOffense('PRO_MESH');
     assert.equal(step, 1);
     settle();
     assert.equal(midfieldNumbers.get(30), 'bold 28px Courier New, monospace');
     assert.equal(midfieldNumbers.get(310), 'bold 28px Courier New, monospace');
-    tap(90, 364);
+    tap(90, 264);
     assert.equal(step, 2);
     assert.equal(game.phase, 'QB_DROP');
     settle();
@@ -226,12 +226,12 @@ test(`Pro tutorial follows play cards, joystick snaps, passing, scheme cards, de
       frame(timestamp);
     }
     assert.equal(step, 4, 'The real offensive play must finish before defense');
-    tap(90, 364);
+    tap(90, 264);
     assert.equal(step, 4, 'Must select a defensive scheme first');
     game.selectDefense('PRO_COVER3_DEEP');
     assert.equal(step, 5);
     settle();
-    tap(90, 364);
+    tap(90, 264);
     assert.equal(step, 6);
     for (let count = 0; count < 2000 && step === 6; count++) {
       timestamp += 16;
@@ -247,7 +247,7 @@ test(`Pro tutorial follows play cards, joystick snaps, passing, scheme cards, de
       assert.equal(game.getFieldGoalMeterState?.().stage, 'POWER');
       game.lockFieldGoalMeter();
     } else {
-      tap(90, 364);
+      tap(90, 264);
     }
     assert.equal(game.phase, 'THROWN');
     for (let count = 0; count < 500 && step === 8; count++) {
@@ -269,7 +269,7 @@ test('tutorial coaching overlays the field without changing its aspect ratio', a
   const { RealPlayTutorial } = await import('./RealPlayTutorial');
   const markup = renderToStaticMarkup(createElement(RealPlayTutorial, { onFinish: () => {} }));
 
-  assert.ok(markup.includes('aspect-ratio:340 / 450'));
+  assert.ok(markup.includes('aspect-ratio:450 / 340'));
   assert.ok(markup.includes('h-auto!'));
   assert.ok(markup.includes('pointer-events-none absolute inset-x-0 top-0'));
   assert.ok(markup.includes('aria-label="Live tutorial football field"'));
@@ -598,7 +598,7 @@ test('the punt joystick starts the punt and all player speeds scale with GAME_SP
 
   const handlers = new Map<string, Function>();
   const mockCanvas = createMockCanvas();
-  mockCanvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 340, height: 450 } as DOMRect);
+  mockCanvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 450, height: 340 } as DOMRect);
   mockCanvas.addEventListener = ((name: string, handler: Function) => handlers.set(name, handler)) as typeof mockCanvas.addEventListener;
 
   let engineInstance: GameEngineHandle | null = null;
@@ -637,9 +637,9 @@ test('the punt joystick starts the punt and all player speeds scale with GAME_SP
   assert.ok(typeof pointerDown === 'function', 'Canvas has pointerdown listener');
 
   // The punt meter is informational; the shared joystick is the start control.
-  pointerDown({ clientX: 190, clientY: 280, pointerId: 1 });
+  pointerDown({ clientX: 190, clientY: 180, pointerId: 1 });
   assert.notEqual(engine.phase, 'THROWN', 'Tapping outside the joystick area does not start the punt');
-  pointerDown({ clientX: 90, clientY: 364, pointerId: 2 });
+  pointerDown({ clientX: 90, clientY: 264, pointerId: 2 });
 
   assert.equal(engine.phase, 'THROWN', 'Touching the joystick starts the punt');
 
@@ -649,7 +649,7 @@ test('the punt joystick starts the punt and all player speeds scale with GAME_SP
 test('swiping left or right on the RB calls a running play while tapping toggles pass protection and route', async () => {
   const handlers = new Map<string, Function>();
   const mockCanvas = createMockCanvas();
-  mockCanvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 340, height: 450 } as DOMRect);
+  mockCanvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 450, height: 340 } as DOMRect);
   mockCanvas.addEventListener = ((name: string, handler: Function) => handlers.set(name, handler)) as typeof mockCanvas.addEventListener;
 
   let engineInstance: GameEngineHandle | null = null;
@@ -696,41 +696,41 @@ test('swiping left or right on the RB calls a running play while tapping toggles
 
   try {
     // 1. Single tap on RB at (220, 300) toggles into Pass Protection ('BLOCK') - NOT a run play!
-    pointerDown({ clientX: 220, clientY: 300, pointerId: 1 });
+    pointerDown({ clientX: 90, clientY: 220, pointerId: 1 });
     simulatedTime += 50;
-    pointerUp({ clientX: 220, clientY: 300, pointerId: 1 });
+    pointerUp({ clientX: 90, clientY: 220, pointerId: 1 });
 
     assert.equal(engine.p1OffPlay, 'SHORT_PASS', 'Tapping RB does not call running play; keeps pass play');
     assert.ok(announcement.includes('PASS PROTECTION'), 'Announcement indicates pass protection');
 
     // 2. Single tap again: toggles into Pass Route ('FLAT') - NOT a run play!
     simulatedTime += 500;
-    pointerDown({ clientX: 220, clientY: 300, pointerId: 1 });
+    pointerDown({ clientX: 90, clientY: 220, pointerId: 1 });
     simulatedTime += 50;
-    pointerUp({ clientX: 220, clientY: 300, pointerId: 1 });
+    pointerUp({ clientX: 90, clientY: 220, pointerId: 1 });
     assert.equal(engine.p1OffPlay, 'SHORT_PASS', 'Tapping RB again keeps pass play');
     assert.ok(announcement.includes('PASS ROUTE'), 'Announcement indicates pass route');
 
     // Alabama's available inside run is Power, not ISO.
     simulatedTime += 500;
-    pointerDown({ clientX: 220, clientY: 300, pointerId: 1 });
+    pointerDown({ clientX: 90, clientY: 220, pointerId: 1 });
     if (typeof pointerMove === 'function') {
-      pointerMove({ clientX: 180, clientY: 300, pointerId: 1 });
+      pointerMove({ clientX: 90, clientY: 165, pointerId: 1 });
     }
     simulatedTime += 100;
-    pointerUp({ clientX: 180, clientY: 300, pointerId: 1 });
+    pointerUp({ clientX: 90, clientY: 165, pointerId: 1 });
 
     assert.equal(engine.p1OffPlay, 'POWER', 'Swiping left uses the team run package');
     assert.ok(announcement.includes('RUN PLAY'), 'Announcement indicates running play');
 
     // Swipe right retains the same available team run.
     simulatedTime += 500;
-    pointerDown({ clientX: 120, clientY: 300, pointerId: 1 });
+    pointerDown({ clientX: 90, clientY: 220, pointerId: 1 });
     if (typeof pointerMove === 'function') {
-      pointerMove({ clientX: 170, clientY: 300, pointerId: 1 });
+      pointerMove({ clientX: 90, clientY: 275, pointerId: 1 });
     }
     simulatedTime += 100;
-    pointerUp({ clientX: 170, clientY: 300, pointerId: 1 });
+    pointerUp({ clientX: 90, clientY: 275, pointerId: 1 });
 
     assert.equal(engine.p1OffPlay, 'POWER', 'Swiping right uses the team run package');
     assert.ok(announcement.includes('RUN PLAY'), 'Announcement indicates running play');

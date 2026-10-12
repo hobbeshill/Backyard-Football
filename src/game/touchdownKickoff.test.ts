@@ -5,8 +5,8 @@ import { mountFootballGame, type GameEngineHandle } from './engine';
 function createMockCanvas(): HTMLCanvasElement {
   const listeners: Record<string, Function[]> = {};
   return {
-    width: 340,
-    height: 450,
+    width: 450,
+    height: 340,
     getContext: () => ({
       clearRect: () => {},
       fillRect: () => {},
@@ -29,7 +29,7 @@ function createMockCanvas(): HTMLCanvasElement {
       createLinearGradient: () => ({ addColorStop: () => {} }),
       createRadialGradient: () => ({ addColorStop: () => {} }),
       measureText: () => ({ width: 40 }),
-      canvas: { width: 340, height: 450 }
+      canvas: { width: 450, height: 340 }
     }),
     addEventListener: (evt: string, fn: Function) => {
       listeners[evt] = listeners[evt] || [];

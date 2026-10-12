@@ -104,8 +104,8 @@ export type RemoteGameAction =
   | { type: 'DIVE' }
   | { type: 'SWAT' }
   | { type: 'TURBO'; active: boolean };
-export function getCanvasRenderScale(availableWidth: number, availableHeight: number, devicePixelRatio = 1): number {
-  const layoutScale = Math.min(availableWidth / 340, availableHeight / 450);
+export function getCanvasRenderScale(availableWidth: number, availableHeight: number, devicePixelRatio = 1, logicalWidth = 340, logicalHeight = 450): number {
+  const layoutScale = Math.min(availableWidth / logicalWidth, availableHeight / logicalHeight);
   const deviceScale = Math.min(2, Math.max(1, devicePixelRatio || 1));
   return Math.max(1, Math.min(3, layoutScale * deviceScale));
 }
@@ -162,6 +162,16 @@ export function getPlayerForwardDirection(
 
 export function getCameraYForAction(focusY: number, viewHeight: number, pitch: number): number {
   return focusY - (viewHeight * 0.5 / pitch);
+}
+
+export function getSideScrollCameraYForLineOfScrimmage(
+  lineOfScrimmageY: number,
+  viewWidth: number,
+  pitch: number,
+  userOnOffense: boolean
+): number {
+  const lineScreenFraction = userOnOffense ? 0.34 : 0.40;
+  return lineOfScrimmageY - (viewWidth * (1 - lineScreenFraction) / pitch);
 }
 
 export interface GameEngineCallbacks {
@@ -250,8 +260,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   const receiverHitPadding = touchOptimized ? 30 : 20;
 
   const fieldWidth = 340;
-  const logicalCanvasWidth = fieldWidth;
-  const logicalCanvasHeight = 450;
+  const logicalCanvasWidth = 450;
+  const logicalCanvasHeight = 340;
   const fieldHeight = 1200;
   const endZoneHeight = 100;
   const cameraRunoff = 225;
@@ -270,7 +280,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   })();
 
   function getCameraPitchFactor(): number {
-    return cameraPerspectiveMode === 'THREE_QUARTER' ? 0.72 : 1.0;
+    return 1.0;
   }
 
   function setCameraPerspective(mode: CameraPerspectiveMode) {
@@ -307,8 +317,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     const canvasX = (clientX - rect.left) * (logicalCanvasWidth / rect.width);
     const canvasY = (clientY - rect.top) * (logicalCanvasHeight / rect.height);
     const pitch = getCameraPitchFactor();
-    const wx = (canvasX - cameraOffsetX) / cameraScale;
-    const wy = (canvasY / (cameraScale * pitch)) + cameraY;
+    const wx = (canvasY / cameraScale) - cameraOffsetX;
+    const wy = cameraY + ((logicalCanvasWidth - canvasX) / (cameraScale * pitch));
     return { x: wx, y: wy };
   }
 
@@ -1189,8 +1199,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   function getScreenCoords(clientX: number, clientY: number): { x: number; y: number } {
     const rect = canvas!.getBoundingClientRect();
     return {
-      x: (clientX - rect.left) * (fieldWidth / rect.width),
-      y: (clientY - rect.top) * (450 / rect.height)
+      x: (clientX - rect.left) * (logicalCanvasWidth / rect.width),
+      y: (clientY - rect.top) * (logicalCanvasHeight / rect.height)
     };
   }
 
@@ -2503,8 +2513,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     assignRosterPlayers();
 
     cameraY = Math.max(cameraWorldTop, Math.min(
-      cameraWorldBottom - 450,
-      getCameraYForLineOfScrimmage(lineOfScrimmageY, 450, getCameraPitchFactor(), activeOffense === 'P1')
+      cameraWorldBottom - logicalCanvasWidth,
+      getSideScrollCameraYForLineOfScrimmage(lineOfScrimmageY, logicalCanvasWidth, getCameraPitchFactor(), activeOffense === 'P1')
     ));
     setDownDistanceText(`KICKOFF - ${kickTeam.name.toUpperCase()} KICKING`);
     setIsKickoffState?.(true, kickingTeam, receivingTeam);
@@ -2815,8 +2825,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     qb.jukeTimer = 0;
     qb.hasBall = false;
     cameraY = Math.max(cameraWorldTop, Math.min(
-      cameraWorldBottom - 450,
-      getCameraYForLineOfScrimmage(lineOfScrimmageY, 450, getCameraPitchFactor(), activeOffense === 'P1')
+      cameraWorldBottom - logicalCanvasWidth,
+      getSideScrollCameraYForLineOfScrimmage(lineOfScrimmageY, logicalCanvasWidth, getCameraPitchFactor(), activeOffense === 'P1')
     ));
     updateDownDisplay();
 
@@ -4058,12 +4068,14 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
   function publishLocalOnlineInput(): void {
     if (!onlineGuestControlsP2 || onlinePlayerSide !== 'P2') return;
-    let dx = joystick.active ? joystick.inputX : 0;
-    let dy = joystick.active ? joystick.inputY : 0;
-    if (keysDown.left) dx -= 1;
-    if (keysDown.right) dx += 1;
-    if (keysDown.up) dy -= 1;
-    if (keysDown.down) dy += 1;
+    let screenX = joystick.active ? joystick.inputX : 0;
+    let screenY = joystick.active ? joystick.inputY : 0;
+    if (keysDown.left) screenX -= 1;
+    if (keysDown.right) screenX += 1;
+    if (keysDown.up) screenY -= 1;
+    if (keysDown.down) screenY += 1;
+    let dx = screenX;
+    let dy = screenY;
     const magnitude = Math.hypot(dx, dy);
     if (magnitude > 1) {
       dx /= magnitude;
@@ -4081,17 +4093,22 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     const shouldUseRemote = onlineGuestControlsP2 && onlinePlayerSide === 'P1' && controlledSide === 'P2';
     if (!isLocalSide && !shouldUseRemote) return { x: 0, y: 0, active: false };
 
-    let x = shouldUseRemote
-      ? remoteJoystick.active ? remoteJoystick.dx : 0
-      : joystick.active ? joystick.inputX : 0;
-    let y = shouldUseRemote
-      ? remoteJoystick.active ? remoteJoystick.dy : 0
-      : joystick.active ? joystick.inputY : 0;
-    if (!shouldUseRemote) {
-      if (keysDown.left) x -= 1;
-      if (keysDown.right) x += 1;
-      if (keysDown.up) y -= 1;
-      if (keysDown.down) y += 1;
+    let x: number;
+    let y: number;
+    if (shouldUseRemote) {
+      const screenX = remoteJoystick.active ? remoteJoystick.dx : 0;
+      const screenY = remoteJoystick.active ? remoteJoystick.dy : 0;
+      x = screenY;
+      y = -screenX;
+    } else {
+      let screenX = joystick.active ? joystick.inputX : 0;
+      let screenY = joystick.active ? joystick.inputY : 0;
+      if (keysDown.left) screenX -= 1;
+      if (keysDown.right) screenX += 1;
+      if (keysDown.up) screenY -= 1;
+      if (keysDown.down) screenY += 1;
+      x = screenY;
+      y = -screenX;
     }
     const mag = Math.hypot(x, y);
     if (mag > 1) {
@@ -4119,13 +4136,13 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   function worldToCanvas(wx: number, wy: number): { x: number; y: number } {
     const pitch = getCameraPitchFactor();
     return {
-      x: (wx * cameraScale) + cameraOffsetX,
-      y: (wy - cameraY) * (cameraScale * pitch)
+      x: logicalCanvasWidth - ((wy - cameraY) * (cameraScale * pitch)),
+      y: (wx + cameraOffsetX) * cameraScale
     };
   }
 
   function getJoystickAnchor(): { x: number; y: number } {
-    return getOffenseJoystickAnchor(288, logicalCanvasWidth);
+    return { x: 84, y: logicalCanvasHeight - 76 };
   }
 
   function activateJoystick(pointerId: number, origin: { x: number; y: number }): void {
@@ -4667,8 +4684,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       const dx = joystick.currentX - joystick.baseX;
       const dy = joystick.currentY - joystick.baseY;
       const rawDist = Math.hypot(dx, dy);
-      const MAX_RADIUS = OFFENSE_JOYSTICK_RADIUS * (logicalCanvasWidth / 340);
-      const DEADZONE = 5 * (logicalCanvasWidth / 340);
+      const MAX_RADIUS = OFFENSE_JOYSTICK_RADIUS;
+      const DEADZONE = 5;
 
       if (rawDist > DEADZONE) {
         const clampedDist = Math.min(MAX_RADIUS, rawDist);
@@ -5024,8 +5041,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     if (focusY === undefined) return;
 
     const targetCameraY = Math.max(cameraWorldTop, Math.min(
-      cameraWorldBottom - logicalCanvasHeight,
-      getCameraYForAction(focusY, logicalCanvasHeight, getCameraPitchFactor())
+      cameraWorldBottom - logicalCanvasWidth,
+      getCameraYForAction(focusY, logicalCanvasWidth, getCameraPitchFactor())
     ));
     cameraY += (targetCameraY - cameraY) * 0.12;
   }
@@ -7608,13 +7625,13 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
   function drawHelmet(entity: Entity, design: HelmetDesign, forwardDirection: number, faceForwardDirection = false) {
     ctx!.save();
-    if (cameraPerspectiveMode === 'THREE_QUARTER') {
-      ctx!.translate(entity.x, entity.y);
-      ctx!.scale(1, 1 / 0.72);
-      ctx!.translate(-entity.x, -entity.y);
-    }
     const buildScale = entity.player ? 0.94 + (entity.player.ratings.power - 30) / 65 * 0.14 : 1;
-    drawHelmetSprite(ctx!, entity, design, forwardDirection, (touchOptimized ? 1.23 : 1.08) * buildScale, cameraPerspectiveMode, faceForwardDirection);
+    ctx!.translate(entity.x, entity.y);
+    ctx!.rotate(-Math.PI / 2);
+    ctx!.translate(-entity.x, -entity.y);
+    drawHelmetSprite(ctx!, { ...entity, vx: -forwardDirection, vy: 0 }, design, forwardDirection, (touchOptimized ? 1.23 : 1.08) * buildScale, 'THREE_QUARTER', faceForwardDirection);
+    ctx!.restore();
+    ctx!.save();
     if (entity.stamina !== undefined) {
       const stamina = entity.stamina;
       ctx!.fillStyle = '#171717';
@@ -7625,14 +7642,40 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     ctx!.restore();
   }
 
+  function drawPlayerBody(entity: Entity, uniformColor: string) {
+    const stride = Math.sin(Date.now() * 0.025 + entity.x) * Math.min(2.5, Math.abs(entity.vy || 0));
+    ctx!.save();
+    ctx!.fillStyle = 'rgba(0, 0, 0, 0.35)';
+    ctx!.beginPath();
+    ctx!.ellipse(entity.x + 13, entity.y + 2, 5, 8, 0, 0, Math.PI * 2);
+    ctx!.fill();
+
+    ctx!.strokeStyle = '#17211e';
+    ctx!.lineWidth = 3.5;
+    ctx!.lineCap = 'round';
+    ctx!.beginPath();
+    ctx!.moveTo(entity.x + 12, entity.y - 2);
+    ctx!.lineTo(entity.x + 17, entity.y - 5 + stride);
+    ctx!.moveTo(entity.x + 12, entity.y + 2);
+    ctx!.lineTo(entity.x + 17, entity.y + 5 - stride);
+    ctx!.stroke();
+
+    ctx!.fillStyle = uniformColor;
+    ctx!.beginPath();
+    ctx!.ellipse(entity.x + 8, entity.y, 7, 6, 0, 0, Math.PI * 2);
+    ctx!.fill();
+    ctx!.strokeStyle = '#f1ead0';
+    ctx!.lineWidth = 1.5;
+    ctx!.beginPath();
+    ctx!.moveTo(entity.x + 7, entity.y - 4);
+    ctx!.lineTo(entity.x + 7, entity.y + 4);
+    ctx!.stroke();
+    ctx!.restore();
+  }
+
   function drawGoalPost(postY: number, isTopEnd: boolean) {
     if (!ctx) return;
     ctx.save();
-    if (cameraPerspectiveMode === 'THREE_QUARTER') {
-      ctx.translate(GOALPOST_CENTER_X, postY);
-      ctx.scale(1, 1 / 0.72);
-      ctx.translate(-GOALPOST_CENTER_X, -postY);
-    }
     const centerX = GOALPOST_CENTER_X; // 170
     const leftX = GOALPOST_LEFT_UPRIGHT_X; // 151
     const rightX = GOALPOST_RIGHT_UPRIGHT_X; // 189
@@ -7716,11 +7759,6 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
   function drawFootball(x: number, y: number, rotation: number, size = 8) {
     ctx!.save();
-    if (cameraPerspectiveMode === 'THREE_QUARTER') {
-      ctx!.translate(x, y);
-      ctx!.scale(1, 1 / 0.72);
-      ctx!.translate(-x, -y);
-    }
     ctx!.translate(x, y);
     ctx!.rotate(rotation);
     const leather = ctx!.createLinearGradient(0, -size * 0.6, 0, size * 0.6);
@@ -7778,6 +7816,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
     // Apply dynamic camera scale and centering translation
     const pitch = getCameraPitchFactor();
+    ctx.translate(logicalCanvasWidth, 0);
+    ctx.rotate(Math.PI / 2);
     ctx.translate(cameraOffsetX, 0);
     ctx.scale(cameraScale, cameraScale * pitch);
     ctx.translate(0, -cameraY);
@@ -7915,6 +7955,10 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       const teamKey = entity.team || (defaultRole === 'offense' ? activeOffense : activeDefense);
       return teamKey === 'P1' ? p1Helmet : p2Helmet;
     };
+    const getEntityUniformColor = (entity: Entity, defaultRole: 'offense' | 'defense') => {
+      const teamKey = entity.team || (defaultRole === 'offense' ? activeOffense : activeDefense);
+      return teamKey === 'P1' ? p1Team.primaryColor : p2Team.primaryColor;
+    };
     const getEntityForwardDirection = (entity: Entity, defaultRole: 'offense' | 'defense') =>
       getPlayerForwardDirection(
         entity.team,
@@ -7952,6 +7996,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     playersByDepth
       .sort((first, second) => first.entity.y - second.entity.y)
       .forEach(({ entity, role, forwardDirection }) => {
+        drawPlayerBody(entity, getEntityUniformColor(entity, role));
         drawHelmet(entity, getEntityHelmet(entity, role), forwardDirection, entity === qb && (phase === 'PRE_SNAP' || phase === 'QB_DROP'));
       });
 
@@ -8827,8 +8872,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     const showJoystickHint = phase === 'PRE_SNAP' && (activeOffense === 'P1' || activeDefense === 'P1');
     if (joystick.alpha > 0.01 || showJoystickHint) {
       ctx.save();
-      const MAX_RADIUS = OFFENSE_JOYSTICK_RADIUS * (logicalCanvasWidth / 340);
-      const KNOB_RADIUS = 20 * (logicalCanvasWidth / 340);
+      const MAX_RADIUS = OFFENSE_JOYSTICK_RADIUS;
+      const KNOB_RADIUS = 20;
       const alpha = joystick.alpha > 0.01 ? joystick.alpha : 0.42;
       const joystickAnchor = getJoystickAnchor();
       const baseX = joystick.active ? joystick.baseX : joystickAnchor.x;

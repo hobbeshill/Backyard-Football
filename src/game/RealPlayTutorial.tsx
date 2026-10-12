@@ -5,14 +5,14 @@ import { ProPlaybookCards } from './ProPlaybookCards';
 
 const steps = [
   ['Offense', 'Choose a Pro play card', 'Read down and distance at the top of the playbook. Pick a passing play; long routes stretch coverage and blue short routes offer checkdowns. The RB stays in pass protection.'],
-  ['Offense', 'Snap the ball', 'Touch the joystick area in the lower-left corner to snap. On keyboard, press Space, WASD, or an arrow key.'],
+  ['Offense', 'Snap the ball', 'Touch the field to snap. Drag left or right to run downfield and up or down to move across the field. On keyboard, press Space to snap.'],
   ['Offense', 'Throw the ball', 'Tap an eligible receiver to pass, or drag back from the QB and release. Look for an open target; use a short checkdown if deep coverage holds.'],
   ['Offense', 'Finish the play', 'The live pass and tackle rules resolve the play. After a catch, drag the joystick to steer your runner.'],
   ['Defense', 'Choose a defensive scheme card', 'Pick a scheme from the Pro playbook. Deep zones protect against long passes; man coverage and pressure attack shorter plays.'],
-  ['Defense', 'Start the defensive play', 'Touch the lower-left joystick to start. Pro mode assigns your teammates from the chosen scheme; you control the highlighted free defender once the play starts. Space, WASD, and arrows also start the play.'],
-  ['Defense', 'Control the free defender', 'Drag the joystick or use WASD / arrows to move the highlighted defender. Tap or quickly swipe the field to dive-tackle; Space also dives on defense.'],
+  ['Defense', 'Start the defensive play', 'Touch the field to start. Pro mode assigns your teammates from the chosen scheme; you control the highlighted free defender once the play starts. Space also starts the play.'],
+  ['Defense', 'Control the free defender', 'Drag left or right to run along the field and up or down to move across it. Tap or quickly swipe the field to dive-tackle; Space also dives on defense.'],
   ['Special teams', 'Choose a kick from the playbook', 'Punt and Field Goal are in the offensive Pro playbook, not the pause menu. Open the playbook below. Punt is available on fourth down; field goals show the attempt distance.'],
-  ['Special teams', 'Execute your kick', 'For a field goal, lock direction first, then power. For a punt, touch the lower-left joystick or press Space to launch.'],
+  ['Special teams', 'Execute your kick', 'For a field goal, lock direction first, then power. For a punt, touch the field or press Space to launch.'],
   ['Complete', 'Ready for Pro football', 'You called plays, used a checkdown-ready offense, chose a defense, controlled the free defender, and tried special teams. Choose One Game, Season, or the Dynasty preview, then your teams.']
 ];
 
@@ -53,7 +53,7 @@ export function RealPlayTutorial({ onFinish }: { onFinish: () => void }) {
   const [side, title, instruction] = steps[step] || steps[9];
   return (
     <section role="dialog" aria-modal="true" aria-labelledby="real-tutorial-title" className="fixed inset-0 z-[140] flex items-center justify-center overflow-hidden bg-[#07110a] text-white">
-      <canvas ref={canvasRef} aria-label="Live tutorial football field" className="block h-auto! w-[min(95vw,71dvh,600px)]! touch-none border-2 border-white" style={{ aspectRatio: '340 / 450' }} />
+      <canvas ref={canvasRef} aria-label="Live tutorial football field" className="block h-auto! w-[min(95vw,71dvh,900px)]! touch-none border-2 border-white" style={{ aspectRatio: '450 / 340' }} />
       <div className="pointer-events-none absolute inset-x-0 top-0 z-10 mx-auto w-full max-w-xl bg-white/95 text-[#1b3026] shadow-lg">
         <header className="flex items-center justify-between gap-3 px-3 py-1">
           <span className="text-xs font-bold text-[#246344]">Tutorial · {side} · {Math.min(step + 1, steps.length)}/{steps.length}</span>

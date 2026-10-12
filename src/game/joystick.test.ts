@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { FIELD_NUMBERS_INNER_EDGE_X, getCanvasRenderScale, getCameraYForAction, getCameraYForLineOfScrimmage, getOffenseJoystickAnchor, getPlayerForwardDirection, isOffenseJoystickStartZone, mountFootballGame, OFFENSE_JOYSTICK_INNER_RING_RADIUS, OFFENSE_JOYSTICK_RADIUS, type GameEngineHandle } from './engine';
+import { FIELD_NUMBERS_INNER_EDGE_X, getCanvasRenderScale, getCameraYForAction, getCameraYForLineOfScrimmage, getSideScrollCameraYForLineOfScrimmage, getOffenseJoystickAnchor, getPlayerForwardDirection, isOffenseJoystickStartZone, mountFootballGame, OFFENSE_JOYSTICK_INNER_RING_RADIUS, OFFENSE_JOYSTICK_RADIUS, type GameEngineHandle } from './engine';
 import { createSimulationClock, getDesignedRunLateralBias, getDirectionalInput, getRunLaneOptions, getScreenEdgeTargetPosition, getUserRunnerVelocity } from './movement';
 import { TEAMS } from './teams';
 import { getPlayerSpeedMultiplier } from './roster';
@@ -16,6 +16,11 @@ test('camera raises the offensive line of scrimmage while retaining defensive fr
 
   assert.ok(Math.abs(getScreenFraction(true) - (0.68 - (100 * pitch / viewHeight))) < 0.000001);
   assert.ok(Math.abs(getScreenFraction(false) - 1 / 3) < 0.000001);
+});
+
+test('side-scroll camera places the line of scrimmage left of center with room ahead', () => {
+  const cameraY = getSideScrollCameraYForLineOfScrimmage(600, 450, 1, true);
+  assert.ok(Math.abs(450 - (600 - cameraY) - 153) < 0.000001);
 });
 
 test('idle joystick marker stays inside the field numbers at the RB formation depth', () => {
@@ -79,6 +84,7 @@ test('canvas backing resolution follows display scale with a bounded pixel ratio
   assert.equal(getCanvasRenderScale(340, 450, 2), 2);
   assert.equal(getCanvasRenderScale(680, 900, 2), 3);
   assert.equal(getCanvasRenderScale(170, 225, 1), 1);
+  assert.equal(getCanvasRenderScale(450, 340, 2, 450, 340), 2);
 });
 
 test('simulation runs at 60 Hz regardless of display refresh rate', () => {
@@ -132,11 +138,11 @@ function createMockCanvas(): HTMLCanvasElement & { _listeners: Map<string, Event
   };
 
   const canvas = {
-    width: 340,
-    height: 450,
+    width: 450,
+    height: 340,
     style: {},
     getContext: () => drawingContext,
-    getBoundingClientRect: () => ({ left: 0, top: 0, width: 340, height: 450 } as DOMRect),
+    getBoundingClientRect: () => ({ left: 0, top: 0, width: 450, height: 340 } as DOMRect),
     addEventListener: (type: string, listener: EventListener) => listeners.set(type, listener),
     removeEventListener: (type: string) => listeners.delete(type),
     _listeners: listeners,
@@ -242,14 +248,14 @@ test('online guest controls the selected P2 team on offense and defense', () => 
     game.applyRemoteAction?.({ type: 'DEFENDER', index: 6 });
     const defender = game.getDefenders?.()[6];
     assert.ok(defender);
-    const defenderXBefore = defender.x;
+    const defenderYBefore = defender.y;
     game.applyRemoteInput?.(1, 0, true);
     game.startPlay?.();
     for (let frame = 0; frame < 8; frame++) {
       timestamp += 1000 / 60;
       nextFrame(timestamp);
     }
-    assert.ok(defender.x > defenderXBefore, 'Guest input should move the P2 defender while P1 has the ball');
+    assert.notEqual(defender.y, defenderYBefore, 'Guest input should move the P2 defender while P1 has the ball');
 
     game.applyRemoteInput?.(0, 0, false);
     game.setPossessionForTest?.('P1');
@@ -566,7 +572,7 @@ test('relative joystick controls QB in pocket and does not interfere with tappin
     upHandler({ clientX: 180, clientY: 100, pointerId: 9 } as PointerEvent);
 
     // The joystick zone below the RB starts the play and stays with this touch.
-    downHandler({ clientX: 90, clientY: 364, pointerId: 10 } as PointerEvent);
+    downHandler({ clientX: 90, clientY: 264, pointerId: 10 } as PointerEvent);
     assert.equal(game.phase, 'QB_DROP');
     assert.equal(game.isJoystickActiveForTest?.(), true);
     // Drag joystick up and right
@@ -600,7 +606,7 @@ test('joystick floats at the touch origin and steers relative to it on scaled di
     for (const scale of [1, 2]) {
       const canvas = createMockCanvas();
       const rect = canvas.getBoundingClientRect();
-      canvas.getBoundingClientRect = () => ({ ...rect, width: 340 * scale, height: 450 * scale });
+      canvas.getBoundingClientRect = () => ({ ...rect, width: 450 * scale, height: 340 * scale });
       const ctx = canvas.getContext('2d');
       assert.ok(ctx);
       const arcs: { x: number; y: number; radius: number }[] = [];
@@ -619,8 +625,8 @@ test('joystick floats at the touch origin and steers relative to it on scaled di
         game.setPossessionForTest?.('P1');
         game.selectOffense('SHORT_PASS');
         game.resetDrill();
-        canvas.width = 340 * scale;
-        canvas.height = 450 * scale;
+        canvas.width = 450 * scale;
+        canvas.height = 340 * scale;
         const listeners = (canvas as HTMLCanvasElement & { _listeners: Map<string, EventListener> })._listeners;
         const down = listeners.get('pointerdown');
         const move = listeners.get('pointermove');
@@ -629,33 +635,33 @@ test('joystick floats at the touch origin and steers relative to it on scaled di
         const pointer = (x: number, y: number) =>
           ({ clientX: x * scale, clientY: y * scale, pointerId: 10 } as PointerEvent);
 
-        down(pointer(10, 440));
+        down(pointer(10, 320));
         assert.equal(game.phase, 'QB_DROP');
         assert.equal(game.isJoystickActiveForTest?.(), true);
-        move(pointer(10, 440));
+        move(pointer(10, 320));
         nextFrame(0);
         assert.deepEqual(arcs.slice(-3), [
-          { x: 10, y: 440, radius: OFFENSE_JOYSTICK_RADIUS },
-          { x: 10, y: 440, radius: OFFENSE_JOYSTICK_INNER_RING_RADIUS },
-          { x: 10, y: 440, radius: 20 }
+          { x: 10, y: 320, radius: OFFENSE_JOYSTICK_RADIUS },
+          { x: 10, y: 320, radius: OFFENSE_JOYSTICK_INNER_RING_RADIUS },
+          { x: 10, y: 320, radius: 20 }
         ], 'A stationary touch stays neutral and draws the original-size stick at the touch');
 
-        move(pointer(10, 420));
+        move(pointer(10, 300));
         nextFrame(0);
         const knob = arcs.at(-1);
         assert.ok(knob);
         assert.ok(Math.abs(knob.x - 10) < 0.000001);
-        assert.ok(Math.abs(knob.y - (440 - (15 / 41) * 40)) < 0.000001,
+        assert.ok(Math.abs(knob.y - (320 - (15 / 41) * 40)) < 0.000001,
           'Steering uses logical coordinates, independent of display and backing resolution');
-        up(pointer(10, 420));
+        up(pointer(10, 300));
         assert.equal(game.isJoystickActiveForTest?.(), false);
 
-        down(pointer(170, 440));
+        down(pointer(10, 320));
         assert.equal(game.isJoystickActiveForTest?.(), true, 'The expanded area also works during live play');
         nextFrame(0);
-        assert.deepEqual(arcs.at(-1), { x: 170, y: 440, radius: 20 },
+        assert.deepEqual(arcs.at(-1), { x: 10, y: 320, radius: 20 },
           'A new touch establishes a new floating origin');
-        up(pointer(170, 440));
+        up(pointer(10, 320));
       } finally {
         cleanup?.();
       }
@@ -855,12 +861,12 @@ test('P1 can steer the return man after fielding a kickoff', () => {
     } as PointerEvent);
     advanceFrame();
 
-    assert.ok(returner.x > xBeforeInput, 'A rightward joystick drag should move the returner right');
+    assert.ok(returner.y < yBeforeInput, 'A rightward joystick drag should move downfield to screen right');
     assert.ok((returner.y - yBeforeInput) * game.attackDirection > 0, 'A lateral drag still preserves forward return progress');
     canvas._listeners.get('pointercancel')?.({ clientX: 140, clientY: 220, pointerId: 7 } as PointerEvent);
     assert.equal(game.isJoystickActiveForTest?.(), false, 'Pointer cancellation releases returner control');
 
-    const xBeforeReverse = returner.x;
+    const yBeforeReverse = returner.y;
     canvas._listeners.get('pointerdown')?.({
       clientX: 160, clientY: 220, pointerId: 8, preventDefault: () => {}
     } as PointerEvent);
@@ -868,7 +874,7 @@ test('P1 can steer the return man after fielding a kickoff', () => {
       clientX: 120, clientY: 220, pointerId: 8
     } as PointerEvent);
     advanceFrame();
-    assert.ok(returner.x < xBeforeReverse, 'The returner must reverse left even while blockers pursue coverage');
+    assert.ok(returner.y > yBeforeReverse, 'The returner must reverse left even while blockers pursue coverage');
     canvas._listeners.get('pointerup')?.({ clientX: 120, clientY: 220, pointerId: 8 } as PointerEvent);
   } finally {
     cleanup?.();
@@ -1014,13 +1020,13 @@ test('guest native input cannot steer the host-controlled P1 quarterback', () =>
     game.applyNetworkSnapshot?.(snapshot);
     const guestDefender = game.getControlledDefender?.();
     assert.ok(guestDefender);
-    const defenderXBefore = guestDefender.x;
+    const defenderYBefore = guestDefender.y;
     game.applyLocalInput?.(1, 0, true);
     for (let frame = 0; frame < 8; frame++) advanceFrame();
     const after = game.getNetworkSnapshot?.().entities.qb.data;
     assert.equal(after.x, expectedQb.x, 'Guest defensive direction must not alter the host QB x-position');
     assert.ok(Math.abs(after.y - expectedQb.y) < 1.5, 'Guest defensive direction must not alter the host QB dropback');
-    assert.ok(guestDefender.x > defenderXBefore, 'The same guest input should move the controlled defender');
+    assert.notEqual(guestDefender.y, defenderYBefore, 'The same guest input should move the controlled defender');
 
   } finally {
     cleanup?.();
@@ -1136,12 +1142,12 @@ test('host remote defense input moves P2 defenders without changing the P1 QB pa
     game.applyNetworkSnapshot?.(snapshot);
     const p2Defender = game.getDefenders?.()[6];
     assert.ok(p2Defender);
-    const defenderX = p2Defender.x;
+    const defenderY = p2Defender.y;
     game.applyRemoteInput?.(1, 0, true);
     for (let frame = 0; frame < 10; frame++) advanceFrame();
     const defended = game.getNetworkSnapshot?.();
     assert.ok(defended);
-    assert.ok(p2Defender.x > defenderX, 'Host applies invited P2 defensive direction to the P2 defender');
+    assert.notEqual(p2Defender.y, defenderY, 'Host applies invited P2 defensive direction to the P2 defender');
     assert.equal(defended.entities.qb.data.x, qbPath.x, 'Remote defense input must not steer the P1 quarterback');
     assert.ok(Math.abs(defended.entities.qb.data.y - qbPath.y) < 1.5, 'Remote defense input must not change QB dropback timing');
   } finally {
@@ -1235,14 +1241,14 @@ test('native edge target can throw to a Go-route receiver beyond the viewport', 
     manDefender.assignedReceiver = routeReceiver;
 
     let receiver = game.getReceiverScreenPositionForTest?.(0);
-    for (let frame = 0; frame < 1600 && receiver && receiver.y >= 0 && receiver.y <= 450; frame++) {
+    for (let frame = 0; frame < 1600 && receiver && receiver.x >= 0 && receiver.x <= 450; frame++) {
       advanceFrame();
       receiver = game.getReceiverScreenPositionForTest?.(0);
     }
     assert.ok(receiver);
-    assert.ok(receiver.y < 0 || receiver.y > 450, 'Go-route receiver should continue beyond the visible field');
-    assert.ok(Math.abs(manDefender.y - routeReceiver.y) < 50, 'Man coverage should stay with the receiver through the deep route');
-    const edge = getScreenEdgeTargetPosition(receiver.x, receiver.y, 340, 450);
+    assert.ok(receiver.x < 0 || receiver.x > 450, 'Go-route receiver should continue beyond the visible field');
+    assert.ok(Math.abs(manDefender.y - routeReceiver.y) < 50, `Man coverage should stay with the receiver through the deep route (${manDefender.y}, ${routeReceiver.y})`);
+    const edge = getScreenEdgeTargetPosition(receiver.x, receiver.y, 450, 340);
     assert.ok(edge);
     canvas._listeners.get('pointerdown')?.({
       clientX: edge.x, clientY: edge.y, pointerId: 11, preventDefault: () => {}
@@ -1422,15 +1428,14 @@ test('controlled player speed matches teammate speed scale', () => {
     const downHandler = (canvas as any)._listeners.get('pointerdown');
     const moveHandler = (canvas as any)._listeners.get('pointermove');
     const upHandler = (canvas as any)._listeners.get('pointerup');
-    downHandler({ clientX: 90, clientY: 364, pointerId: 1 } as PointerEvent);
-    upHandler({ clientX: 90, clientY: 364, pointerId: 1 } as PointerEvent);
+    downHandler({ clientX: 90, clientY: 264, pointerId: 1 } as PointerEvent);
+    upHandler({ clientX: 90, clientY: 264, pointerId: 1 } as PointerEvent);
     assert.equal(game.phase, 'QB_DROP');
 
     // Move joystick
-    downHandler({ clientX: 110, clientY: 364, pointerId: 2 } as PointerEvent);
-    moveHandler({ clientX: 140, clientY: 364, pointerId: 2 } as PointerEvent);
-    upHandler({ clientX: 140, clientY: 364, pointerId: 2 } as PointerEvent);
-
+    downHandler({ clientX: 110, clientY: 264, pointerId: 2 } as PointerEvent);
+    moveHandler({ clientX: 140, clientY: 264, pointerId: 2 } as PointerEvent);
+    upHandler({ clientX: 140, clientY: 264, pointerId: 2 } as PointerEvent);
     assert.ok(game.phase === 'QB_DROP' || game.phase === 'RUNNING');
   } finally {
     cleanup?.();
@@ -1563,10 +1568,10 @@ test('assignment defenders can cycle coverage but cannot be moved or controlled'
     assert.equal(game.getControlledDefender?.(), defenders[0]);
 
     downHandler({ clientX: teammateScreenPosition.x, clientY: teammateScreenPosition.y, pointerId: 2 } as PointerEvent);
-    moveHandler({ clientX: teammateScreenPosition.x + 50, clientY: teammateScreenPosition.y + 35, pointerId: 2 } as PointerEvent);
-    upHandler({ clientX: teammateScreenPosition.x + 50, clientY: teammateScreenPosition.y + 35, pointerId: 2 } as PointerEvent);
+    moveHandler({ clientX: teammateScreenPosition.x - 50, clientY: teammateScreenPosition.y, pointerId: 2 } as PointerEvent);
+    upHandler({ clientX: teammateScreenPosition.x - 50, clientY: teammateScreenPosition.y, pointerId: 2 } as PointerEvent);
     assert.deepEqual({ x: teammate.x, y: teammate.y }, initialPosition);
-    assert.equal(teammate.defenseAssignment, 'ZONE', 'Deep backward swipe on assignment defender assigns ZONE coverage without moving the sprite');
+    assert.equal(teammate.defenseAssignment, 'ZONE', 'A screen-left swipe assigns ZONE coverage without moving the sprite');
     assert.equal(game.getControlledDefender?.(), defenders[0]);
   } finally {
     cleanup?.();
@@ -1811,11 +1816,11 @@ test('the shared joystick starts defense, offense, kickoffs, and punts', () => {
 
     const downHandler = (canvas as any)._listeners.get('pointerdown');
     const upHandler = (canvas as any)._listeners.get('pointerup');
-    downHandler({ clientX: 90, clientY: 256, pointerId: 1 } as PointerEvent);
-    upHandler({ clientX: 90, clientY: 256, pointerId: 1 } as PointerEvent);
+    downHandler({ clientX: 90, clientY: 190, pointerId: 1 } as PointerEvent);
+    upHandler({ clientX: 90, clientY: 190, pointerId: 1 } as PointerEvent);
     assert.equal(game.phase, 'PRE_SNAP', 'The defense start area is anchored to the offense joystick position');
-    downHandler({ clientX: 10, clientY: 440, pointerId: 5 } as PointerEvent);
-    upHandler({ clientX: 10, clientY: 440, pointerId: 5 } as PointerEvent);
+    downHandler({ clientX: 10, clientY: 320, pointerId: 5 } as PointerEvent);
+    upHandler({ clientX: 10, clientY: 320, pointerId: 5 } as PointerEvent);
     const phaseAfterDefenseStart: string = game.phase;
     assert.ok(phaseAfterDefenseStart === 'QB_DROP' || phaseAfterDefenseStart === 'HANDOFF', 'The joystick starts the defensive play');
 
@@ -1823,23 +1828,23 @@ test('the shared joystick starts defense, offense, kickoffs, and punts', () => {
     game.setPossessionForTest?.('P1');
     game.resetDrill();
     assert.equal(game.phase, 'PRE_SNAP');
-    downHandler({ clientX: 170, clientY: 440, pointerId: 2 } as PointerEvent);
-    upHandler({ clientX: 170, clientY: 440, pointerId: 2 } as PointerEvent);
+    downHandler({ clientX: 10, clientY: 320, pointerId: 2 } as PointerEvent);
+    upHandler({ clientX: 10, clientY: 320, pointerId: 2 } as PointerEvent);
     const phaseAfterOffenseStart: string = game.phase;
     assert.ok(phaseAfterOffenseStart === 'QB_DROP' || phaseAfterOffenseStart === 'HANDOFF');
 
     game.resetGame();
     assert.equal(game.phase, 'KICKOFF');
-    downHandler({ clientX: 0, clientY: 450, pointerId: 3 } as PointerEvent);
-    upHandler({ clientX: 0, clientY: 450, pointerId: 3 } as PointerEvent);
+    downHandler({ clientX: 0, clientY: 340, pointerId: 3 } as PointerEvent);
+    upHandler({ clientX: 0, clientY: 340, pointerId: 3 } as PointerEvent);
     assert.equal(game.phase, 'THROWN', 'The joystick starts the kickoff');
 
     game.setPossessionForTest?.('P1');
     game.set4thDownForTest?.();
     game.callPunt();
     assert.equal(game.phase, 'PRE_SNAP');
-    downHandler({ clientX: 170, clientY: 450, pointerId: 4 } as PointerEvent);
-    upHandler({ clientX: 170, clientY: 450, pointerId: 4 } as PointerEvent);
+    downHandler({ clientX: 10, clientY: 320, pointerId: 4 } as PointerEvent);
+    upHandler({ clientX: 10, clientY: 320, pointerId: 4 } as PointerEvent);
     assert.equal(game.phase, 'THROWN', 'The joystick starts the punt');
   } finally {
     cleanup?.();
@@ -1927,8 +1932,8 @@ test('defender under user control does not move unless the user moves them', () 
     const upHandler = (canvas as any)._listeners.get('pointerup');
 
     // Start defensive play by tapping the start area
-    downHandler({ clientX: 10, clientY: 440, pointerId: 5 } as PointerEvent);
-    upHandler({ clientX: 10, clientY: 440, pointerId: 5 } as PointerEvent);
+    downHandler({ clientX: 10, clientY: 320, pointerId: 5 } as PointerEvent);
+    upHandler({ clientX: 10, clientY: 320, pointerId: 5 } as PointerEvent);
     assert.notEqual(game.phase, 'PRE_SNAP');
 
     // Defender under user control without active joystick input must not move
@@ -1938,8 +1943,8 @@ test('defender under user control does not move unless the user moves them', () 
     assert.equal(controlledDefender.vy, 0);
 
     // Now user moves with the joystick
-    downHandler({ clientX: 90, clientY: 364, pointerId: 6 } as PointerEvent);
-    moveHandler({ clientX: 130, clientY: 364, pointerId: 6 } as PointerEvent);
+    downHandler({ clientX: 90, clientY: 264, pointerId: 6 } as PointerEvent);
+    moveHandler({ clientX: 130, clientY: 264, pointerId: 6 } as PointerEvent);
 
     assert.equal(game.isJoystickActiveForTest?.(), true);
     upHandler({ clientX: 130, clientY: 364, pointerId: 6 } as PointerEvent);

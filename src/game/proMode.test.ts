@@ -225,9 +225,9 @@ test('User can pick which defender to control before starting the play in Pro mo
     measureText: () => ({ width: 40 }), rotate: () => {}
   };
   const canvas = {
-    width: 340, height: 450, style: {},
+    width: 450, height: 340, style: {},
     getContext: () => drawingContext,
-    getBoundingClientRect: () => ({ left: 0, top: 0, width: 340, height: 450 } as DOMRect),
+    getBoundingClientRect: () => ({ left: 0, top: 0, width: 450, height: 340 } as DOMRect),
     addEventListener: (type: string, listener: EventListener) => listeners.set(type, listener),
     removeEventListener: (type: string) => listeners.delete(type),
     _listeners: listeners
@@ -300,9 +300,9 @@ test('Pro hot route on a run call converts it into a passing play', () => {
     measureText: () => ({ width: 40 }), rotate: () => {}
   };
   const canvas = {
-    width: 340, height: 450, style: {},
+    width: 450, height: 340, style: {},
     getContext: () => drawingContext,
-    getBoundingClientRect: () => ({ left: 0, top: 0, width: 340, height: 450 } as DOMRect),
+    getBoundingClientRect: () => ({ left: 0, top: 0, width: 450, height: 340 } as DOMRect),
     addEventListener: (type: string, listener: EventListener) => listeners.set(type, listener),
     removeEventListener: (type: string) => listeners.delete(type),
     _listeners: listeners
@@ -327,8 +327,8 @@ test('Pro hot route on a run call converts it into a passing play', () => {
     const receiver = game.getReceiverScreenPositionForTest?.(0);
     assert.ok(receiver, 'The outside receiver should be available for route drawing');
     listeners.get('pointerdown')?.({ clientX: receiver.x, clientY: receiver.y, pointerId: 1 } as PointerEvent);
-    listeners.get('pointermove')?.({ clientX: receiver.x + 55, clientY: receiver.y, pointerId: 1 } as PointerEvent);
-    listeners.get('pointerup')?.({ clientX: receiver.x + 55, clientY: receiver.y, pointerId: 1 } as PointerEvent);
+    listeners.get('pointermove')?.({ clientX: receiver.x, clientY: receiver.y + 55, pointerId: 1 } as PointerEvent);
+    listeners.get('pointerup')?.({ clientX: receiver.x, clientY: receiver.y + 55, pointerId: 1 } as PointerEvent);
 
     assert.notEqual(game.p1OffPlay, 'PRO_DRAW');
     assert.equal(offensivePlaybook[game.p1OffPlay].type, 'PASS');

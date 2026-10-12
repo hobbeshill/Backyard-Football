@@ -46,8 +46,8 @@ test('post-play announcements report actual results without Pro matchup commenta
 function createMockCanvas(): HTMLCanvasElement {
   const listeners: Record<string, Function[]> = {};
   return {
-    width: 340,
-    height: 450,
+    width: 450,
+    height: 340,
     getContext: () => ({
       clearRect: () => {},
       fillRect: () => {},
@@ -64,7 +64,7 @@ function createMockCanvas(): HTMLCanvasElement {
       scale: () => {},
       setLineDash: () => {},
       measureText: () => ({ width: 40 }),
-      canvas: { width: 340, height: 450 }
+      canvas: { width: 450, height: 340 }
     }),
     addEventListener: (evt: string, fn: Function) => {
       listeners[evt] = listeners[evt] || [];
