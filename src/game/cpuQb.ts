@@ -61,7 +61,8 @@ export class CPUQuarterbackAI {
       case 'DROPBACK': {
         // Phase 1: Moving backward, completely blind to receivers (locked animation)
         this.executeDropbackMovement(qb, attackDirection);
-        if (this.timer >= this.dropbackDuration) {
+        const pressuredEarly = this.timer >= 0.2 && this.isPressureImminent(passRushers, qb);
+        if (this.timer >= this.dropbackDuration || pressuredEarly) {
           this.state = 'POCKET_DWELL';
           this.timer = 0.0; // Reset timer for the 2.5-second dwell clock
         }
@@ -73,13 +74,16 @@ export class CPUQuarterbackAI {
         this.performSubtlePocketMovement(qb);
         this.updateVisionConeSweep(deltaTime);
 
-        // Scan only receivers inside the restricted vision cone
-        const visibleReceivers = this.getReceiversInVisionCone(receivers, qb, attackDirection);
+        // Scan only receivers inside the restricted vision cone; pressure forces a full-field read
+        const underPressure = this.isPressureImminent(passRushers, qb);
+        const visibleReceivers = underPressure
+          ? receivers.filter(receiver => !receiver.isBlocker && receiver.routeType !== 'BLOCK')
+          : this.getReceiversInVisionCone(receivers, qb, attackDirection);
         this.selectedTarget = this.evaluateBestTarget(visibleReceivers, evaluator, defenders);
 
         // Check pressure or clock expiration
-        if (this.timer >= this.dwellDuration || this.isPressureImminent(passRushers, qb)) {
-          if (this.selectedTarget && this.isReceiverOpen(this.selectedTarget, defenders)) {
+        if (this.timer >= this.dwellDuration || underPressure) {
+          if (this.selectedTarget && this.isReceiverOpen(this.selectedTarget, defenders, underPressure ? 8 : 22)) {
             this.initiateThrow(this.selectedTarget);
           } else {
             // Panic trigger: forced checkdown, throw away, or scramble
@@ -186,17 +190,17 @@ export class CPUQuarterbackAI {
     const qbY = qb?.y ?? 500;
     return passRushers.some(rusher => {
       const dist = Math.hypot(rusher.x - qbX, rusher.y - qbY);
-      return dist < 65 && !rusher.isEngagedWithBlocker;
+      return dist < 125 && !rusher.isEngagedWithBlocker;
     });
   }
 
-  public isReceiverOpen(target: Entity, defenders: Entity[] = []): boolean {
+  public isReceiverOpen(target: Entity, defenders: Entity[] = [], minSeparation = 22): boolean {
     if (target.isOpenDeep || target.coverageMistake) {
       return true;
     }
     if (defenders.length > 0) {
       const nearestDist = defenders.reduce((min, d) => Math.min(min, Math.hypot(d.x - target.x, d.y - target.y)), Infinity);
-      return nearestDist >= 22;
+      return nearestDist >= minSeparation;
     }
     return false;
   }
@@ -212,12 +216,12 @@ export class CPUQuarterbackAI {
     // Roll a random chance to either force a risky throw, check down, or scramble.
     const eligible = receivers.filter(r => !r.isBlocker && r.routeType !== 'BLOCK');
     const roll = Math.random();
-    if (roll < 0.40 && eligible.length > 0) {
+    if (roll < 0.60 && eligible.length > 0) {
       // Force throw to a covered receiver (creates user interceptions / breakups)
       this.selectedTarget = eligible[Math.floor(Math.random() * eligible.length)];
       this.state = 'THROW';
       this.executeThrowWithInaccuracy(this.selectedTarget);
-    } else if (roll < 0.75) {
+    } else if (roll < 0.90) {
       // Safe checkdown to running back
       this.selectedTarget = this.findRunningBack(eligible, rb);
       if (this.selectedTarget) {

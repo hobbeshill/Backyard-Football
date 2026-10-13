@@ -367,11 +367,23 @@ export function isRusherActivelyBlocked(rusher: Entity, blockers: Entity[]): boo
   return Boolean(rusher.isEngagedWithBlocker && blockers.some(blocker => canEngagePassBlock(blocker, rusher)));
 }
 
+export function isBlockerBetween(defender: Entity, runner: Entity, blocker: Entity): boolean {
+  const dx = runner.x - defender.x;
+  const dy = runner.y - defender.y;
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq === 0) return true;
+  const t = ((blocker.x - defender.x) * dx + (blocker.y - defender.y) * dy) / lenSq;
+  if (t < 0 || t > 1) return false;
+  const distance = Math.hypot(blocker.x - (defender.x + t * dx), blocker.y - (defender.y + t * dy));
+  return distance <= (blocker.radius || 12) + (defender.radius || 10) + 6;
+}
+
 export function checkOffensiveLineWall(
   rusher: Entity,
   linemen: Entity[],
   lineOfScrimmageY: number,
-  attackDirection: number
+  attackDirection: number,
+  runner?: Entity | null
 ): boolean {
   if ((rusher.blockShedTimer || 0) > 0) return false;
   if (rusher.isEngagedWithBlocker) return false;
@@ -395,6 +407,7 @@ export function checkOffensiveLineWall(
       ? rusher.y > nearestLineman.y + 2
       : rusher.y < nearestLineman.y - 2;
     if (isPastLineman) return false;
+    if (runner && !linemen.some(l => isBlockerBetween(rusher, runner, l))) return false;
 
     const contactDist = (nearestLineman.radius || 12) + (rusher.radius || 10);
     rusher.isEngagedWithBlocker = true;
@@ -510,7 +523,7 @@ export function resolveCollisions(
       const firstIsUserControlled = userControlledEntities.includes(first);
       const secondIsUserControlled = userControlledEntities.includes(second);
 
-      if (distance < minDistance && (distance > 0 || carrierBlockContact || firstIsUserControlled || secondIsUserControlled)) {
+      if (distance < minDistance) {
         const overlap = minDistance - distance;
         const nx = distance > 0 ? dx / distance : 0;
         const ny = distance > 0 ? dy / distance : 1;
@@ -551,7 +564,9 @@ export function resolveCollisions(
         const firstIsDefender = defenders.includes(first);
         const secondIsDefender = defenders.includes(second);
 
-        if ((firstIsBlocker && secondIsDefender) || (secondIsBlocker && firstIsDefender)) {
+        const shedDefender = firstIsBlocker ? second : first;
+        const hasShed = Boolean(shedDefender.hasShedBlock || (shedDefender.blockShedTimer || 0) > 0);
+        if (!hasShed && ((firstIsBlocker && secondIsDefender) || (secondIsBlocker && firstIsDefender))) {
           const blockingPlayer = firstIsBlocker ? first : second;
           const defendingPlayer = firstIsBlocker ? second : first;
           const pushDirection = firstIsBlocker ? 1 : -1;

@@ -277,8 +277,8 @@ export interface CpuPassReleaseSituation {
 }
 
 export function shouldCpuReleasePass(situation: CpuPassReleaseSituation): boolean {
-  if (!situation.hasTarget || situation.playClock < 60) return false;
   const pressureReactionComplete = situation.isUnderHeavyPressure && (situation.pressureFrames ?? 0) >= 10;
+  if (!situation.hasTarget || situation.playClock < (pressureReactionComplete ? 20 : 60)) return false;
   if (situation.isVerticalPlay) {
     if (pressureReactionComplete) return true;
     const hasDevelopedTarget = (situation.targetDepthYards ?? 0) >= 15 &&

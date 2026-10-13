@@ -1261,7 +1261,7 @@ test('user-controlled defender can sack the quarterback on a pass play', () => {
     assert.equal(userDefender.team, 'P1');
     game.applyLocalInput?.(attackDirection, 0, true);
     assert.equal(game.isJoystickActiveForTest?.(), true);
-    for (let frame = 0; frame < 10 && game.phase === 'QB_DROP'; frame++) advanceFrame();
+    for (let frame = 0; frame < 30 && game.phase === 'QB_DROP'; frame++) advanceFrame();
 
     assert.equal(game.phase, 'DEAD');
     assert.ok((userDefender.defensiveBigPlays || 0) > 0, 'The controlled defender receives credit for the sack');

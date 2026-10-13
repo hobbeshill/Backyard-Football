@@ -567,8 +567,8 @@ test('CPU releases open, pressured, and overdue passes before scrambling', () =>
   assert.equal(shouldCpuReleasePass({ ...situation, hasOpenBreak: true, playClock: 59 }), false);
   assert.equal(shouldCpuReleasePass({ ...situation, hasOpenBreak: true, playClock: 60 }), true);
   assert.equal(shouldCpuReleasePass({ ...situation, isUnderHeavyPressure: true, playClock: 26, pressureFrames: 9 }), false);
-  assert.equal(shouldCpuReleasePass({ ...situation, isUnderHeavyPressure: true, playClock: 59, pressureFrames: 10 }), false);
-  assert.equal(shouldCpuReleasePass({ ...situation, isUnderHeavyPressure: true, playClock: 60, pressureFrames: 10 }), true);
+  assert.equal(shouldCpuReleasePass({ ...situation, isUnderHeavyPressure: true, playClock: 19, pressureFrames: 10 }), false);
+  assert.equal(shouldCpuReleasePass({ ...situation, isUnderHeavyPressure: true, playClock: 20, pressureFrames: 10 }), true);
   assert.equal(shouldCpuReleasePass({ ...situation, playClock: 65 }), false);
   assert.equal(shouldCpuReleasePass({ ...situation, playClock: 66 }), true);
   assert.equal(shouldCpuReleasePass({ ...situation, hasTarget: false, playClock: 66 }), false);
@@ -596,8 +596,8 @@ test('CPU vertical calls wait for downfield windows but escape pressure and even
   assert.equal(shouldCpuReleasePass({ ...situation, playClock: 59, targetDepthYards: 18 }), false);
   assert.equal(shouldCpuReleasePass({ ...situation, playClock: 60, targetDepthYards: 18 }), true);
   assert.equal(shouldCpuReleasePass({ ...situation, playClock: 60, targetDepthYards: 18, targetSeparation: 8 }), false);
-  assert.equal(shouldCpuReleasePass({ ...situation, isUnderHeavyPressure: true, playClock: 59, pressureFrames: 10 }), false);
-  assert.equal(shouldCpuReleasePass({ ...situation, isUnderHeavyPressure: true, playClock: 60, pressureFrames: 10 }), true);
+  assert.equal(shouldCpuReleasePass({ ...situation, isUnderHeavyPressure: true, playClock: 19, pressureFrames: 10 }), false);
+  assert.equal(shouldCpuReleasePass({ ...situation, isUnderHeavyPressure: true, playClock: 20, pressureFrames: 10 }), true);
   assert.equal(shouldCpuReleasePass({ ...situation, playClock: 100 }), false);
   assert.equal(shouldCpuReleasePass({ ...situation, playClock: 200 }), false);
   assert.equal(shouldCpuReleasePass({ ...situation, playClock: 240 }), true);
@@ -2600,7 +2600,7 @@ test('AI QB throws decisively on rhythm and under pressure without freezing in t
     isDeepShotOpportunity: false,
     hasOpenBreak: false,
     isUnderHeavyPressure: true,
-    playClock: 59,
+    playClock: 19,
     pressureFrames: 10,
     bestScore: 10
   });
@@ -2610,7 +2610,7 @@ test('AI QB throws decisively on rhythm and under pressure without freezing in t
     isDeepShotOpportunity: false,
     hasOpenBreak: false,
     isUnderHeavyPressure: true,
-    playClock: 60,
+    playClock: 20,
     pressureFrames: 10,
     bestScore: 10
   }), true, 'AI QB releases once the minimum reaction window passes');
