@@ -839,12 +839,22 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
   let preSnapFieldSwipeStartY = 0;
   let isPullingDefender = false;
   let lastPublishedPhase = '';
+  let lastPublishedTurboMeter = -1;
+  let lastPublishedTurboActive: boolean | null = null;
 
   function publishPhaseIfNeeded() {
     if (lastPublishedPhase !== phase) {
       lastPublishedPhase = phase;
       callbacks.setPhaseState?.(phase);
     }
+  }
+
+  function publishTurboIfNeeded(active: boolean): void {
+    const roundedMeter = Math.round(userTurboMeter);
+    if (roundedMeter === lastPublishedTurboMeter && active === lastPublishedTurboActive) return;
+    lastPublishedTurboMeter = roundedMeter;
+    lastPublishedTurboActive = active;
+    callbacks.onTurboChange?.(roundedMeter, active);
   }
 
   function repositionUserDefender(defender: Entity, targetX: number, targetY: number) {
@@ -2886,7 +2896,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     userTurboMeter = 100;
     userTurboActive = false;
     defenderFlameParticles = [];
-    callbacks.onTurboChange?.(100, false);
+    publishTurboIfNeeded(false);
     isAiming = false;
     gestureEntity = null;
     isDirtGestureActive = false;
@@ -3935,7 +3945,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
     const defender = getControlledDefender();
     if (defender) {
       defender.isTurboActive = active && (userTurboMeter > 0 || Boolean(defender.isOnFire));
-      callbacks.onTurboChange?.(userTurboMeter, Boolean(defender.isTurboActive));
+      publishTurboIfNeeded(Boolean(defender.isTurboActive));
     }
   }
 
@@ -5360,7 +5370,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
           cd.isTurboActive = false;
           userTurboMeter = Math.min(100, userTurboMeter + 0.45);
         }
-        callbacks.onTurboChange?.(Math.round(userTurboMeter), Boolean(cd.isTurboActive));
+        publishTurboIfNeeded(Boolean(cd.isTurboActive));
 
         // Spawn flame / exhaust particles
         if ((cd.isTurboActive || cd.isOnFire) && (cd.vx !== 0 || cd.vy !== 0 || cd.isOnFire)) {

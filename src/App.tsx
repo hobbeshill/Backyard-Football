@@ -1,33 +1,64 @@
-import { useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { Volume2, VolumeX, RefreshCw, HelpCircle, X, Users, Shield, ArrowRight, Search, Pause, Play, Home, Hand, Crosshair, Trophy, Award, RotateCcw, Zap, BookOpen, SlidersHorizontal, Info, Settings, ArrowLeft, Copy, Check } from 'lucide-react';
 import { offensivePlaybook, defensivePlaybook } from './game/playbook';
 import { sounds } from './game/sound';
 import { isLiveBallAnnouncement, shouldShowAnnouncement } from './game/announcements';
 import { createEmptyTeamGameStats, hasSavedGameSession, mountFootballGame, type GameBoxScore, type GameEngineHandle } from './game/engine';
-import { HelmetSpritePreview } from './game/HelmetSpritePreview';
-import { RealPlayTutorial } from './game/RealPlayTutorial';
 import { TEAM_KEYS, TEAMS, getAllTeams, getTeam, type TeamProfile } from './game/teams';
 import { createSeason, getSeasonRecord, loadGameMode, loadSeasonProgress, recordSeasonGame, saveGameMode, saveSeasonProgress, type GameMode, type SeasonProgress } from './game/season';
 import { getRivalryForMatchup, type RivalryGame } from './game/rivalries';
 import type { TacticalMode } from './game/types';
 import { PRO_OFFENSE_PLAYS, PRO_DEFENSE_PLAYS, type ProOffensePlayId, type ProDefensePlayId } from './game/proMode';
-import { TecmoPlaybookCards } from './game/TecmoPlaybookCards';
 import { getTecmoPlaysForTeam } from './game/tecmoPlaybook';
 import { PLAYER_TRAIT_COLORS } from './game/roster';
 import { getTeamPlaybook, getTeamOffensePlays, getTeamDefensePlays } from './game/teamPlaybooks';
-import {
-  createLobby,
-  joinLobby,
-  setLobbyTeam,
-  setLobbyReady,
-  startOnlineMatch,
-  sendGameAction,
-  sendGameInput,
-  sendGameSync,
-  leaveLobby,
-  getMultiplayerSocket,
-  type LobbyRoom
-} from './game/multiplayer';
+import type { LobbyRoom } from './game/multiplayer';
+
+const HelmetSpritePreview = lazy(() => import('./game/HelmetSpritePreview').then(module => ({
+  default: module.HelmetSpritePreview
+})));
+const RealPlayTutorial = lazy(() => import('./game/RealPlayTutorial').then(module => ({
+  default: module.RealPlayTutorial
+})));
+const TecmoPlaybookCards = lazy(() => import('./game/TecmoPlaybookCards').then(module => ({
+  default: module.TecmoPlaybookCards
+})));
+
+type MultiplayerModule = typeof import('./game/multiplayer');
+let loadedMultiplayer: MultiplayerModule | null = null;
+let multiplayerPromise: Promise<MultiplayerModule> | null = null;
+
+function loadMultiplayer(): Promise<MultiplayerModule> {
+  if (loadedMultiplayer) return Promise.resolve(loadedMultiplayer);
+  multiplayerPromise ??= import('./game/multiplayer').then(module => {
+    loadedMultiplayer = module;
+    return module;
+  }).catch(error => {
+    multiplayerPromise = null;
+    throw error;
+  });
+  return multiplayerPromise;
+}
+
+function sendOnlineAction(action: unknown): void {
+  if (loadedMultiplayer) {
+    loadedMultiplayer.sendGameAction(action);
+    return;
+  }
+  void loadMultiplayer()
+    .then(module => module.sendGameAction(action))
+    .catch(error => console.error('Could not load online action support.', error));
+}
+
+function sendOnlineInput(input: unknown): void {
+  if (loadedMultiplayer) {
+    loadedMultiplayer.sendGameInput(input);
+    return;
+  }
+  void loadMultiplayer()
+    .then(module => module.sendGameInput(input))
+    .catch(error => console.error('Could not load online input support.', error));
+}
 
 function getTeamTextStyle(color: string) {
   const hex = color.replace('#', '');
@@ -431,10 +462,10 @@ export default function App() {
       setGameClockState: (quarter, seconds) => setGameClockState({ quarter, seconds }),
       showAnnouncement,
       onOnlineAction: action => {
-        if (onlineRoleRef.current === 'guest') sendGameAction(action);
+        if (onlineRoleRef.current === 'guest') sendOnlineAction(action);
       },
       onOnlineInput: (dx, dy, active) => {
-        if (onlineRoleRef.current === 'guest') sendGameInput({ dx, dy, active });
+        if (onlineRoleRef.current === 'guest') sendOnlineInput({ dx, dy, active });
       },
       onEngineReady: engine => {
         engineRef.current = engine;
@@ -512,8 +543,9 @@ export default function App() {
 
   // Online Multiplayer Socket.io lifecycle
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const socket = getMultiplayerSocket();
+    if (typeof window === 'undefined' || (!showOnlineLobby && !onlineRole)) return;
+    let disposed = false;
+    let removeListeners: (() => void) | undefined;
 
     const onLobbyUpdated = (lobby: LobbyRoom) => {
       setOnlineLobby(lobby);
@@ -588,28 +620,40 @@ export default function App() {
       setOnlineError(data?.message || 'Opponent disconnected');
     };
 
-    socket.on('lobby:updated', onLobbyUpdated);
-    socket.on('match:start', onMatchStart);
-    socket.on('game:action', onGameAction);
-    socket.on('game:input', onGameInput);
-    socket.on('game:sync', onGameSync);
-    socket.on('peer:disconnected', onPeerDisconnected);
+    void loadMultiplayer()
+      .then(module => {
+        if (disposed) return;
+        const socket = module.getMultiplayerSocket();
+        socket.on('lobby:updated', onLobbyUpdated);
+        socket.on('match:start', onMatchStart);
+        socket.on('game:action', onGameAction);
+        socket.on('game:input', onGameInput);
+        socket.on('game:sync', onGameSync);
+        socket.on('peer:disconnected', onPeerDisconnected);
+        removeListeners = () => {
+          socket.off('lobby:updated', onLobbyUpdated);
+          socket.off('match:start', onMatchStart);
+          socket.off('game:action', onGameAction);
+          socket.off('game:input', onGameInput);
+          socket.off('game:sync', onGameSync);
+          socket.off('peer:disconnected', onPeerDisconnected);
+        };
+      })
+      .catch(error => {
+        if (!disposed) setOnlineError(`Online multiplayer failed to load: ${error instanceof Error ? error.message : String(error)}`);
+      });
 
     return () => {
-      socket.off('lobby:updated', onLobbyUpdated);
-      socket.off('match:start', onMatchStart);
-      socket.off('game:action', onGameAction);
-      socket.off('game:input', onGameInput);
-      socket.off('game:sync', onGameSync);
-      socket.off('peer:disconnected', onPeerDisconnected);
+      disposed = true;
+      removeListeners?.();
     };
-  }, []);
+  }, [onlineRole, showOnlineLobby]);
 
   // Host synchronizes authoritative state to guest periodically
   useEffect(() => {
     if (onlineRole !== 'host') return;
     const interval = setInterval(() => {
-      sendGameSync({
+      loadedMultiplayer?.sendGameSync({
         snapshot: engineRef.current?.getNetworkSnapshot?.(),
         userScore,
         cpuScore,
@@ -629,14 +673,20 @@ export default function App() {
     try {
       window.localStorage?.setItem('player_display_name', onlineName);
     } catch {}
-    const res = await createLobby(onlineName, onlineTeamId || p1TeamState.id);
-    setOnlineBusy(false);
-    if (res.success && res.lobby) {
-      setOnlineLobby(res.lobby);
-      setOnlineRole('host');
-      onlineRoleRef.current = 'host';
-    } else {
-      setOnlineError(res.error || 'Failed to create lobby');
+    try {
+      const multiplayer = await loadMultiplayer();
+      const res = await multiplayer.createLobby(onlineName, onlineTeamId || p1TeamState.id);
+      if (res.success && res.lobby) {
+        setOnlineLobby(res.lobby);
+        setOnlineRole('host');
+        onlineRoleRef.current = 'host';
+      } else {
+        setOnlineError(res.error || 'Failed to create lobby');
+      }
+    } catch (error) {
+      setOnlineError(`Online multiplayer failed to load: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setOnlineBusy(false);
     }
   };
 
@@ -647,23 +697,33 @@ export default function App() {
     try {
       window.localStorage?.setItem('player_display_name', onlineName);
     } catch {}
-    const res = await joinLobby(lobbyCodeInput.trim().toUpperCase(), onlineName, onlineTeamId || p2TeamState.id);
-    setOnlineBusy(false);
-    if (res.success && res.lobby) {
-      setOnlineLobby(res.lobby);
-      setOnlineRole('guest');
-      onlineRoleRef.current = 'guest';
-    } else {
-      setOnlineError(res.error || 'Failed to join lobby');
+    try {
+      const multiplayer = await loadMultiplayer();
+      const res = await multiplayer.joinLobby(lobbyCodeInput.trim().toUpperCase(), onlineName, onlineTeamId || p2TeamState.id);
+      if (res.success && res.lobby) {
+        setOnlineLobby(res.lobby);
+        setOnlineRole('guest');
+        onlineRoleRef.current = 'guest';
+      } else {
+        setOnlineError(res.error || 'Failed to join lobby');
+      }
+    } catch (error) {
+      setOnlineError(`Online multiplayer failed to load: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setOnlineBusy(false);
     }
   };
 
   const handleStartOnlineMatch = () => {
-    startOnlineMatch();
+    void loadMultiplayer()
+      .then(module => module.startOnlineMatch())
+      .catch(error => setOnlineError(`Online multiplayer failed to load: ${error instanceof Error ? error.message : String(error)}`));
   };
 
   const handleLeaveOnlineLobby = () => {
-    leaveLobby();
+    void loadMultiplayer()
+      .then(module => module.leaveLobby())
+      .catch(error => console.error('Could not leave online lobby cleanly.', error));
     engineRef.current?.setOnlineGuestControl?.(false);
     engineRef.current?.setOnlinePlayerSide?.('P1');
     engineRef.current?.setNetworkMirror?.(false);
@@ -676,7 +736,7 @@ export default function App() {
   };
 
   const sendRemoteAction = (action: any) => {
-    sendGameAction(action);
+    sendOnlineAction(action);
   };
 
   const selectOnlinePlay = (play: string, onOffense: boolean) => {
@@ -1580,8 +1640,11 @@ export default function App() {
                             <select
                               value={onlineTeamId}
                               onChange={event => {
-                                setOnlineTeamId(event.target.value);
-                                setLobbyTeam(event.target.value);
+                                const teamId = event.target.value;
+                                setOnlineTeamId(teamId);
+                                void loadMultiplayer()
+                                  .then(module => module.setLobbyTeam(teamId))
+                                  .catch(error => setOnlineError(`Could not update team: ${error instanceof Error ? error.message : String(error)}`));
                               }}
                               className="mt-1 w-full rounded border border-white/15 bg-[#142126] px-2 py-1 text-xs text-white"
                             >
@@ -1607,7 +1670,12 @@ export default function App() {
                     <button
                       type="button"
                       disabled={onlineBusy}
-                      onClick={() => setLobbyReady(!onlineLobby.guest?.ready)}
+                      onClick={() => {
+                        const ready = !onlineLobby.guest?.ready;
+                        void loadMultiplayer()
+                          .then(module => module.setLobbyReady(ready))
+                          .catch(error => setOnlineError(`Could not update ready state: ${error instanceof Error ? error.message : String(error)}`));
+                      }}
                       className="w-full rounded-lg bg-emerald-500 px-4 py-3 text-sm font-black uppercase text-[#07110a] hover:bg-emerald-400 active:scale-95 transition cursor-pointer"
                     >
                       {onlineLobby.guest.ready ? 'Cancel Ready' : 'Ready to Play'}
@@ -1761,7 +1829,9 @@ export default function App() {
                           }}
                           className="flex flex-1 items-center gap-1.5 sm:gap-2 text-left text-xs sm:text-sm font-bold min-w-0 cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#246344]"
                         >
-                          <HelmetSpritePreview team={team} />
+                          <Suspense fallback={<span className="h-16 w-14 shrink-0" aria-hidden="true" />}>
+                            <HelmetSpritePreview team={team} />
+                          </Suspense>
                           <span className="team-selector-name min-w-0 truncate text-[11px] sm:text-xs">{team.name}</span>
                           {isActiveSide && (
                             <span className="shrink-0 rounded bg-[#246344] text-white px-1 sm:px-1.5 py-0.5 text-[7px] sm:text-[9px] font-black uppercase ml-auto">
@@ -2296,7 +2366,9 @@ export default function App() {
       )}
 
       {showTutorial && (
-        <RealPlayTutorial onFinish={finishTutorial} />
+        <Suspense fallback={null}>
+          <RealPlayTutorial onFinish={finishTutorial} />
+        </Suspense>
       )}
 
       {showSettings && (
@@ -2320,33 +2392,35 @@ export default function App() {
       )}
 
       {showPlaybookCards && (
-        <TecmoPlaybookCards
-          teamId={onlineRole ? onlinePlayerTeam.id : p1TeamState.id}
-          opposingTeamId={onlineRole ? onlineOpponentTeam.id : p2TeamState.id}
-          isDefense={onlineRole ? !isOnlinePlayerOnOffense : activeOffenseState === 'P2'}
-          activeOffensePlay={onlineRole && isOnlinePlayerOnOffense ? onlineSelectedPlay : p1OffPlayState}
-          activeDefensePlay={onlineRole && !isOnlinePlayerOnOffense ? onlineSelectedPlay : p1DefPlayState}
-          attackDirection={engineRef.current?.attackDirection ?? -1}
-          scoreboard={playbookScoreboard}
-          canPunt={is4thDown}
-          fieldGoalDistance={engineRef.current?.getFieldGoalDistance?.()}
-          onSelectPlay={(playId) => {
-            if (onlineRole) {
-              selectOnlinePlay(playId, isOnlinePlayerOnOffense);
-            } else if (activeOffenseState === 'P1') {
-              handleSelectOffensePlay(playId);
-            } else {
-              handleSelectDefensePlay(playId);
+        <Suspense fallback={null}>
+          <TecmoPlaybookCards
+            teamId={onlineRole ? onlinePlayerTeam.id : p1TeamState.id}
+            opposingTeamId={onlineRole ? onlineOpponentTeam.id : p2TeamState.id}
+            isDefense={onlineRole ? !isOnlinePlayerOnOffense : activeOffenseState === 'P2'}
+            activeOffensePlay={onlineRole && isOnlinePlayerOnOffense ? onlineSelectedPlay : p1OffPlayState}
+            activeDefensePlay={onlineRole && !isOnlinePlayerOnOffense ? onlineSelectedPlay : p1DefPlayState}
+            attackDirection={engineRef.current?.attackDirection ?? -1}
+            scoreboard={playbookScoreboard}
+            canPunt={is4thDown}
+            fieldGoalDistance={engineRef.current?.getFieldGoalDistance?.()}
+            onSelectPlay={(playId) => {
+              if (onlineRole) {
+                selectOnlinePlay(playId, isOnlinePlayerOnOffense);
+              } else if (activeOffenseState === 'P1') {
+                handleSelectOffensePlay(playId);
+              } else {
+                handleSelectDefensePlay(playId);
+              }
+            }}
+            onSelectSpecialTeams={onlineRole
+              ? isOnlinePlayerOnOffense ? playId => selectOnlinePlay(playId, true) : undefined
+              : activeOffenseState === 'P1' ? playId => {
+                handleSelectOffensePlay(playId);
+              } : undefined
             }
-          }}
-          onSelectSpecialTeams={onlineRole
-            ? isOnlinePlayerOnOffense ? playId => selectOnlinePlay(playId, true) : undefined
-            : activeOffenseState === 'P1' ? playId => {
-              handleSelectOffensePlay(playId);
-            } : undefined
-          }
-          onClose={() => setShowPlaybookCards(false)}
-        />
+            onClose={() => setShowPlaybookCards(false)}
+          />
+        </Suspense>
       )}
       {showElitePlaybook && isUserPreSnapPhase && tacticalMode === 'ELITE' && (
         <div className="fixed inset-0 z-[150] flex items-center justify-center bg-black/85 p-4">
