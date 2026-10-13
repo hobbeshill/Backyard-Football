@@ -85,6 +85,10 @@ export function getRunLaneOptions(
   });
 }
 
+export function getCounterRunDirection(runningBackSide: Entity['side']): -1 | 1 {
+  return runningBackSide === 'right' ? -1 : 1;
+}
+
 // Direction-only input: analog sticks and d-pads both produce a unit heading (or none).
 export function getDirectionalInput(x: number, y: number, deadzone = 0.05): { x: number; y: number } {
   const magnitude = Math.hypot(x, y);

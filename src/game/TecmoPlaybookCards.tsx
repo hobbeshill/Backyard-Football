@@ -74,6 +74,10 @@ function MiniRouteDiagram({ play, attackDirection }: { play: TecmoPlayOption; at
             d={
               play.type === 'SWEEP'
                 ? `M 70 ${rbY} Q 40 ${rbY - 5 * direction} 25 ${advance(15)} Q 18 ${advance(40)} 22 ${advance(70)}`
+                : play.type === 'COUNTER'
+                  ? `M 70 ${rbY} Q 92 ${rbY - 4 * direction} 96 ${rbY + 5 * direction} Q 68 ${advance(15)} 52 ${advance(65)}`
+                  : play.type === 'INSIDE_ZONE'
+                    ? `M 70 ${rbY} L 70 ${advance(18)} Q 58 ${advance(36)} 62 ${advance(70)} M 70 ${advance(18)} Q 82 ${advance(36)} 80 ${advance(70)}`
                 : play.type === 'POWER'
                   ? `M 70 ${rbY} Q 75 ${rbY - 11 * direction} 88 ${advance(10)} L 94 ${advance(65)}`
                   : `M 70 ${rbY} Q 74 ${rbY - 11 * direction} 80 ${advance(10)} L 80 ${advance(70)}`
@@ -88,6 +92,10 @@ function MiniRouteDiagram({ play, attackDirection }: { play: TecmoPlayOption; at
             points={
               play.type === 'SWEEP'
                 ? `22,${advance(70)} 18,${advance(62)} 26,${advance(62)}`
+                : play.type === 'COUNTER'
+                  ? `52,${advance(65)} 48,${advance(57)} 56,${advance(57)}`
+                  : play.type === 'INSIDE_ZONE'
+                    ? `62,${advance(70)} 58,${advance(62)} 66,${advance(62)}`
                 : play.type === 'POWER'
                   ? `94,${advance(65)} 90,${advance(57)} 98,${advance(57)}`
                   : `80,${advance(70)} 76,${advance(62)} 84,${advance(62)}`
@@ -179,8 +187,7 @@ export const TecmoPlaybookCards: React.FC<TecmoPlaybookCardsProps> = ({
   onSelectSpecialTeams,
   onClose
 }) => {
-  // If defense: player chooses what to defend from OPPONENT'S 6 plays (Tecmo Super Bowl style)
-  // If offense: player chooses from THEIR OWN 6 plays
+  // Defense chooses from the same expanded play list available to the opponent.
   const relevantTeamId = isDefense ? opposingTeamId : teamId;
   const team = getTeam(relevantTeamId);
   const userTeam = getTeam(teamId);
@@ -232,7 +239,7 @@ export const TecmoPlaybookCards: React.FC<TecmoPlaybookCardsProps> = ({
                       Opponent: <b className="text-amber-300">{team.name}</b> • <span className="text-emerald-400 font-bold">Pick the same play to TOTALLY SHUT IT DOWN! 🔒💥</span>
                     </span>
                   ) : (
-                    <span>6 Unique Plays: 4 Passes & 2 Runs • Varying defensive coverage applies!</span>
+                    <span>8 Team Plays: 6 Team Calls & 2 Identity Concepts • Varying defensive coverage applies!</span>
                   )}
                 </p>
               </div>
@@ -240,7 +247,7 @@ export const TecmoPlaybookCards: React.FC<TecmoPlaybookCardsProps> = ({
           </div>
         </div>
 
-        {/* 6 Unique Plays Grid (4 Passes, 2 Runs) */}
+        {/* Team plays grid */}
         <div className="grid min-h-0 flex-1 grid-cols-2 gap-2 overflow-y-auto p-2 sm:grid-cols-3 sm:gap-3 sm:p-4">
           {plays.map((play) => {
             const isSelected = selectedPlayId === play.id;

@@ -1,5 +1,6 @@
 import type { PlayOption, RouteType } from './types';
 import type { TeamProfile } from './teams';
+import { getTeamCoreConcepts, type CoreConceptPlayId } from './conceptPlays';
 
 export interface TecmoPlayOption extends PlayOption {
   id: string;
@@ -7,7 +8,7 @@ export interface TecmoPlayOption extends PlayOption {
   teamId: string;
   isRun: boolean;
   category: 'PASS' | 'RUN';
-  playSlot: 'PASS_1' | 'PASS_2' | 'PASS_3' | 'PASS_4' | 'RUN_1' | 'RUN_2';
+  playSlot: 'PASS_1' | 'PASS_2' | 'PASS_3' | 'PASS_4' | 'RUN_1' | 'RUN_2' | CoreConceptPlayId;
   alignment: 'SPREAD' | 'STACK' | 'TRIPS';
   left: string;
   right: string;
@@ -102,6 +103,59 @@ function runPlay(
     expectedGain
   };
 }
+
+export const CORE_CONCEPT_PLAYS: Record<CoreConceptPlayId, TecmoPlayOption> = {
+  SLANT_FLAT: {
+    ...passPlay(
+      'SLANT_FLAT', 'CORE', 'Slant-Flat', 'PASS_1', 'SPREAD',
+      ['SLANT-R', 'SLANT-L', 'COMEBACK', 'HITCH'],
+      'A quick slant and RB flat create an immediate high-low read on the edge defender.',
+      'SHORT', 'SAFE', [5, 13]
+    ),
+    playSlot: 'SLANT_FLAT'
+  },
+  FLOOD: {
+    ...passPlay(
+      'FLOOD', 'CORE', 'Flood', 'PASS_1', 'TRIPS',
+      ['GO', 'FLAG-R', 'CROSS-R', 'HITCH'],
+      'Three routes attack the same sideline at deep, intermediate, and flat levels.',
+      'MEDIUM', 'BALANCED', [8, 22]
+    ),
+    playSlot: 'FLOOD',
+    rolloutDirection: 'right'
+  },
+  COUNTER: {
+    ...runPlay(
+      'COUNTER', 'CORE', 'Counter', 'RUN_1', 'POWER', 'STACK',
+      ['BLOCK', 'GO', 'BLOCK', 'BLOCK'],
+      'The back false-steps one way before following a pulling blocker through the opposite gap.',
+      [3, 14]
+    ),
+    type: 'COUNTER',
+    playSlot: 'COUNTER'
+  },
+  INSIDE_ZONE: {
+    ...runPlay(
+      'INSIDE_ZONE', 'CORE', 'Inside Zone', 'RUN_1', 'ISO', 'SPREAD',
+      ['GO', 'GO', 'BLOCK', 'BLOCK'],
+      'The line blocks an area while the back reads the best interior crease before committing.',
+      [4, 13]
+    ),
+    type: 'INSIDE_ZONE',
+    playSlot: 'INSIDE_ZONE'
+  },
+  PLAY_ACTION_BOOTLEG: {
+    ...passPlay(
+      'PLAY_ACTION_BOOTLEG', 'CORE', 'Play-Action Bootleg', 'PASS_1', 'STACK',
+      ['POST-R', 'FLAG-R', 'CROSS-R', 'HITCH'],
+      'The quarterback fakes an inside handoff, boots right, and reads layered routes on the move.',
+      'MEDIUM', 'BALANCED', [8, 24]
+    ),
+    playSlot: 'PLAY_ACTION_BOOTLEG',
+    playAction: true,
+    rolloutDirection: 'right'
+  }
+};
 
 export const SEC_TEAM_TECMO_PLAYS: Record<string, [
   TecmoPlayOption, TecmoPlayOption, TecmoPlayOption, TecmoPlayOption,
@@ -238,9 +292,13 @@ export const SEC_TEAM_TECMO_PLAYS: Record<string, [
 };
 
 export function getTecmoPlaysForTeam(teamId: string): TecmoPlayOption[] {
-  const plays = SEC_TEAM_TECMO_PLAYS[teamId];
-  if (!plays) return SEC_TEAM_TECMO_PLAYS.ALABAMA;
-  return [...plays];
+  const resolvedTeamId = SEC_TEAM_TECMO_PLAYS[teamId] ? teamId : 'ALABAMA';
+  const teamPlays = SEC_TEAM_TECMO_PLAYS[resolvedTeamId];
+  const concepts = getTeamCoreConcepts(resolvedTeamId).map(id => ({
+    ...CORE_CONCEPT_PLAYS[id],
+    teamId: resolvedTeamId
+  }));
+  return [...teamPlays, ...concepts];
 }
 
 export function evaluateTecmoMatchup(
@@ -270,8 +328,8 @@ export function evaluateTecmoMatchup(
   const defName = defPlay ? defPlay.name : defendedPlayId;
   const offName = offPlay ? offPlay.name : offensePlayId;
 
-  const offIsRun = Boolean(offPlay && ['ISO', 'POWER', 'SWEEP'].includes(offPlay.type));
-  const defIsRun = Boolean(defPlay && ['ISO', 'POWER', 'SWEEP'].includes(defPlay.type));
+  const offIsRun = Boolean(offPlay && ['ISO', 'POWER', 'SWEEP', 'COUNTER', 'INSIDE_ZONE'].includes(offPlay.type));
+  const defIsRun = Boolean(defPlay && ['ISO', 'POWER', 'SWEEP', 'COUNTER', 'INSIDE_ZONE'].includes(defPlay.type));
 
   // 1. EXACT MATCH: The defense correctly called the exact play (Tecmo Super Bowl total shutdown!)
   if (offensePlayId === defendedPlayId) {

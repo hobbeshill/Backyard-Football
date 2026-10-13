@@ -1,4 +1,5 @@
 import { SIGNATURE_PLAYS, signatureOffenseIds, signatureDefenseIds, type SignatureProOffenseId, type SignatureProDefenseId, type DefenseLandmark } from './signaturePlays';
+import type { CoreConceptPlayId } from './conceptPlays';
 
 export type TacticalMode = 'ELITE' | 'PRO';
 
@@ -10,6 +11,7 @@ export type ProOffensePlayId =
   | 'PRO_SCREEN'
   | 'PRO_JET_SWEEP'
   | 'PRO_DRAW'
+  | CoreConceptPlayId
   | SignatureProOffenseId;
 
 export type ProDefensePlayId =
@@ -238,6 +240,136 @@ export const PRO_OFFENSE_PLAYS: Record<ProOffensePlayId, ProOffensePlay> = {
       PRO_RUN_STOP_BOX: 'SHUTDOWN',
       PRO_TAMPA2: 'MODERATE'
     }
+  },
+  SLANT_FLAT: {
+    id: 'SLANT_FLAT',
+    name: 'Slant-Flat',
+    category: 'Short Pass',
+    isRun: false,
+    isDeepPass: false,
+    description: 'A quick slant and RB flat put the edge defender in a high-low conflict.',
+    counterDefenseId: 'PRO_COVER2_HARD_FLAT',
+    counterDefenseName: 'Cover 2 Hard Flat',
+    alignment: 'SPREAD',
+    leftRoute: 'SLANT-R',
+    rightRoute: 'SLANT-L',
+    centerRoute: 'COMEBACK',
+    slotRoute: 'HITCH',
+    rbRoute: 'FLAT',
+    routesSummary: 'Read the edge defender: throw the slant behind a flat jump or take the RB in the flat.',
+    matchups: {
+      PRO_COVER2_HARD_FLAT: 'SHUTDOWN',
+      PRO_COVER1_MAN: 'MODERATE',
+      PRO_COVER3_DEEP: 'EFFECTIVE',
+      PRO_COVER4_QUARTERS: 'EFFECTIVE',
+      PRO_BLITZ_ZERO: 'EFFECTIVE',
+      PRO_RUN_STOP_BOX: 'MODERATE',
+      PRO_TAMPA2: 'EFFECTIVE'
+    }
+  },
+  FLOOD: {
+    id: 'FLOOD',
+    name: 'Flood',
+    category: 'Short/Medium Pass',
+    isRun: false,
+    isDeepPass: false,
+    description: 'Three routes attack one sideline at deep, intermediate, and flat levels.',
+    counterDefenseId: 'PRO_COVER3_DEEP',
+    counterDefenseName: 'Cover 3 Deep Zone',
+    alignment: 'TRIPS',
+    leftRoute: 'GO',
+    rightRoute: 'FLAG-R',
+    centerRoute: 'CROSS-R',
+    slotRoute: 'HITCH',
+    rbRoute: 'FLAT',
+    routesSummary: 'A go clears deep coverage while the corner, crosser, and RB flat layer the right sideline.',
+    matchups: {
+      PRO_COVER2_HARD_FLAT: 'MODERATE',
+      PRO_COVER1_MAN: 'EFFECTIVE',
+      PRO_COVER3_DEEP: 'SHUTDOWN',
+      PRO_COVER4_QUARTERS: 'MODERATE',
+      PRO_BLITZ_ZERO: 'EFFECTIVE',
+      PRO_RUN_STOP_BOX: 'BIG_GAIN',
+      PRO_TAMPA2: 'EFFECTIVE'
+    }
+  },
+  COUNTER: {
+    id: 'COUNTER',
+    name: 'Counter',
+    category: 'Run',
+    isRun: true,
+    isDeepPass: false,
+    description: 'The back false-steps before following a pulling blocker through the opposite gap.',
+    counterDefenseId: 'PRO_RUN_STOP_BOX',
+    counterDefenseName: 'Run-Stop 6-1 / Box Stack',
+    alignment: 'STACK',
+    leftRoute: 'BLOCK',
+    rightRoute: 'GO',
+    centerRoute: 'BLOCK',
+    slotRoute: 'BLOCK',
+    rbRoute: 'RUN',
+    routesSummary: 'Initial flow sells one edge before the back redirects behind a puller to the opposite interior gap.',
+    matchups: {
+      PRO_COVER2_HARD_FLAT: 'EFFECTIVE',
+      PRO_COVER1_MAN: 'MODERATE',
+      PRO_COVER3_DEEP: 'EFFECTIVE',
+      PRO_COVER4_QUARTERS: 'EFFECTIVE',
+      PRO_BLITZ_ZERO: 'MODERATE',
+      PRO_RUN_STOP_BOX: 'SHUTDOWN',
+      PRO_TAMPA2: 'MODERATE'
+    }
+  },
+  INSIDE_ZONE: {
+    id: 'INSIDE_ZONE',
+    name: 'Inside Zone',
+    category: 'Run',
+    isRun: true,
+    isDeepPass: false,
+    description: 'The line blocks areas while the back reads the best interior crease.',
+    counterDefenseId: 'PRO_RUN_STOP_BOX',
+    counterDefenseName: 'Run-Stop 6-1 / Box Stack',
+    alignment: 'SPREAD',
+    leftRoute: 'GO',
+    rightRoute: 'GO',
+    centerRoute: 'BLOCK',
+    slotRoute: 'BLOCK',
+    rbRoute: 'RUN',
+    routesSummary: 'The back presses the middle and chooses the A or B gap with the least immediate traffic.',
+    matchups: {
+      PRO_COVER2_HARD_FLAT: 'EFFECTIVE',
+      PRO_COVER1_MAN: 'MODERATE',
+      PRO_COVER3_DEEP: 'EFFECTIVE',
+      PRO_COVER4_QUARTERS: 'EFFECTIVE',
+      PRO_BLITZ_ZERO: 'MODERATE',
+      PRO_RUN_STOP_BOX: 'SHUTDOWN',
+      PRO_TAMPA2: 'MODERATE'
+    }
+  },
+  PLAY_ACTION_BOOTLEG: {
+    id: 'PLAY_ACTION_BOOTLEG',
+    name: 'Play-Action Bootleg',
+    category: 'Short/Medium Pass',
+    isRun: false,
+    isDeepPass: false,
+    description: 'A hard inside-run fake leads into a quarterback bootleg with layered routes.',
+    counterDefenseId: 'PRO_COVER1_MAN',
+    counterDefenseName: 'Cover 1 Man-Free',
+    alignment: 'STACK',
+    leftRoute: 'POST-R',
+    rightRoute: 'FLAG-R',
+    centerRoute: 'CROSS-R',
+    slotRoute: 'HITCH',
+    rbRoute: 'FLAT',
+    routesSummary: 'After the fake, the quarterback boots right and reads the corner, crossing route, and flat.',
+    matchups: {
+      PRO_COVER2_HARD_FLAT: 'MODERATE',
+      PRO_COVER1_MAN: 'SHUTDOWN',
+      PRO_COVER3_DEEP: 'MODERATE',
+      PRO_COVER4_QUARTERS: 'EFFECTIVE',
+      PRO_BLITZ_ZERO: 'MODERATE',
+      PRO_RUN_STOP_BOX: 'BIG_GAIN',
+      PRO_TAMPA2: 'EFFECTIVE'
+    }
   }
 };
 
@@ -249,7 +381,7 @@ export const PRO_DEFENSE_PLAYS: Record<ProDefensePlayId, ProDefensePlay> = {
     isRunDefense: false,
     isPassingDefense: true,
     description: 'Corners and flat defenders jump short routes immediately; vulnerable over top.',
-    exactCounterAgainst: ['PRO_DOUBLE_MOVES'],
+    exactCounterAgainst: ['PRO_DOUBLE_MOVES', 'SLANT_FLAT'],
     vulnerableAgainst: 'Deep routes, vertical seam bombs, and post routes.',
     strengths: 'Shuts down Double Moves and jumps quick flats immediately.'
   },
@@ -260,7 +392,7 @@ export const PRO_DEFENSE_PLAYS: Record<ProDefensePlayId, ProDefensePlay> = {
     isRunDefense: false,
     isPassingDefense: true,
     description: 'Single-high safety with man-to-man coverage across the board. Great for locking down short routes, vulnerable to deep double-moves.',
-    exactCounterAgainst: ['PRO_QUICK_SLANTS'],
+    exactCounterAgainst: ['PRO_QUICK_SLANTS', 'PLAY_ACTION_BOOTLEG'],
     vulnerableAgainst: 'Deep double-moves and crossing rubs that exploit trailing man leverage.',
     strengths: 'Blankets Quick Slants with tight man-to-man coverage.'
   },
@@ -271,7 +403,7 @@ export const PRO_DEFENSE_PLAYS: Record<ProDefensePlayId, ProDefensePlay> = {
     isRunDefense: false,
     isPassingDefense: true,
     description: 'Three deep defenders split the field into thirds; excellent for preventing deep bombs, vulnerable underneath.',
-    exactCounterAgainst: ['PRO_MESH'],
+    exactCounterAgainst: ['PRO_MESH', 'FLOOD'],
     vulnerableAgainst: 'Underneath rubs, curls, and intermediate sideline windows.',
     strengths: 'Shuts down Mesh Concept and caps all deep boundary shots.'
   },
@@ -304,7 +436,7 @@ export const PRO_DEFENSE_PLAYS: Record<ProDefensePlayId, ProDefensePlay> = {
     isRunDefense: true,
     isPassingDefense: false,
     description: 'Linebackers and defensive backs crowd the line of scrimmage to completely stuff the run game.',
-    exactCounterAgainst: ['PRO_JET_SWEEP', 'PRO_DRAW'],
+    exactCounterAgainst: ['PRO_JET_SWEEP', 'PRO_DRAW', 'COUNTER', 'INSIDE_ZONE'],
     vulnerableAgainst: 'Deep vertical passing plays (Verts and Double-Moves).',
     strengths: 'Completely stuffs Jet Sweep and Draw runs for 0-2 yds or TFL.'
   },

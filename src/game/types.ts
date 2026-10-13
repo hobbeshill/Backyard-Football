@@ -22,6 +22,8 @@ export interface PlayOption {
   bestVs?: string[];
   weakVs?: string[];
   expectedGain?: [number, number];
+  playAction?: boolean;
+  rolloutDirection?: 'left' | 'right';
 }
 
 export interface DefOption {
@@ -102,6 +104,8 @@ export interface Entity {
   mistakeAnnounced?: boolean;
   runRecognitionTimer?: number;
   dropStepTimer?: number;
+  playActionTimer?: number;
+  rolloutTimer?: number;
   isOpenDeep?: boolean;
   isKicker?: boolean;
   isPunter?: boolean;

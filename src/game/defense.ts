@@ -347,7 +347,7 @@ export function alignDefenders(
   const isEightMan = defenders.length >= 8;
 
   const tecmoTargetPlay = offensivePlaybook[playKey];
-  const isTecmoRunDef = Boolean(tecmoTargetPlay && ['ISO', 'POWER', 'SWEEP'].includes(tecmoTargetPlay.type));
+  const isTecmoRunDef = Boolean(tecmoTargetPlay && ['ISO', 'POWER', 'SWEEP', 'COUNTER', 'INSIDE_ZONE'].includes(tecmoTargetPlay.type));
   const isTecmoPassDef = Boolean(tecmoTargetPlay && tecmoTargetPlay.type === 'PASS');
 
   if (isTecmoRunDef) {

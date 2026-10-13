@@ -13,6 +13,7 @@ import { SIGNATURE_PLAYS, signatureOffenseIds, signatureDefenseIds } from './sig
 import { PRO_OFFENSE_PLAYS, PRO_DEFENSE_PLAYS, evaluateProMatchup } from './proMode';
 import { chooseProDefensiveCall } from './ai';
 import { evaluateTecmoMatchup, getTecmoPlaysForTeam } from './tecmoPlaybook';
+import { getTeamCoreConcepts } from './conceptPlays';
 
 test('each team gains exactly two exclusive executable calls per side in both modes', () => {
   const priorCounts: Record<string, readonly [number, number, number, number]> = {
@@ -28,7 +29,7 @@ test('each team gains exactly two exclusive executable calls per side in both mo
   for (const teamId of TEAM_KEYS) {
     const book = getTeamPlaybook(teamId);
     assert.deepEqual([book.eliteOffense.length, book.eliteDefense.length, book.proOffense.length, book.proDefense.length],
-      priorCounts[teamId].map(count => count + 2), teamId);
+      priorCounts[teamId].map((count, index) => count + 2 + (index === 0 || index === 2 ? 2 : 0)), teamId);
     for (const mode of ['ELITE', 'PRO'] as const) {
       const prefix = mode === 'PRO' ? 'PRO_' : '';
       for (const id of signatureOffenseIds(teamId)) {
@@ -67,6 +68,31 @@ test('each team gains exactly two exclusive executable calls per side in both mo
   }
   assert.equal(offenseSignatures.size, 32);
   assert.equal(defenseSignatures.size, 32);
+});
+
+test('five core concepts are executable and distributed directly into team playbooks', () => {
+  const seenConcepts = new Set<string>();
+  for (const teamId of TEAM_KEYS) {
+    const concepts = getTeamCoreConcepts(teamId);
+    const tecmoIds = getTecmoPlaysForTeam(teamId).map(play => play.id);
+    assert.equal(tecmoIds.length, 8, teamId);
+    for (const concept of concepts) {
+      seenConcepts.add(concept);
+      assert.ok(tecmoIds.includes(concept), `${teamId}: Tecmo ${concept}`);
+      assert.ok(getTeamOffensePlays(teamId, 'ELITE').includes(concept), `${teamId}: Elite ${concept}`);
+      assert.ok(getTeamOffensePlays(teamId, 'PRO').includes(concept), `${teamId}: Pro ${concept}`);
+      assert.ok(offensivePlaybook[concept], concept);
+    }
+  }
+  assert.deepEqual([...seenConcepts].sort(), [
+    'COUNTER', 'FLOOD', 'INSIDE_ZONE', 'PLAY_ACTION_BOOTLEG', 'SLANT_FLAT'
+  ]);
+  assert.equal(offensivePlaybook.COUNTER.type, 'COUNTER');
+  assert.equal(offensivePlaybook.INSIDE_ZONE.type, 'INSIDE_ZONE');
+  assert.equal(offensivePlaybook.PLAY_ACTION_BOOTLEG.playAction, true);
+  assert.equal(offensivePlaybook.PLAY_ACTION_BOOTLEG.rolloutDirection, 'right');
+  assert.equal(evaluateTecmoMatchup('COUNTER', 'SLANT_FLAT', offensivePlaybook).level, 'MISMATCH_DROPPED_IN_COVERAGE');
+  assert.equal(evaluateTecmoMatchup('PLAY_ACTION_BOOTLEG', 'COUNTER', offensivePlaybook).level, 'MISMATCH_BIT_ON_RUN');
 });
 
 test('signature defensive landmarks and man assignments execute in both directions and modes', () => {
@@ -322,11 +348,16 @@ test('engine restrictions apply to user selection, cycling, CPU calls and team c
         for (const key of offense) {
           game.selectOffense(key);
           assert.equal(game.p1OffPlay, key, `${mode}: ${teamId}: ${key}`);
-          if (key.includes('TEAM_')) {
+          if (key.includes('TEAM_') || getTeamCoreConcepts(teamId).some(concept => concept === key)) {
             const play = offensivePlaybook[key];
             assert.deepEqual(game.getReceivers().map(receiver => receiver.routeType), [play.left, play.slot, play.right], key);
             game.startPlay?.();
             assert.equal(game.phase, play.type === 'PASS' ? 'QB_DROP' : 'HANDOFF', key);
+            if (key === 'PLAY_ACTION_BOOTLEG') {
+              const snapshot: Record<string, any> | undefined = game.getNetworkSnapshot?.();
+              assert.equal(snapshot?.entities.qb.data.playActionTimer, 24);
+              assert.equal(snapshot?.entities.qb.data.rolloutTimer, 34);
+            }
             game.resetDrill();
           }
         }

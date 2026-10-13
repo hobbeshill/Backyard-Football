@@ -15,11 +15,11 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { ProPlaybookCards } from './ProPlaybookCards';
 
-test('Pro playbooks retain the seven base calls and add 32 team-exclusive calls per side', () => {
+test('Pro playbooks retain the base calls, add five core concepts, and add 32 team-exclusive calls per side', () => {
   const offKeys = Object.keys(PRO_OFFENSE_PLAYS) as ProOffensePlayId[];
   const defKeys = Object.keys(PRO_DEFENSE_PLAYS) as ProDefensePlayId[];
 
-  assert.equal(offKeys.length, 39);
+  assert.equal(offKeys.length, 44);
   assert.equal(defKeys.length, 39);
 
   assert.deepEqual(offKeys.filter(key => !key.startsWith('PRO_TEAM_')), [
@@ -29,7 +29,12 @@ test('Pro playbooks retain the seven base calls and add 32 team-exclusive calls 
     'PRO_DOUBLE_MOVES',
     'PRO_SCREEN',
     'PRO_JET_SWEEP',
-    'PRO_DRAW'
+    'PRO_DRAW',
+    'SLANT_FLAT',
+    'FLOOD',
+    'COUNTER',
+    'INSIDE_ZONE',
+    'PLAY_ACTION_BOOTLEG'
   ]);
 
   assert.deepEqual(defKeys.filter(key => !key.startsWith('PRO_TEAM_')), [
@@ -51,7 +56,12 @@ test('Exact Counter Rule: Every offensive play has an exact counter defense that
     PRO_DOUBLE_MOVES: 'PRO_COVER2_HARD_FLAT',
     PRO_SCREEN: 'PRO_BLITZ_ZERO',
     PRO_JET_SWEEP: 'PRO_RUN_STOP_BOX',
-    PRO_DRAW: 'PRO_RUN_STOP_BOX'
+    PRO_DRAW: 'PRO_RUN_STOP_BOX',
+    SLANT_FLAT: 'PRO_COVER2_HARD_FLAT',
+    FLOOD: 'PRO_COVER3_DEEP',
+    COUNTER: 'PRO_RUN_STOP_BOX',
+    INSIDE_ZONE: 'PRO_RUN_STOP_BOX',
+    PLAY_ACTION_BOOTLEG: 'PRO_COVER1_MAN'
   };
 
   for (const [offId, expectedDefId] of Object.entries(exactCounters) as [ProOffensePlayId, ProDefensePlayId][]) {
@@ -95,9 +105,9 @@ test('Passing Defense vs Passing Offense Rule: Non-counter pass defense containm
 });
 
 test('Pro and Elite keys are properly separated in playbook', () => {
-  assert.equal(eliteOffensiveKeys.length, 41);
+  assert.equal(eliteOffensiveKeys.length, 46);
   assert.equal(eliteDefensiveKeys.length, 38);
-  assert.equal(proOffensiveKeys.length, 39);
+  assert.equal(proOffensiveKeys.length, 44);
   assert.equal(proDefensiveKeys.length, 39);
 });
 
@@ -120,11 +130,12 @@ test('Pro mode allows players to pick every offensive play with valid route assi
   }
 });
 
-test('every Pro passing play keeps the RB in pass protection', () => {
+test('Pro passing plays use intentional RB protection or concept routes', () => {
   for (const play of Object.values(PRO_OFFENSE_PLAYS)) {
     if (play.isRun) continue;
-    assert.equal(play.rbRoute, 'BLOCK', `${play.id} should keep an RB pass protector`);
-    assert.equal(offensivePlaybook[play.id].rbRoute, 'BLOCK', `${play.id} engine routes should match its card`);
+    const expectedRbRoute = ['SLANT_FLAT', 'FLOOD', 'PLAY_ACTION_BOOTLEG'].includes(play.id) ? 'FLAT' : 'BLOCK';
+    assert.equal(play.rbRoute, expectedRbRoute, `${play.id} should use its designed RB assignment`);
+    assert.equal(offensivePlaybook[play.id].rbRoute, expectedRbRoute, `${play.id} engine routes should match its card`);
   }
 });
 

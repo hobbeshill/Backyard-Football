@@ -20,7 +20,7 @@ export function chooseTeamOffensivePlay(
   if (plays.length === 0) throw new Error('Cannot choose an offensive play from an empty playbook');
   const weighted = plays.map(play => {
     const definition = offensivePlaybook[play];
-    const isRun = ['SWEEP', 'ISO', 'POWER'].includes(definition.type);
+    const isRun = ['SWEEP', 'ISO', 'POWER', 'COUNTER', 'INSIDE_ZONE'].includes(definition.type);
     const isOutsideRun = definition.type === 'SWEEP';
     const isDeep = definition.routeType === 'VERTICAL';
     let weight = isRun
@@ -215,10 +215,10 @@ export function chooseProDefensiveCall(
   const recentDefinitions = recentPlays.map(play => offensivePlaybook[play.play]);
   const successfulDefinitions = recentPlays.filter(play => play.isSuccessful).map(play => offensivePlaybook[play.play]);
   if (successfulDefinitions.filter(play => play?.type === 'PASS' && (play.left === 'BLOCK' || play.right === 'BLOCK')).length >= 2) return 'PRO_BLITZ_ZERO';
-  if (successfulDefinitions.filter(play => play && ['ISO', 'POWER', 'SWEEP'].includes(play.type)).length >= 2) return 'PRO_RUN_STOP_BOX';
+  if (successfulDefinitions.filter(play => play && ['ISO', 'POWER', 'SWEEP', 'COUNTER', 'INSIDE_ZONE'].includes(play.type)).length >= 2) return 'PRO_RUN_STOP_BOX';
   if (successfulDefinitions.filter(play => play?.type === 'PASS' && play.routeType === 'VERTICAL').length >= 2) return 'PRO_COVER4_QUARTERS';
   const recentDeepCount = recentDefinitions.filter(play => play?.type === 'PASS' && play.routeType === 'VERTICAL').length;
-  const recentRunCount = recentDefinitions.filter(play => play && ['ISO', 'POWER', 'SWEEP'].includes(play.type)).length;
+  const recentRunCount = recentDefinitions.filter(play => play && ['ISO', 'POWER', 'SWEEP', 'COUNTER', 'INSIDE_ZONE'].includes(play.type)).length;
   const recentSlantsCount = recentDefinitions.filter(play => play?.type === 'PASS' &&
     [play.left, play.right, play.slot].some(route => route?.startsWith('SLANT'))).length;
   const recentMeshCount = recentDefinitions.filter(play => play?.type === 'PASS' &&

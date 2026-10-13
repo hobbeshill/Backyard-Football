@@ -1,8 +1,9 @@
 import type { ProDefensePlayId, ProOffensePlayId } from './proMode';
 import type { TacticalMode } from './types';
 import { SIGNATURE_PLAYS, signatureOffenseIds, signatureDefenseIds, type SignatureOffenseId, type SignatureDefenseId } from './signaturePlays';
+import { getTeamCoreConcepts, type CoreConceptPlayId } from './conceptPlays';
 
-type EliteOffensePlayId = 'SHORT_PASS' | 'CONTROL_PASS' | 'DEEP_SHOT' | 'ISO' | 'SWEEP' | 'POWER' | 'MESH' | 'SMASH' | 'POST_WHEEL' | SignatureOffenseId;
+type EliteOffensePlayId = 'SHORT_PASS' | 'CONTROL_PASS' | 'DEEP_SHOT' | 'ISO' | 'SWEEP' | 'POWER' | 'MESH' | 'SMASH' | 'POST_WHEEL' | CoreConceptPlayId | SignatureOffenseId;
 type EliteDefensePlayId = 'COVER2' | 'ZONE34' | 'ZONE232' | 'ZONE151' | 'MAN_FREE' | 'DEEP_THIRDS' | SignatureDefenseId;
 
 export interface TeamPlaybook {
@@ -82,6 +83,9 @@ for (const teamId of Object.keys(SIGNATURE_PLAYS)) {
   playbook.eliteDefense = [...playbook.eliteDefense, ...defense];
   playbook.proOffense = [...playbook.proOffense, ...offense.map((id): ProOffensePlayId => `PRO_${id}`)];
   playbook.proDefense = [...playbook.proDefense, ...defense.map((id): ProDefensePlayId => `PRO_${id}`)];
+  const concepts = getTeamCoreConcepts(teamId);
+  playbook.eliteOffense = [...playbook.eliteOffense, ...concepts];
+  playbook.proOffense = [...playbook.proOffense, ...concepts];
 }
 
 export function getTeamPlaybook(teamId: string): TeamPlaybook {

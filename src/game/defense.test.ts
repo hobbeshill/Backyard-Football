@@ -5,7 +5,7 @@ import { alignDefenderAcrossFromReceiver, alignDefenderAcrossFromRunningBack, al
 import { getCarrierFumbleChance } from './fumbles';
 import { TEAMS } from './teams';
 import { calculateYardsToGo, canApplyProMatchupAdjustment, canDefenderDeflectPass, canTackleQuarterback, evaluateQbThrowAccuracy, findTappedPassReceiver, getCatchCompletionChance, getDefenderPassReachHeight, getDriveStartY, getPreSnapPenaltyChances, getSnapBallPosition, getPassArcHeight, getPassArcMaxHeight, getPassArcScreenPoint, getPassFlightFrames, getPassLeadTarget, getRoutePassLeadTarget, isSafety, resolveCatchContestOutcome, resolvePlayResult } from './rules';
-import { canEngagePassBlock, checkOffensiveLineWall, clampPlayerToFieldY, engageRunBlocker, GAME_SPEED_SCALE, getBallCarrierRunSpeed, getFatigueSpeedMultiplier, getPassBlockBaseHoldFrames, getPassBlockHoldFrames, getRunBlockEffect, getRunDirectionSpeedFactor, getRunPursuitMovement, getUserDefenderSpeed, isRusherActivelyBlocked, moveToward, resolveCollisions, shouldHoldPassBlock, updateBlockEngagement, updatePlayerStamina, updateReceiverTargetStamina, updateRunningBackStamina, updateRouteMovement, USER_CONTROL_SPEED_MULTIPLIER } from './movement';
+import { canEngagePassBlock, checkOffensiveLineWall, clampPlayerToFieldY, engageRunBlocker, GAME_SPEED_SCALE, getBallCarrierRunSpeed, getCounterRunDirection, getFatigueSpeedMultiplier, getPassBlockBaseHoldFrames, getPassBlockHoldFrames, getRunBlockEffect, getRunDirectionSpeedFactor, getRunLaneOptions, getRunPursuitMovement, getUserDefenderSpeed, isRusherActivelyBlocked, moveToward, resolveCollisions, shouldHoldPassBlock, updateBlockEngagement, updatePlayerStamina, updateReceiverTargetStamina, updateRunningBackStamina, updateRouteMovement, USER_CONTROL_SPEED_MULTIPLIER } from './movement';
 import type { Entity } from './types';
 
 test('coverage reduces catches smoothly and touching players are not wide open', () => {
@@ -14,6 +14,20 @@ test('coverage reduces catches smoothly and touching players are not wide open',
   assert.ok(Math.abs(chance(19.99) - chance(20.01)) < 0.001);
   assert.ok(chance(35) > chance(20));
   assert.equal(chance(60), 0.905);
+});
+
+test('counter redirects opposite the initial backfield side and inside zone reads interior daylight', () => {
+  assert.equal(getCounterRunDirection('right'), -1);
+  assert.equal(getCounterRunDirection('left'), 1);
+
+  const runner: Entity = { x: 170, y: 600, radius: 10 };
+  const defenders: Entity[] = [
+    { x: 114, y: 560, radius: 10 },
+    { x: 170, y: 550, radius: 10 }
+  ];
+  const bestLane = getRunLaneOptions(runner, [], defenders, -1, 340, 75)
+    .reduce((best, lane) => lane.clearance > best.clearance ? lane : best);
+  assert.equal(bestLane.side, 'RIGHT');
 });
 
 test('team coverage ratings scale defensive busts symmetrically', () => {

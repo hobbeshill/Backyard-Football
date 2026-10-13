@@ -1,6 +1,6 @@
 import type { DefOption, PlayOption } from './types';
 import { SIGNATURE_PLAYS, signatureOffenseIds, signatureDefenseIds } from './signaturePlays';
-import { SEC_TEAM_TECMO_PLAYS } from './tecmoPlaybook';
+import { CORE_CONCEPT_PLAYS, SEC_TEAM_TECMO_PLAYS } from './tecmoPlaybook';
 
 export function getScreenTravelDirection(attackDirection: number): -1 | 1 {
   return attackDirection < 0 ? 1 : -1;
@@ -140,6 +140,21 @@ export const offensivePlaybook: Record<string, PlayOption> = {
     bestVs: ['ZONE151', 'ZONE34'],
     weakVs: ['COVER2', 'ZONE232'],
     expectedGain: [18, 38]
+  },
+  SLANT_FLAT: {
+    ...CORE_CONCEPT_PLAYS.SLANT_FLAT
+  },
+  FLOOD: {
+    ...CORE_CONCEPT_PLAYS.FLOOD
+  },
+  COUNTER: {
+    ...CORE_CONCEPT_PLAYS.COUNTER
+  },
+  INSIDE_ZONE: {
+    ...CORE_CONCEPT_PLAYS.INSIDE_ZONE
+  },
+  PLAY_ACTION_BOOTLEG: {
+    ...CORE_CONCEPT_PLAYS.PLAY_ACTION_BOOTLEG
   },
   PUNT: {
     name: 'SPECIAL TEAMS: PUNT',
@@ -351,8 +366,8 @@ export const proDefensivePlaybook: Record<string, DefOption> = {
   }
 };
 
-export const eliteOffensiveKeys = ['SHORT_PASS', 'CONTROL_PASS', 'DEEP_SHOT', 'ISO', 'SWEEP', 'POWER', 'MESH', 'SMASH', 'POST_WHEEL'];
-export const proOffensiveKeys = ['PRO_QUICK_SLANTS', 'PRO_MESH', 'PRO_VERTS', 'PRO_DOUBLE_MOVES', 'PRO_SCREEN', 'PRO_JET_SWEEP', 'PRO_DRAW'];
+export const eliteOffensiveKeys = ['SHORT_PASS', 'CONTROL_PASS', 'DEEP_SHOT', 'ISO', 'SWEEP', 'POWER', 'MESH', 'SMASH', 'POST_WHEEL', 'SLANT_FLAT', 'FLOOD', 'COUNTER', 'INSIDE_ZONE', 'PLAY_ACTION_BOOTLEG'];
+export const proOffensiveKeys = ['PRO_QUICK_SLANTS', 'PRO_MESH', 'PRO_VERTS', 'PRO_DOUBLE_MOVES', 'PRO_SCREEN', 'PRO_JET_SWEEP', 'PRO_DRAW', 'SLANT_FLAT', 'FLOOD', 'COUNTER', 'INSIDE_ZONE', 'PLAY_ACTION_BOOTLEG'];
 export const eliteDefensiveKeys = ['COVER2', 'ZONE34', 'ZONE232', 'ZONE151', 'MAN_FREE', 'DEEP_THIRDS'];
 export const proDefensiveKeys = [
   'PRO_COVER2_HARD_FLAT',
@@ -387,6 +402,15 @@ export const allDefensivePlaybook: Record<string, DefOption> = {
 for (const plays of Object.values(SEC_TEAM_TECMO_PLAYS)) {
   for (const play of plays) {
     offensivePlaybook[play.id] = play;
+    allDefensivePlaybook[play.id] = {
+      name: `Defend: ${play.name}`,
+      desc: `Defensive scheme aligned to defend against ${play.name} (${play.category})`,
+      weakness: play.isRun ? 'deep vertical passing' : 'perimeter edge run',
+      vulnerableRouteType: play.isRun ? 'VERTICAL' : 'SHORT'
+    };
+  }
+
+  for (const play of Object.values(CORE_CONCEPT_PLAYS)) {
     allDefensivePlaybook[play.id] = {
       name: `Defend: ${play.name}`,
       desc: `Defensive scheme aligned to defend against ${play.name} (${play.category})`,
