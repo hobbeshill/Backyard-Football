@@ -4,7 +4,7 @@ import { chooseProDefensiveCall, getCoverageMistakeChance, getCpuCounterReason, 
 import { alignDefenderAcrossFromReceiver, alignDefenderAcrossFromRunningBack, alignDefenderToZone, alignDefenders, assignDefensiveRunFits, chooseCpuDefensiveAssignments, constrainDefendersToFieldSide, getBlitzAlignmentY, getBracketCoverageTarget, getDefensiveLineAlignmentY, getRunFitTarget, matchCpuDefendersToReceivers, separateDefenderAlignments } from './defense';
 import { getCarrierFumbleChance } from './fumbles';
 import { TEAMS } from './teams';
-import { calculateYardsToGo, canApplyProMatchupAdjustment, canDefenderDeflectPass, canTackleQuarterback, evaluateQbThrowAccuracy, findTappedPassReceiver, getCatchCompletionChance, getDefenderPassReachHeight, getDriveStartY, getPreSnapPenaltyChances, getSnapBallPosition, getPassArcHeight, getPassArcMaxHeight, getPassArcScreenPoint, getPassFlightFrames, getPassLeadTarget, getRoutePassLeadTarget, isSafety, resolveCatchContestOutcome, resolvePlayResult } from './rules';
+import { calculateYardsToGo, calculateFieldGoalFlight, calculateKickoffFlight, calculatePuntFlight, canApplyProMatchupAdjustment, canDefenderDeflectPass, canTackleQuarterback, evaluateQbThrowAccuracy, findTappedPassReceiver, getCatchCompletionChance, getDefenderPassReachHeight, getDriveStartY, getPreSnapPenaltyChances, getSnapBallPosition, getPassArcHeight, getPassArcMaxHeight, getPassArcScreenPoint, getPassCatchWindowHeight, getPassFlightFrames, getPassLeadTarget, getRoutePassLeadTarget, isSafety, resolveCatchContestOutcome, resolvePlayResult } from './rules';
 import { canEngagePassBlock, checkOffensiveLineWall, clampPlayerToFieldY, engageRunBlocker, GAME_SPEED_SCALE, getBallCarrierRunSpeed, getCounterRunDirection, getFatigueSpeedMultiplier, getPassBlockBaseHoldFrames, getPassBlockHoldFrames, getRunBlockEffect, getRunDirectionSpeedFactor, getRunLaneOptions, getRunPursuitMovement, getUserDefenderSpeed, isRusherActivelyBlocked, moveToward, resolveCollisions, shouldHoldPassBlock, updateBlockEngagement, updatePlayerStamina, updateReceiverTargetStamina, updateRunningBackStamina, updateRouteMovement, USER_CONTROL_SPEED_MULTIPLIER } from './movement';
 import type { Entity } from './types';
 
@@ -399,9 +399,36 @@ test('short passes clear defensive linemen on a safe arc', () => {
   const maxHeight = getPassArcMaxHeight(70, false);
   const lineCrossingHeight = getPassArcHeight(maxHeight, 0.18);
 
-  assert.equal(maxHeight, 38);
+  assert.ok(maxHeight >= 34 && maxHeight <= 48, 'Short throws stay on a flat, quick arc');
   assert.ok(lineCrossingHeight > getDefenderPassReachHeight('DL'));
   assert.equal(getPassArcHeight(maxHeight, 0.5), maxHeight);
+});
+
+test('pass arcs climb higher the longer the throw travels', () => {
+  const quickFlat = getPassArcMaxHeight(40, false);
+  const intermediate = getPassArcMaxHeight(140, false);
+  const bomb = getPassArcMaxHeight(300, true);
+
+  assert.ok(intermediate > quickFlat + 15, 'Intermediate throws arc well above quick flat throws');
+  assert.ok(bomb > intermediate + 25, 'Deep bombs tower above intermediate throws');
+  assert.ok(bomb <= 96, 'Arc height stays within the visible field area');
+});
+
+test('the catchable arrival window scales with the height of the arc', () => {
+  const flatArc = getPassArcMaxHeight(40, false);
+  const bombArc = getPassArcMaxHeight(300, true);
+
+  assert.equal(getPassCatchWindowHeight(flatArc), 20);
+  assert.ok(getPassCatchWindowHeight(bombArc) > 20);
+  assert.ok(getPassArcHeight(bombArc, 0.94) <= getPassCatchWindowHeight(bombArc), 'Deep balls become catchable as they drop in');
+  assert.ok(getPassArcHeight(bombArc, 0.5) > getPassCatchWindowHeight(bombArc), 'Deep balls are untouchable at their apex');
+});
+
+test('kickoffs, punts, and field goals launch on towering arcs', () => {
+  assert.ok(calculateKickoffFlight(0.9, 1.0).maxZ >= 100, 'Deep kickoffs soar');
+  assert.ok(calculatePuntFlight(0.9, 1.0).maxZ >= 110, 'Punts have the highest hang time');
+  assert.ok(calculateFieldGoalFlight(45, 0, 0.9, -1).maxZ >= 100, 'Field goals climb high over the line');
+  assert.ok(calculatePuntFlight(0.2, 1.0).maxZ > calculateKickoffFlight(0.2, 1.0).maxZ, 'Even short punts out-climb squib kickoffs');
 });
 
 test('pass screen path rises above its release and catch points at the arc apex', () => {

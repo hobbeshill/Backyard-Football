@@ -60,8 +60,12 @@ export function calculateYardsToGo(lineOfScrimmageY: number, firstDownMarkerY: n
 }
 
 export function getPassArcMaxHeight(targetDistance: number, isDeepRoute: boolean, isLob = false): number {
-  const calculatedHeight = (isDeepRoute ? 32 + targetDistance * 0.10 : 26 + targetDistance * 0.08) + (isLob ? 10 : 0);
-  return Math.min(isDeepRoute ? 50 : 42, Math.max(38, calculatedHeight));
+  // Short throws stay flat and quick; the arc climbs steeply as the throw gets longer
+  // so bombs visibly tower over the field before dropping into the receiver.
+  const distanceRatio = Math.min(1.2, Math.max(0, targetDistance) / 320);
+  const distanceLift = Math.pow(distanceRatio, 1.15) * 88;
+  const calculatedHeight = 26 + distanceLift + (isDeepRoute ? 6 : 0) + (isLob ? 14 : 0);
+  return Math.min(isDeepRoute ? 96 : 88, Math.max(34, calculatedHeight));
 }
 
 export function getPassFlightFrames(targetDistance: number, throwSpeed: number, isLob = false): number {
@@ -108,6 +112,20 @@ export function getPassArcHeight(maxHeight: number, progress: number): number {
   return Math.max(2, baseHeight + arcHeight);
 }
 
+export function getPassCatchWindowHeight(maxHeight: number): number {
+  // Taller arcs are still descending late in their flight, so the catchable window
+  // scales with the apex of the throw instead of using one fixed ceiling.
+  return Math.max(20, 20 + (maxHeight - 42) * 0.25);
+}
+
+// Ball height renders as a horizontal offset on the rotated field, so towering kicks and
+// bombs are clamped to stay visible inside the canvas.
+export const MIN_BALL_ARC_SCREEN_X = 5;
+
+export function getBallArcScreenX(ballX: number, ballHeight: number): number {
+  return Math.max(MIN_BALL_ARC_SCREEN_X, ballX - ballHeight);
+}
+
 export function getPassArcScreenPoint(
   startX: number,
   startY: number,
@@ -118,7 +136,7 @@ export function getPassArcScreenPoint(
 ): { x: number; y: number } {
   const clampedProgress = Math.max(0, Math.min(1, progress));
   return {
-    x: startX + (targetX - startX) * clampedProgress - getPassArcHeight(maxHeight, clampedProgress),
+    x: getBallArcScreenX(startX + (targetX - startX) * clampedProgress, getPassArcHeight(maxHeight, clampedProgress)),
     y: startY + (targetY - startY) * clampedProgress
   };
 }
@@ -443,7 +461,7 @@ export function calculateKickoffFlight(power: number, kickerRating = 1.0): KickP
   const baseDistance = 35 + clampedPower * 35; // 35 to 70 yards
   const distanceYards = Math.round(baseDistance * Math.max(0.85, Math.min(1.15, kickerRating)));
   const flightFrames = Math.max(38, Math.round(36 + clampedPower * 30));
-  const maxZ = Math.round(30 + clampedPower * 28);
+  const maxZ = Math.round(58 + clampedPower * 54);
   const isTouchback = distanceYards >= 65;
 
   return { distanceYards, flightFrames, maxZ, isTouchback };
@@ -455,7 +473,7 @@ export function calculatePuntFlight(power: number, punterRating = 1.0): KickPhys
   const baseDistance = 25 + clampedPower * 30;
   const distanceYards = Math.round(baseDistance * Math.max(0.85, Math.min(1.15, punterRating)));
   const flightFrames = Math.max(42, Math.round(42 + clampedPower * 28));
-  const maxZ = Math.round(35 + clampedPower * 22);
+  const maxZ = Math.round(72 + clampedPower * 46);
   const isTouchback = distanceYards >= 55;
 
   return { distanceYards, flightFrames, maxZ, isTouchback };
@@ -543,7 +561,7 @@ export function calculateFieldGoalFlight(
 
   // Flight duration and vertical apex
   const flightFrames = Math.max(38, Math.round(36 + (clampedDistance / 60) * 26));
-  const maxZ = Math.round(32 + clampedPower * 30);
+  const maxZ = Math.round(62 + clampedPower * 52);
 
   // Distance / Elevation clearance
   // If effectiveDistance >= clampedDistance, arrival height clears crossbar (z >= 22).

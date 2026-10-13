@@ -6,7 +6,7 @@ import { alignDefenderAcrossFromReceiver, alignDefenderAcrossFromRunningBack, al
 import { chooseAvailableDefensiveCounter, chooseProDefensiveCall, chooseTeamOffensivePlay, evaluateCpuOffensiveAudibles, evaluateCpuBallCarrierMoves, getCoverageMistakeChance, getRepeatedOffensivePlay, getSuccessfulPlayCounter, isCpuPressureRecognized, shouldCpuGoForItOnFourthDown, shouldCpuReleasePass, shouldCpuScramble, scoreRunBlockTarget } from './ai';
 import { createFumbleBall, getCarrierFumbleChance } from './fumbles';
 import { canEngagePassBlock, checkOffensiveLineWall, clampPlayerToFieldY, createSimulationClock, distToSegment, engageRunBlocker, GAME_SPEED_SCALE, getBallCarrierRunSpeed, getCounterRunDirection, getFatigueSpeedMultiplier, getPassBlockBaseHoldFrames, getPassBlockHoldFrames, getDirectionalInput, getReturnPursuitSpeed, getReturnTeamBlockers, getRunLaneOptions, getUserRunnerVelocity, getRunPursuitMovement, getUserDefenderSpeed, isRusherActivelyBlocked, moveToward, releaseBlockEngagement, resolveCollisions, shouldApplyRunBlockStun, updateBlockEngagement, updatePlayerStamina, updateReceiverTargetStamina, updateRunningBackStamina, updateRouteMovement, USER_CONTROL_SPEED_MULTIPLIER } from './movement';
-import { resolvePlayResult, isSafety, calculateBrokenTackleChance, calculateYardsToGo, getDriveStartY, getSnapBallPosition, getPassArcHeight, getPassArcScreenPoint, getFieldGoalBallHeight, getPassArcMaxHeight, getPassFlightFrames, findTappedPassReceiver, shouldReleaseUserPass, getPassLeadTarget, getRoutePassLeadTarget, canDefenderDeflectPass, canTackleQuarterback, resolveCatchContestOutcome, evaluateQbThrowAccuracy, getCpuThrowAimVariance, calculateKickoffFlight, calculatePuntFlight, getTouchbackYardLineY, getInterceptionTouchbackY, getKickoffLineY, getDefenderPassReachHeight, isPlayerOutOfBounds, calculateFieldGoalFlight, getFieldGoalDistanceYards, getPreSnapPenaltyChances, GOALPOST_CENTER_X, GOALPOST_LEFT_UPRIGHT_X, GOALPOST_RIGHT_UPRIGHT_X, GOALPOST_CROSSBAR_HEIGHT_Z } from './rules';
+import { resolvePlayResult, isSafety, calculateBrokenTackleChance, calculateYardsToGo, getDriveStartY, getSnapBallPosition, getPassArcHeight, getPassArcScreenPoint, getBallArcScreenX, getPassCatchWindowHeight, getFieldGoalBallHeight, getPassArcMaxHeight, getPassFlightFrames, findTappedPassReceiver, shouldReleaseUserPass, getPassLeadTarget, getRoutePassLeadTarget, canDefenderDeflectPass, canTackleQuarterback, resolveCatchContestOutcome, evaluateQbThrowAccuracy, getCpuThrowAimVariance, calculateKickoffFlight, calculatePuntFlight, getTouchbackYardLineY, getInterceptionTouchbackY, getKickoffLineY, getDefenderPassReachHeight, isPlayerOutOfBounds, calculateFieldGoalFlight, getFieldGoalDistanceYards, getPreSnapPenaltyChances, GOALPOST_CENTER_X, GOALPOST_LEFT_UPRIGHT_X, GOALPOST_RIGHT_UPRIGHT_X, GOALPOST_CROSSBAR_HEIGHT_Z } from './rules';
 import { sounds } from './sound';
 import { evaluateDirtSwipeGesture, drawDirtSwipeGesture } from './chalkMenu';
 import { getHelmetDesign, type HelmetDesign } from './helmetDesigns';
@@ -7711,10 +7711,11 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       }
 
       // Catch point contest resolution: ONLY when ball arrives at destination / descends into catchable window!
-      // Passes in flight overhead (progress < 0.70 or ball.z > 20) safely clear the line and cannot be caught/batted down prematurely.
+      // Passes still high in flight (progress < 0.70 or above the arc's catchable window) safely clear
+      // the line and cannot be caught/batted down prematurely. Taller arcs get a taller window.
       const activeBall = ball;
       const catchHitPadding = tacticalMode === 'PRO' ? 18 : 10;
-      const isArrivalWindow = activeBall && (progress >= 0.70 || activeBall.currentFrame >= activeBall.flightFrames - 4) && activeBall.z <= 20;
+      const isArrivalWindow = activeBall && (progress >= 0.70 || activeBall.currentFrame >= activeBall.flightFrames - 4) && activeBall.z <= getPassCatchWindowHeight(activeBall.maxZ);
 
       if (!playResolved && isArrivalWindow && activeBall) {
         // Prioritize intended target if in range, otherwise find nearest eligible non-blocking receiver
@@ -8814,8 +8815,8 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
 
       // 1. Soft dark turf drop shadow on grass directly underneath the football
       ctx.save();
-      const shadowAlpha = Math.max(0.16, 0.45 - (bZ * 0.006));
-      const shadowScale = Math.max(0.55, 1.15 - (bZ * 0.008));
+      const shadowAlpha = Math.max(0.10, 0.45 - (bZ * 0.0035));
+      const shadowScale = Math.max(0.32, 1.15 - (bZ * 0.0062));
       ctx.fillStyle = `rgba(0, 0, 0, ${shadowAlpha})`;
       ctx.beginPath();
       ctx.ellipse(ball.x, ball.y, 8 * shadowScale, 4 * shadowScale, 0, 0, Math.PI * 2);
@@ -8823,7 +8824,7 @@ export function mountFootballGame(canvas: HTMLCanvasElement, callbacks: GameEngi
       ctx.restore();
 
       // 2. Football elevated on screen above the field
-      const ballDrawX = ball.x - bZ;
+      const ballDrawX = getBallArcScreenX(ball.x, bZ);
 
       ctx.save();
       ctx.strokeStyle = 'rgba(255, 244, 221, 0.3)';
