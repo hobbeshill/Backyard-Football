@@ -201,6 +201,111 @@ export function getRunBlockEffect(blocker: Entity, defender: Entity, laneSpacing
   return Math.max(0.12, Math.min(0.85, (0.48 + (blocking - resistance) * 0.012) * laneSpacing));
 }
 
+export type BlockEngagementOutcome = 'ENGAGED' | 'SHED' | 'DISENGAGED';
+
+export interface BlockEngagementResult {
+  outcome: BlockEngagementOutcome;
+  leverage: number;
+  holdFrames: number;
+}
+
+export function releaseBlockEngagement(blocker: Entity, defender: Entity): void {
+  if (blocker.blockingDefender === defender) {
+    blocker.blockingDefender = null;
+    blocker.isEngagedWithBlocker = false;
+  }
+  if (defender.blockingDefender === blocker) {
+    defender.blockingDefender = null;
+    defender.isEngagedWithBlocker = false;
+    defender.blockEngagedTimer = 0;
+  }
+}
+
+export function updateBlockEngagement(
+  blocker: Entity,
+  defender: Entity,
+  attackDirection: number,
+  kind: 'RUN' | 'PASS',
+  strengthModifier = 1,
+  holdFramesOverride?: number
+): BlockEngagementResult {
+  const contactDistance = (blocker.radius || 10) + (defender.radius || 10);
+  const dx = defender.x - blocker.x;
+  const dy = defender.y - blocker.y;
+  const distance = Math.hypot(dx, dy);
+  const isSameEngagement = blocker.blockingDefender === defender && defender.blockingDefender === blocker;
+  if (distance > contactDistance + (isSameEngagement ? 12 : 6)) {
+    releaseBlockEngagement(blocker, defender);
+    return { outcome: 'DISENGAGED', leverage: 0, holdFrames: 0 };
+  }
+
+  if ((defender.blockShedTimer || 0) > 0) {
+    defender.blockShedTimer!--;
+    releaseBlockEngagement(blocker, defender);
+    return { outcome: 'SHED', leverage: 0, holdFrames: 0 };
+  }
+
+  if (!isSameEngagement) {
+    if (blocker.blockingDefender && blocker.blockingDefender !== defender) {
+      releaseBlockEngagement(blocker, blocker.blockingDefender);
+    }
+    if (defender.blockingDefender && defender.blockingDefender !== blocker) {
+      releaseBlockEngagement(defender.blockingDefender, defender);
+    }
+    blocker.blockingDefender = defender;
+    defender.blockingDefender = blocker;
+    defender.blockEngagedTimer = 0;
+  }
+  blocker.isEngagedWithBlocker = true;
+  defender.isEngagedWithBlocker = true;
+
+  defender.blockEngagedTimer = (defender.blockEngagedTimer || 0) + 1;
+  const blocking = blocker.player?.ratings.blocking ?? 65;
+  const blockerPower = blocker.player?.ratings.power ?? 65;
+  const resistance = kind === 'PASS'
+    ? defender.player?.ratings.rush ?? 65
+    : defender.player?.ratings.power ?? 65;
+  const lateralContact = Math.min(1, Math.abs(dx) / Math.max(1, contactDistance));
+  const angleLeverage = 1 - lateralContact * 0.35;
+  const momentumAdvantage = Math.hypot(blocker.vx || 0, blocker.vy || 0) -
+    Math.hypot(defender.vx || 0, defender.vy || 0);
+  const leverage = Math.max(-1, Math.min(1,
+    ((blocking * 0.72 + blockerPower * 0.28) * angleLeverage - resistance + momentumAdvantage * 8) / 45
+  ));
+  const calculatedHoldFrames = Math.round(
+    Math.max(18, Math.min(150, (58 + leverage * 42) * strengthModifier))
+  );
+  const holdFrames = holdFramesOverride === undefined
+    ? calculatedHoldFrames
+    : Math.max(1, Math.min(150, Math.round(holdFramesOverride * angleLeverage)));
+  const adjustedHoldFrames = defender.isOnFire
+    ? Math.round(holdFrames * 0.4)
+    : defender.isTurboActive
+      ? Math.round(holdFrames * 0.65)
+      : holdFrames;
+
+  if ((defender.blockEngagedTimer || 0) > adjustedHoldFrames) {
+    releaseBlockEngagement(blocker, defender);
+    defender.blockShedTimer = 10;
+    const shedDirection = dx === 0 ? (defender.x >= 170 ? 1 : -1) : Math.sign(dx);
+    defender.x += shedDirection * 3;
+    return { outcome: 'SHED', leverage, holdFrames: adjustedHoldFrames };
+  }
+
+  const nx = distance > 0 ? dx / distance : 0;
+  const ny = distance > 0 ? dy / distance : attackDirection;
+  const overlap = Math.max(0, contactDistance - distance);
+  defender.x += nx * overlap;
+  defender.y += ny * overlap;
+  const drive = Math.max(0, leverage) * (kind === 'RUN' ? 0.34 : 0.20);
+  defender.y += attackDirection * drive;
+  defender.vx = (defender.vx || 0) * Math.max(0.08, 0.42 - Math.max(0, leverage) * 0.25);
+  defender.vy = (defender.vy || 0) * Math.max(0.08, 0.42 - Math.max(0, leverage) * 0.25);
+  blocker.vx = (blocker.vx || 0) * 0.72;
+  blocker.vy = (blocker.vy || 0) * 0.72;
+  return { outcome: 'ENGAGED', leverage, holdFrames: adjustedHoldFrames };
+}
+
 export function canEngagePassBlock(blocker: Entity, rusher: Entity): boolean {
   return Math.hypot(rusher.x - blocker.x, rusher.y - blocker.y) <= (blocker.radius ?? 10) + (rusher.radius ?? 10) + 6;
 }
@@ -320,6 +425,13 @@ export function moveToward(
   entity.x += Math.sin(time * 0.01 + entity.x) * 0.12;
 }
 
+function engageCollisionBlock(defender: Entity, blocker: Entity): void {
+  defender.isEngagedWithBlocker = true;
+  defender.blockingDefender = blocker;
+  blocker.isEngagedWithBlocker = true;
+  blocker.blockingDefender = defender;
+}
+
 export function resolveCollisions(
   allEntities: Entity[],
   includeReceivers: boolean,
@@ -328,7 +440,8 @@ export function resolveCollisions(
   ballCarrier: Entity | null = null,
   fieldWidth = 340,
   userControlledEntities: Entity[] = [],
-  userPassThroughEntities: Entity[] = []
+  userPassThroughEntities: Entity[] = [],
+  blockingEntities: Entity[] = []
 ): void {
   for (let i = 0; i < allEntities.length; i++) {
     for (let j = i + 1; j < allEntities.length; j++) {
@@ -402,6 +515,17 @@ export function resolveCollisions(
 
         if (firstIsUserControlled || secondIsUserControlled) {
           if (firstIsUserControlled && secondIsUserControlled) continue;
+          const controlledPlayer = firstIsUserControlled ? first : second;
+          const blockingPlayer = firstIsUserControlled ? second : first;
+          if (blockingEntities.includes(blockingPlayer) && defenders.includes(controlledPlayer)) {
+            const pushDirection = firstIsUserControlled ? -1 : 1;
+            controlledPlayer.x += nx * overlap * pushDirection;
+            controlledPlayer.y += ny * overlap * pushDirection;
+            controlledPlayer.vx = 0;
+            controlledPlayer.vy = 0;
+            engageCollisionBlock(controlledPlayer, blockingPlayer);
+            continue;
+          }
           const yieldingPlayer = firstIsUserControlled ? second : first;
           const yieldDirection = firstIsUserControlled ? 1 : -1;
           yieldingPlayer.x += nx * overlap * yieldDirection;

@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { chooseProDefensiveCall, getCoverageMistakeChance, getCpuCounterReason, getSuccessfulPlayCounter, isCpuPressureRecognized, scoreRunBlockTarget, shouldCpuReleasePass, shouldCpuScramble } from './ai';
-import { alignDefenderAcrossFromReceiver, alignDefenderAcrossFromRunningBack, alignDefenderToZone, alignDefenders, chooseCpuDefensiveAssignments, constrainDefendersToFieldSide, getBlitzAlignmentY, getBracketCoverageTarget, getDefensiveLineAlignmentY, matchCpuDefendersToReceivers, separateDefenderAlignments } from './defense';
+import { alignDefenderAcrossFromReceiver, alignDefenderAcrossFromRunningBack, alignDefenderToZone, alignDefenders, assignDefensiveRunFits, chooseCpuDefensiveAssignments, constrainDefendersToFieldSide, getBlitzAlignmentY, getBracketCoverageTarget, getDefensiveLineAlignmentY, getRunFitTarget, matchCpuDefendersToReceivers, separateDefenderAlignments } from './defense';
 import { getCarrierFumbleChance } from './fumbles';
 import { TEAMS } from './teams';
 import { calculateYardsToGo, canApplyProMatchupAdjustment, canDefenderDeflectPass, canTackleQuarterback, evaluateQbThrowAccuracy, findTappedPassReceiver, getCatchCompletionChance, getDefenderPassReachHeight, getDriveStartY, getPreSnapPenaltyChances, getSnapBallPosition, getPassArcHeight, getPassArcMaxHeight, getPassArcScreenPoint, getPassFlightFrames, getPassLeadTarget, getRoutePassLeadTarget, isSafety, resolveCatchContestOutcome, resolvePlayResult } from './rules';
-import { canEngagePassBlock, checkOffensiveLineWall, clampPlayerToFieldY, engageRunBlocker, GAME_SPEED_SCALE, getBallCarrierRunSpeed, getFatigueSpeedMultiplier, getPassBlockBaseHoldFrames, getPassBlockHoldFrames, getRunBlockEffect, getRunDirectionSpeedFactor, getRunPursuitMovement, getUserDefenderSpeed, isRusherActivelyBlocked, moveToward, resolveCollisions, shouldHoldPassBlock, updatePlayerStamina, updateReceiverTargetStamina, updateRunningBackStamina, updateRouteMovement, USER_CONTROL_SPEED_MULTIPLIER } from './movement';
+import { canEngagePassBlock, checkOffensiveLineWall, clampPlayerToFieldY, engageRunBlocker, GAME_SPEED_SCALE, getBallCarrierRunSpeed, getFatigueSpeedMultiplier, getPassBlockBaseHoldFrames, getPassBlockHoldFrames, getRunBlockEffect, getRunDirectionSpeedFactor, getRunPursuitMovement, getUserDefenderSpeed, isRusherActivelyBlocked, moveToward, resolveCollisions, shouldHoldPassBlock, updateBlockEngagement, updatePlayerStamina, updateReceiverTargetStamina, updateRunningBackStamina, updateRouteMovement, USER_CONTROL_SPEED_MULTIPLIER } from './movement';
 import type { Entity } from './types';
 
 test('coverage reduces catches smoothly and touching players are not wide open', () => {
@@ -157,6 +157,28 @@ test('user-controlled defenders are not repositioned by teammate collisions', ()
   assert.equal(defender.x, 170);
   assert.equal(defender.y, 500);
   assert.ok(teammate.y > 500, 'The teammate should yield instead of steering the controlled defender');
+});
+
+test('user-controlled pass rushers bounce off offensive linemen instead of passing through them', () => {
+  const defender: Entity = { x: 170, y: 490, radius: 10, team: 'P2' };
+  const lineman: Entity = { x: 170, y: 500, radius: 12, team: 'P1' };
+
+  resolveCollisions(
+    [lineman, defender],
+    false,
+    [],
+    [defender],
+    null,
+    340,
+    [defender],
+    [],
+    [lineman]
+  );
+
+  assert.ok(defender.y < 490, 'The defender should be pushed back by the offensive line');
+  assert.equal(lineman.y, 500, 'The offensive lineman should hold the block');
+  assert.equal(defender.isEngagedWithBlocker, true);
+  assert.equal(defender.blockingDefender, lineman);
 });
 
 test('fatigue follows workload and endurance, with bounded recovery and speed penalties', () => {
@@ -615,6 +637,64 @@ test('run blocks engage one defender and create stronger non-exact matchup lever
   assert.equal(defender.isEngagedWithBlocker, true);
   assert.equal(engageRunBlocker(blocker, defender), false);
   assert.ok(getRunBlockEffect(blocker, defender, 1.35) > getRunBlockEffect(blocker, defender, 0.4));
+});
+
+test('blocking engagements persist and ratings determine how long a defender is contained', () => {
+  const strongBlocker: Entity = {
+    x: 170, y: 500, radius: 12, player: TEAMS.GEORGIA.roster['line-0']
+  };
+  const weakBlocker: Entity = {
+    x: 170, y: 500, radius: 12, player: TEAMS.FLORIDA.roster['wr-0']
+  };
+  const strongDefender: Entity = {
+    x: 170, y: 480, radius: 10, player: TEAMS.GEORGIA.roster['def-0']
+  };
+  const weakMatchup = updateBlockEngagement(weakBlocker, { ...strongDefender }, -1, 'RUN');
+  const strongMatchupDefender = { ...strongDefender };
+  const strongMatchup = updateBlockEngagement(strongBlocker, strongMatchupDefender, -1, 'RUN');
+
+  assert.equal(strongMatchup.outcome, 'ENGAGED');
+  assert.ok(strongMatchup.holdFrames > weakMatchup.holdFrames);
+  assert.equal(strongBlocker.blockingDefender, strongMatchupDefender);
+  assert.equal(strongMatchupDefender.blockingDefender, strongBlocker);
+
+  const timedBlocker: Entity = { x: 170, y: 500, radius: 12 };
+  const timedDefender: Entity = { x: 170, y: 480, radius: 10 };
+  for (let frame = 0; frame < 3; frame++) {
+    assert.equal(updateBlockEngagement(timedBlocker, timedDefender, -1, 'RUN', 1, 3).outcome, 'ENGAGED');
+  }
+  assert.equal(updateBlockEngagement(timedBlocker, timedDefender, -1, 'RUN', 1, 3).outcome, 'SHED');
+  assert.equal(timedBlocker.blockingDefender, null);
+  assert.equal(timedDefender.isEngagedWithBlocker, false);
+});
+
+test('run fits preserve gap, edge, cutback, and alley responsibilities before pursuit collapses', () => {
+  const lineOfScrimmageY = 500;
+  const defenders: Entity[] = [
+    { x: 55, y: 470, startX: 55, startY: 470, radius: 10, type: 'CB' },
+    { x: 105, y: 480, startX: 105, startY: 480, radius: 10, type: 'LB' },
+    { x: 145, y: 485, startX: 145, startY: 485, radius: 10, type: 'DL' },
+    { x: 195, y: 485, startX: 195, startY: 485, radius: 10, type: 'DL' },
+    { x: 235, y: 480, startX: 235, startY: 480, radius: 10, type: 'LB' },
+    { x: 285, y: 470, startX: 285, startY: 470, radius: 10, type: 'CB' },
+    { x: 120, y: 330, startX: 120, startY: 330, radius: 10, type: 'FS' },
+    { x: 220, y: 350, startX: 220, startY: 350, radius: 10, type: 'SS' }
+  ];
+  assignDefensiveRunFits(defenders, lineOfScrimmageY, -1);
+
+  assert.deepEqual(defenders.slice(0, 6).map(defender => defender.runFit), [
+    'EDGE_LEFT', 'B_LEFT', 'A_LEFT', 'A_RIGHT', 'B_RIGHT', 'EDGE_RIGHT'
+  ]);
+  assert.deepEqual(defenders.slice(6).map(defender => defender.runFit), ['CUTBACK', 'ALLEY']);
+
+  const runner: Entity = { x: 180, y: 520, radius: 10, vx: 1.5, vy: -1.5 };
+  const leftEdgeTarget = getRunFitTarget(defenders[0], runner, lineOfScrimmageY, -1);
+  const rightEdgeTarget = getRunFitTarget(defenders[5], runner, lineOfScrimmageY, -1);
+  const cutbackTarget = getRunFitTarget(defenders[6], runner, lineOfScrimmageY, -1);
+  assert.ok(leftEdgeTarget.x < runner.x);
+  assert.ok(rightEdgeTarget.x > runner.x);
+  assert.ok(cutbackTarget.x < runner.x, 'Cutback defender stays opposite the runner heading');
+  assert.ok(leftEdgeTarget.y < runner.y && rightEdgeTarget.y < runner.y);
 });
 
 function createAlignedDefense(playKey: string, formation: 'SPREAD' | 'STACK' | 'TRIPS' = 'SPREAD') {

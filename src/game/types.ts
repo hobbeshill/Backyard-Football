@@ -3,6 +3,7 @@ import type { DefenseLandmark } from './signaturePlays';
 export type PlayRisk = 'SAFE' | 'BALANCED' | 'EXPLOSIVE';
 export type RouteType = 'SHORT' | 'MEDIUM' | 'VERTICAL';
 export type DefensiveAssignment = 'BLITZ' | 'MAN' | 'ZONE' | 'QB_SPY' | 'RB_SPY' | 'USER';
+export type RunFit = 'A_LEFT' | 'A_RIGHT' | 'B_LEFT' | 'B_RIGHT' | 'EDGE_LEFT' | 'EDGE_RIGHT' | 'CUTBACK' | 'ALLEY';
 export type TacticalMode = 'ELITE' | 'PRO';
 
 export interface PlayOption {
@@ -62,6 +63,8 @@ export interface Entity {
   zoneX?: number;
   zoneY?: number;
   pursuitTimer?: number;
+  runFit?: RunFit;
+  runFitX?: number;
   routeType?: string;
   routeIndex?: number;
   routeWaypoint?: number;
@@ -93,6 +96,7 @@ export interface Entity {
   isQbSpy?: boolean;
   isEngagedWithBlocker?: boolean;
   blockEngagedTimer?: number;
+  blockShedTimer?: number;
   coverageMistake?: 'BIT_UNDERNEATH' | 'STUMBLE' | 'BLOWN_ZONE' | null;
   mistakeTimer?: number;
   mistakeAnnounced?: boolean;

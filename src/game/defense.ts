@@ -1,4 +1,4 @@
-import type { DefensiveAssignment, Entity } from './types';
+import type { DefensiveAssignment, Entity, RunFit } from './types';
 import { allDefensivePlaybook, offensivePlaybook } from './playbook';
 
 export interface CpuDefenseSituation {
@@ -21,6 +21,86 @@ export interface CpuDefenseSituation {
       rb?: string;
     };
   }>;
+}
+
+const RUN_FIT_X: Record<Exclude<RunFit, 'CUTBACK' | 'ALLEY'>, number> = {
+  EDGE_LEFT: 45,
+  B_LEFT: 120,
+  A_LEFT: 155,
+  A_RIGHT: 185,
+  B_RIGHT: 220,
+  EDGE_RIGHT: 295
+};
+
+export function assignDefensiveRunFits(
+  defenders: Entity[],
+  lineOfScrimmageY: number,
+  attackDirection: number,
+  fieldWidth = 340
+): void {
+  const front = defenders
+    .filter(defender => {
+      const depth = ((defender.startY ?? defender.y) - lineOfScrimmageY) * attackDirection;
+      return defender.type !== 'FS' && defender.type !== 'SS' && depth <= 125;
+    })
+    .sort((first, second) => (first.startX ?? first.x) - (second.startX ?? second.x));
+  const deep = defenders
+    .filter(defender => !front.includes(defender))
+    .sort((first, second) => (first.startX ?? first.x) - (second.startX ?? second.x));
+  const frontFits: Array<Exclude<RunFit, 'CUTBACK' | 'ALLEY'>> =
+    ['EDGE_LEFT', 'B_LEFT', 'A_LEFT', 'A_RIGHT', 'B_RIGHT', 'EDGE_RIGHT'];
+
+  front.forEach((defender, index) => {
+    const fitIndex = front.length === 1
+      ? 2
+      : Math.round(index * (frontFits.length - 1) / (front.length - 1));
+    const runFit = frontFits[fitIndex];
+    defender.runFit = runFit;
+    defender.runFitX = Math.max(25, Math.min(fieldWidth - 25, RUN_FIT_X[runFit]));
+  });
+  deep.forEach((defender, index) => {
+    defender.runFit = index === deep.length - 1 ? 'ALLEY' : 'CUTBACK';
+    defender.runFitX = Math.max(35, Math.min(fieldWidth - 35, defender.startX ?? defender.x));
+  });
+}
+
+export function getRunFitTarget(
+  defender: Entity,
+  runner: Entity,
+  lineOfScrimmageY: number,
+  attackDirection: number,
+  fieldWidth = 340
+): { x: number; y: number; roleMultiplier: number } {
+  const fit = defender.runFit ?? 'ALLEY';
+  const fitX = defender.runFitX ?? defender.startX ?? defender.x;
+  const runnerProgress = (runner.y - lineOfScrimmageY) * attackDirection;
+  const pursuitFrames = defender.pursuitTimer ?? 0;
+  const readWeight = Math.max(0, Math.min(1, 1 - pursuitFrames / 36));
+  let responsibilityX = fitX;
+  let roleMultiplier = 1;
+
+  if (fit === 'EDGE_LEFT' || fit === 'EDGE_RIGHT') {
+    const side = fit === 'EDGE_LEFT' ? -1 : 1;
+    responsibilityX = runner.x + side * 28;
+    roleMultiplier = 1.08;
+  } else if (fit === 'CUTBACK') {
+    const heading = Math.abs(runner.vx ?? 0) > 0.15 ? Math.sign(runner.vx ?? 0) : Math.sign(runner.x - 170);
+    responsibilityX = runner.x - heading * 34;
+    roleMultiplier = 0.94;
+  } else if (fit === 'ALLEY') {
+    responsibilityX = runner.x + Math.sign(fitX - runner.x) * 12;
+    roleMultiplier = 1.04;
+  } else {
+    responsibilityX = fitX * readWeight + runner.x * (1 - readWeight);
+  }
+
+  const fitDepth = runnerProgress < 0 ? 14 : Math.max(8, 18 - runnerProgress * 0.08);
+  const responsibilityY = runner.y + fitDepth * attackDirection;
+  return {
+    x: Math.max(25, Math.min(fieldWidth - 25, responsibilityX)),
+    y: responsibilityY,
+    roleMultiplier
+  };
 }
 
 function getDefensiveLineDepth(radius = 10): number {
