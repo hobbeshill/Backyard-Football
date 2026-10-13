@@ -99,6 +99,7 @@ export interface Entity {
   isEngagedWithBlocker?: boolean;
   blockEngagedTimer?: number;
   blockShedTimer?: number;
+  hasShedBlock?: boolean;
   coverageMistake?: 'BIT_UNDERNEATH' | 'STUMBLE' | 'BLOWN_ZONE' | null;
   mistakeTimer?: number;
   mistakeAnnounced?: boolean;

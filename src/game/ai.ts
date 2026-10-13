@@ -325,7 +325,9 @@ export function scoreRunBlockTarget(
   const blockerDistance = Math.hypot(defender.x - blocker.x, defender.y - blocker.y);
   const isInFront = (defender.y - runner.y) * attackDirection > 0;
   const leadBlockBonus = isQbRunner && isInFront ? 45 : 0;
-  return blockerDistance + defenderDistance * 0.7 - leadBlockBonus;
+  const isDirectDlMatch = defender.type === 'DL' && Math.abs(blocker.x - defender.x) <= 35;
+  const dlBonus = isDirectDlMatch ? 55 : 0;
+  return blockerDistance + defenderDistance * 0.7 - leadBlockBonus - dlBonus;
 }
 
 /**
@@ -685,3 +687,5 @@ export function evaluateCpuBallCarrierMoves(
 
   return result;
 }
+
+export { CPUQuarterbackAI } from './cpuQb';

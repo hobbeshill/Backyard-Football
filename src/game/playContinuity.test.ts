@@ -392,3 +392,31 @@ test('interception touchbacks use the proper receiving-team spot rather than the
   assert.equal(getInterceptionTouchbackY(50, 1200, 100, -1), 300);
   assert.equal(getInterceptionTouchbackY(1150, 1200, 100, 1), 900);
 });
+
+test('CPU receivers run their routes downfield during passing plays', context => {
+  const { game, advance } = createGame(context);
+  game.setPossessionForTest?.('P2');
+  game.resetDrill();
+  const snapshot = game.getNetworkSnapshot!();
+  snapshot.p2OffPlay = 'SHORT_PASS';
+  snapshot.phase = 'PRE_SNAP';
+  game.applyNetworkSnapshot!(snapshot);
+
+  const initialReceivers = game.getReceivers();
+  const initialY = initialReceivers[0].y;
+  const attackDir = game.attackDirection;
+
+  game.startPlay?.();
+  assert.equal(game.phase, 'QB_DROP');
+
+  // Advance simulation by 30 frames
+  for (let f = 0; f < 30; f++) {
+    advance();
+  }
+
+  const activeReceivers = game.getReceivers();
+  // Receiver should have moved downfield along their route
+  const movedDownfield = activeReceivers.some(r => (r.y - initialY) * attackDir > 15);
+  assert.ok(movedDownfield, 'CPU receivers must advance downfield along routes during QB_DROP');
+});
+

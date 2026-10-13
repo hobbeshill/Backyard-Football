@@ -290,9 +290,11 @@ export function updateBlockEngagement(
 
   if ((defender.blockEngagedTimer || 0) > adjustedHoldFrames) {
     releaseBlockEngagement(blocker, defender);
-    defender.blockShedTimer = 10;
+    defender.blockShedTimer = 16;
+    defender.hasShedBlock = true;
     const shedDirection = dx === 0 ? (defender.x >= 170 ? 1 : -1) : Math.sign(dx);
-    defender.x += shedDirection * 3;
+    defender.x += shedDirection * 5;
+    defender.y -= attackDirection * 5;
     return { outcome: 'SHED', leverage, holdFrames: adjustedHoldFrames };
   }
 
@@ -301,8 +303,25 @@ export function updateBlockEngagement(
   const overlap = Math.max(0, contactDistance - distance);
   defender.x += nx * overlap;
   defender.y += ny * overlap;
-  const drive = Math.max(0, leverage) * (kind === 'RUN' ? 0.34 : 0.20);
-  defender.y += attackDirection * drive;
+
+  // Active trench push & pocket collapse:
+  // When blocker has leverage, blocker drives defender in attack direction (away from QB).
+  // When defender has leverage (leverage < 0), defender bull-rushes blocker back toward the QB.
+  if (leverage > 0) {
+    const drive = leverage * (kind === 'RUN' ? 0.34 : 0.20);
+    defender.y += attackDirection * drive;
+  } else if (leverage < 0) {
+    const rusherDrive = (-leverage) * (kind === 'RUN' ? 0.22 : 0.28);
+    defender.y -= attackDirection * rusherDrive;
+    blocker.y -= attackDirection * rusherDrive * 0.85;
+  }
+
+  // Dynamic trench struggle jostle
+  const struggleTime = defender.blockEngagedTimer || 0;
+  const trenchShift = Math.sin(struggleTime * 0.35 + (defender.startX || 170)) * 0.35;
+  defender.x += trenchShift;
+  blocker.x += trenchShift * 0.6;
+
   defender.vx = (defender.vx || 0) * Math.max(0.08, 0.42 - Math.max(0, leverage) * 0.25);
   defender.vy = (defender.vy || 0) * Math.max(0.08, 0.42 - Math.max(0, leverage) * 0.25);
   blocker.vx = (blocker.vx || 0) * 0.72;
@@ -335,6 +354,7 @@ export function shouldHoldPassBlock(blocker: Entity, rusher: Entity, holdFrames:
     : (rusher.isTurboActive ? Math.round(holdFrames * 0.65) : holdFrames);
   if (rusher.blockEngagedTimer > adjustedHoldFrames) {
     rusher.isEngagedWithBlocker = false;
+    rusher.hasShedBlock = true;
     return false;
   }
   rusher.isEngagedWithBlocker = true;
@@ -353,6 +373,9 @@ export function checkOffensiveLineWall(
   lineOfScrimmageY: number,
   attackDirection: number
 ): boolean {
+  if ((rusher.blockShedTimer || 0) > 0) return false;
+  if (rusher.isEngagedWithBlocker) return false;
+  if (rusher.hasShedBlock) return false;
   if (rusher.x < 118 || rusher.x > 222) return false;
   const losMargin = 18;
   const isAtOrCrossingLos = attackDirection === -1
@@ -367,6 +390,12 @@ export function checkOffensiveLineWall(
   }, null)?.l;
 
   if (nearestLineman) {
+    // If the rusher has already crossed past the lineman into the offensive backfield, do not trap them backward
+    const isPastLineman = attackDirection === -1
+      ? rusher.y > nearestLineman.y + 2
+      : rusher.y < nearestLineman.y - 2;
+    if (isPastLineman) return false;
+
     const contactDist = (nearestLineman.radius || 12) + (rusher.radius || 10);
     rusher.isEngagedWithBlocker = true;
     rusher.blockingDefender = nearestLineman;
@@ -517,19 +546,25 @@ export function resolveCollisions(
           continue;
         }
 
+        const firstIsBlocker = blockingEntities.includes(first);
+        const secondIsBlocker = blockingEntities.includes(second);
+        const firstIsDefender = defenders.includes(first);
+        const secondIsDefender = defenders.includes(second);
+
+        if ((firstIsBlocker && secondIsDefender) || (secondIsBlocker && firstIsDefender)) {
+          const blockingPlayer = firstIsBlocker ? first : second;
+          const defendingPlayer = firstIsBlocker ? second : first;
+          const pushDirection = firstIsBlocker ? 1 : -1;
+          defendingPlayer.x += nx * overlap * pushDirection;
+          defendingPlayer.y += ny * overlap * pushDirection;
+          defendingPlayer.vx = 0;
+          defendingPlayer.vy = 0;
+          engageCollisionBlock(defendingPlayer, blockingPlayer);
+          continue;
+        }
+
         if (firstIsUserControlled || secondIsUserControlled) {
           if (firstIsUserControlled && secondIsUserControlled) continue;
-          const controlledPlayer = firstIsUserControlled ? first : second;
-          const blockingPlayer = firstIsUserControlled ? second : first;
-          if (blockingEntities.includes(blockingPlayer) && defenders.includes(controlledPlayer)) {
-            const pushDirection = firstIsUserControlled ? -1 : 1;
-            controlledPlayer.x += nx * overlap * pushDirection;
-            controlledPlayer.y += ny * overlap * pushDirection;
-            controlledPlayer.vx = 0;
-            controlledPlayer.vy = 0;
-            engageCollisionBlock(controlledPlayer, blockingPlayer);
-            continue;
-          }
           const yieldingPlayer = firstIsUserControlled ? second : first;
           const yieldDirection = firstIsUserControlled ? 1 : -1;
           yieldingPlayer.x += nx * overlap * yieldDirection;

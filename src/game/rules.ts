@@ -431,9 +431,10 @@ export function getPreSnapPenaltyChances(
 ): { falseStart: number; offside: number } {
   const isPenaltyProneOffense = offenseDiscipline < 48;
   const isPenaltyProneDefense = defenseDiscipline < 48;
-  const falseStart = (isPenaltyProneOffense
-    ? 0.002 + Math.max(0, 85 - offenseDiscipline) * 0.00012
-    : 0) + (offenseIsAway && homeFieldAdvantage > 1.12 ? (homeFieldAdvantage - 1) * 0.018 : 0);
+  const falseStart = offenseIsAway
+    ? (isPenaltyProneOffense ? 0.002 + Math.max(0, 85 - offenseDiscipline) * 0.00012 : 0) +
+      (homeFieldAdvantage > 1.12 ? (homeFieldAdvantage - 1) * 0.018 : 0)
+    : 0;
   const offside = isPenaltyProneDefense
     ? 0.0015 + Math.max(0, 80 - defenseDiscipline) * 0.00008
     : 0;

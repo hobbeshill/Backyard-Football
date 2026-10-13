@@ -324,6 +324,7 @@ export function alignDefenders(
   defenders[0].startY = lineOfScrimmageY + defOffset;
   defenders[0].type = 'DL';
   defenders[0].passRusher = true;
+  defenders[0].defenseAssignment = 'BLITZ';
   defenders[0].color = '#ff3333';
 
   const placeDefender = (
@@ -342,6 +343,7 @@ export function alignDefenders(
     defender.zoneY = lineOfScrimmageY + (zoneDepth * attackDirection);
     defender.type = type;
     defender.passRusher = passRusher;
+    defender.defenseAssignment = passRusher ? 'BLITZ' : (defender.assignedReceiver ? 'MAN' : 'ZONE');
   };
 
   const isEightMan = defenders.length >= 8;

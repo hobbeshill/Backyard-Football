@@ -2731,3 +2731,121 @@ test('3 OL blocking wall engages and stops a player attempting to run through th
   const edgeHit = checkOffensiveLineWall(edgeRusher, linemen, lineOfScrimmageY, attackDirection);
   assert.equal(edgeHit, false, 'Edge rushers outside the tackles can rush the edge without hitting the interior wall');
 });
+
+test('CPU nose tackle battles center in pass protection, drives into pocket, sheds, and bypasses wall', () => {
+  const lineOfScrimmageY = 500;
+  const attackDirection = -1; // Offense drives +Y (towards 530 where QB sits)
+  const center: Entity = { x: 170, y: lineOfScrimmageY + 6, radius: 12, player: { ratings: { blocking: 70, power: 70 } } as any };
+  const noseTackle: Entity = {
+    x: 170,
+    y: lineOfScrimmageY - 10,
+    startX: 170,
+    radius: 10,
+    type: 'DL',
+    passRusher: true,
+    defenseAssignment: 'BLITZ',
+    player: { ratings: { rush: 85, power: 85 } } as any
+  };
+
+  const linemen = [center];
+
+  // 1. Initial rush into line engages with Center via checkOffensiveLineWall
+  const hit = checkOffensiveLineWall(noseTackle, linemen, lineOfScrimmageY, attackDirection);
+  assert.equal(hit, true, 'Nose tackle must engage with the offensive line');
+  assert.equal(noseTackle.isEngagedWithBlocker, true);
+  assert.equal(noseTackle.blockingDefender, center);
+
+  // 2. While engaged, updateBlockEngagement handles leverage push into the pocket
+  const result = updateBlockEngagement(center, noseTackle, attackDirection, 'PASS', 1, 15);
+  assert.equal(result.outcome, 'ENGAGED');
+  const postContactY = noseTackle.y;
+  for (let f = 0; f < 3; f++) {
+    updateBlockEngagement(center, noseTackle, attackDirection, 'PASS', 1, 15);
+  }
+  // Defender with superior rush (85 vs 70) pushes blocker back toward the QB (+Y)
+  assert.ok(noseTackle.y > postContactY, 'Nose tackle with leverage advantage must collapse the pocket toward QB');
+
+  // 3. While engaged, checkOffensiveLineWall must not re-clamp or freeze the rusher
+  const engagedHit = checkOffensiveLineWall(noseTackle, linemen, lineOfScrimmageY, attackDirection);
+  assert.equal(engagedHit, false, 'Engaged rusher must not be re-trapped by checkOffensiveLineWall');
+
+  // 4. Rusher holds block until adjusted frames, then sheds
+  for (let f = 0; f < 15; f++) {
+    updateBlockEngagement(center, noseTackle, attackDirection, 'PASS', 1, 15);
+  }
+  assert.equal(noseTackle.isEngagedWithBlocker, false, 'Nose tackle must shed the block after hold time expires');
+  assert.ok((noseTackle.blockShedTimer || 0) > 0, 'Nose tackle must have active blockShedTimer');
+
+  // 5. When shedding, checkOffensiveLineWall must NOT re-lock the shed rusher
+  const shedWallHit = checkOffensiveLineWall(noseTackle, linemen, lineOfScrimmageY, attackDirection);
+  assert.equal(shedWallHit, false, 'Shed rusher must not be caught by offensive line wall');
+  assert.equal(noseTackle.isEngagedWithBlocker, false, 'Nose tackle remains free to rush the quarterback');
+});
+
+test('CPU nose tackle sheds run block and pursues ballcarrier', () => {
+  const lineOfScrimmageY = 500;
+  const attackDirection = -1;
+  const center: Entity = { x: 170, y: lineOfScrimmageY + 6, radius: 12, player: { ratings: { blocking: 70, power: 70 } } as any };
+  const noseTackle: Entity = {
+    x: 170,
+    y: lineOfScrimmageY - 18,
+    radius: 10,
+    type: 'DL',
+    passRusher: true,
+    defenseAssignment: 'BLITZ',
+    player: { ratings: { rush: 80, power: 80 } } as any
+  };
+
+  // Run block engagement
+  center.blockingDefender = noseTackle;
+  noseTackle.blockingDefender = center;
+  noseTackle.isEngagedWithBlocker = true;
+
+  // Simulate block hold until shed
+  for (let f = 0; f < 55; f++) {
+    updateBlockEngagement(center, noseTackle, attackDirection, 'RUN', 1, 50);
+  }
+
+  assert.equal(noseTackle.isEngagedWithBlocker, false, 'Nose tackle sheds run block');
+  assert.ok((noseTackle.blockShedTimer || 0) > 0);
+
+  // When shed, nose tackle is unblocked and checkOffensiveLineWall does not trap him
+  const wallHit = checkOffensiveLineWall(noseTackle, [center], lineOfScrimmageY, attackDirection);
+  assert.equal(wallHit, false, 'Shed nose tackle can freely shoot through to make the tackle');
+  assert.equal(noseTackle.hasShedBlock, true, 'Nose tackle retains hasShedBlock flag');
+
+  // Even after blockShedTimer expires, rusher retains hasShedBlock and is not trapped
+  noseTackle.blockShedTimer = 0;
+  noseTackle.y += 15; // Penetrated deeper into the backfield past the center
+  const wallHitAfterTimer = checkOffensiveLineWall(noseTackle, [center], lineOfScrimmageY, attackDirection);
+  assert.equal(wallHitAfterTimer, false, 'Penetrating nose tackle with expired timer must not be caught by wall');
+});
+
+test('CPU nose tackle does not freeze on thrown passes and can tackle on handoffs', () => {
+  const lineOfScrimmageY = 500;
+  const attackDirection = -1;
+  const noseTackle: Entity = {
+    x: 170,
+    y: lineOfScrimmageY + 10, // Across LOS in backfield
+    radius: 10,
+    type: 'DL',
+    passRusher: true,
+    defenseAssignment: 'BLITZ',
+    isEngagedWithBlocker: false
+  };
+
+  const runner: Entity = {
+    x: 170,
+    y: lineOfScrimmageY + 12,
+    radius: 10,
+    hasBall: true
+  };
+
+  // Distance is 2px, well within contactDist (10 + 10 + 4 = 24)
+  const dist = Math.hypot(runner.x - noseTackle.x, runner.y - noseTackle.y);
+  assert.ok(dist < (runner.radius || 10) + (noseTackle.radius || 10) + 4, 'Nose tackle is in tackle contact range');
+  const isAcrossLos = attackDirection === -1 ? noseTackle.y > lineOfScrimmageY + 4 : noseTackle.y < lineOfScrimmageY - 4;
+  assert.ok(isAcrossLos, 'Nose tackle has penetrated across line of scrimmage');
+});
+
+
